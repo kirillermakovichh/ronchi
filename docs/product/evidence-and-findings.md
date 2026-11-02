@@ -1,6 +1,6 @@
 # Journal, evidence, and Findings
 
-Status: initial implementation contract. Runtime code and verification do not yet exist.
+Status: initial implementation contract. Task 2a implements the atomic storage primitive; the queue records remaining runtime work.
 The defaults below are reversible product choices to validate in the first prototype.
 They refine [ADR-0005](../adr/0005-explanation-first-outcomes.md), [ADR-0016](../adr/0016-continuous-lab-journal.md), and [ADR-0019](../adr/0019-resource-efficient-rust-core.md).
 This document owns evidence semantics, persistence, Findings, and retention; the [RPC contract](solana-rpc-contract.md) owns protocol behavior.
@@ -141,6 +141,28 @@ Bound individual records, attachments, pending requests, readers, and exports be
 Use automatic WAL checkpoints and bounded reader snapshots; do not delete a live WAL or keep readers open across paginated client pauses.
 If checkpoint progress or available disk space cannot sustain the budget, stop the Lab with the same explicit storage-failure outcome.
 No active history is evicted to keep the Lab running; protocol lookup and lifetime Fault memory remain intact.
+
+### Implemented storage primitive
+
+`JournalStore` creates a new file-backed version-1 Journal.
+Its strict tables store one immutable Lab identity, the committed watermark, terminal state, and JSON event envelopes keyed by sequence.
+Sequence assignment, event insertion, watermark update, and terminal state update share one transaction.
+The writer reads back WAL mode and `synchronous=FULL` before creating the schema.
+Lock waiting is bounded to 250 ms; automatic WAL checkpoints remain enabled at 1,000 pages.
+Existing Journals are not reinitialized or resumed.
+
+The initial storage envelope contains version, kind, UTC timestamp text, monotonic elapsed nanoseconds, source, execution mode, and data.
+Callers must validate event-family semantics and redact facts before storage.
+Protocol correlation fields and typed event families arrive with their owning slices.
+Each encoded event is bounded to 64 KiB before serialization can exceed that limit.
+An atomic group contains at most 256 events and 1 MiB.
+These are storage safety limits, not measured throughput results.
+
+A reader exposes committed events and a watermark without loading full history.
+If the lifecycle owner confirms that no authenticated writer remains, an open Journal is reported as interrupted.
+The reader does not authenticate processes itself.
+The dedicated queue, disk admission reserve, and Lab failure integration remain unimplemented until tasks 2b and 3.
+This primitive does not yet acknowledge RPC acceptance or persist signed protocol content.
 
 ## Finalization, retention, and export
 

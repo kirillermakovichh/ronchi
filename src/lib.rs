@@ -1,4 +1,5 @@
 pub mod config;
+pub mod journal;
 use clap::{Parser, Subcommand};
 use config::{Mode, Settings};
 use schemars::JsonSchema;

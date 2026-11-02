@@ -42,6 +42,20 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 1. **Scope:** Medium. **Likely files:** `src/journal.rs`, `src/journal/writer.rs`, `src/journal/schema.rs`, `src/evidence.rs`, `tests/journal.rs`.
 - **Source:** [Evidence and Findings](../docs/product/evidence-and-findings.md).
 
+#### 2a. Atomic file-backed Journal storage
+
+- [x] **Accept:** Create a version-1 SQLite WAL/FULL Journal, commit bounded event groups and their contiguous watermark atomically, and retain explicit terminal state.
+- **Verify:** `cargo test --locked --test journal -- --nocapture` passed (4 behavior tests and one subprocess fixture). A killed writer retained both acknowledged events. An injected SQLite failure rolled back the whole unit and watermark. Finalized Journals reject new events and reinitialization.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (11 tests including the subprocess fixture), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- **Storage:** Bundled SQLite `3.54.1`, rusqlite `0.41.1`; WAL mode and writer `synchronous=FULL` are read back. Individual encoded events are capped at 64 KiB; atomic groups are capped at 256 events and 1 MiB.
+- **Boundary:** This storage primitive accepts caller-validated/redacted facts. RPC event models, retained signed bytes, and transaction acceptance integration remain assigned to their owning slices.
+
+#### 2b. Bounded dedicated writer and storage admission
+
+- [ ] **Accept:** Add the dedicated writer, bounded event/byte queue, bounded batching, explicit failure health, and disk admission/drain reserve. Preserve the committed-watermark contract.
+- **Verify:** Queue saturation, writer failure, byte bounds, and recovery through actual file-backed storage. Include atomic required-content admission when transaction models arrive in task 5.
+- **Dependencies:** 2a. This subtask completes task 2 before task 3 starts.
+
 ### 3. Persistent Lab controls
 
 - [ ] **Accept:** Implement authenticated loopback control, background readiness, immutable IDs, name resolution, and bounded stop; finalize only after owned work/resources settle.
