@@ -24,6 +24,7 @@ pub struct Settings {
     pub rpc_listen: Option<SocketAddr>,
     pub control_listen: Option<SocketAddr>,
     pub initial_case: Option<String>,
+    pub slot_duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -35,6 +36,8 @@ pub struct EffectiveConfig {
     pub rpc_listen: SocketAddr,
     pub control_listen: SocketAddr,
     pub initial_case: Option<String>,
+    #[serde(default = "default_slot_duration_ms")]
+    pub slot_duration_ms: u64,
 }
 
 pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, String> {
@@ -77,6 +80,7 @@ pub fn resolve_requested(
         Err(_) => return Err("Configuration cannot be read".into()),
     };
     let requested = Settings {
+        slot_duration_ms: overrides.slot_duration_ms.or(file.slot_duration_ms),
         schema_version: None,
         mode: overrides.mode.or(file.mode),
         read_upstream: overrides
@@ -91,6 +95,10 @@ pub fn resolve_requested(
         control_listen: overrides.control_listen.or(file.control_listen),
         initial_case: overrides.initial_case.clone().or(file.initial_case.clone()),
     };
+    let slot_duration_ms = requested.slot_duration_ms.unwrap_or(400);
+    if !(1..=60_000).contains(&slot_duration_ms) {
+        return Err("slot_duration_ms must be between 1 and 60000".into());
+    }
     let mode = overrides.mode.or(file.mode).unwrap_or_default();
     let read_upstream = overrides.read_upstream.or(file.read_upstream);
     let surfpool_datasource = overrides.surfpool_datasource.or(file.surfpool_datasource);
@@ -140,7 +148,12 @@ pub fn resolve_requested(
             rpc_listen,
             control_listen,
             initial_case,
+            slot_duration_ms,
         },
         requested,
     ))
+}
+
+fn default_slot_duration_ms() -> u64 {
+    400
 }

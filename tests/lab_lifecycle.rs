@@ -34,6 +34,7 @@ impl Project {
             "RONCHI_RPC_LISTEN",
             "RONCHI_CONTROL_LISTEN",
             "RONCHI_INITIAL_CASE",
+            "RONCHI_SLOT_DURATION_MS",
         ] {
             c.env_remove(key);
         }
@@ -134,8 +135,8 @@ fn persistent_lifecycle_authentication_and_retained_evidence() {
             "POST / HTTP/1.1\r\nHost: {rpc}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
         ),
     );
-    assert!(reply.starts_with("HTTP/1.1 501"));
-    assert!(reply.contains("unsupported_capability"));
+    assert!(reply.starts_with("HTTP/1.1 200"));
+    assert!(reply.contains("-32600"));
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(
         std::fs::metadata(
@@ -169,7 +170,14 @@ fn persistent_lifecycle_authentication_and_retained_evidence() {
         reader.snapshot(false).unwrap().state,
         JournalState::Finalized
     );
-    assert_eq!(reader.event(4).unwrap().unwrap().kind, "lab.finalized");
+    assert_eq!(
+        reader
+            .event(reader.snapshot(false).unwrap().snapshot_seq)
+            .unwrap()
+            .unwrap()
+            .kind,
+        "lab.finalized"
+    );
     assert_eq!(
         project.ok(&["status"])["result"]["selection_basis"],
         "latest"

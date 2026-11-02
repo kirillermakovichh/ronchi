@@ -13,6 +13,7 @@ fn run(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
         "RONCHI_RPC_LISTEN",
         "RONCHI_CONTROL_LISTEN",
         "RONCHI_INITIAL_CASE",
+        "RONCHI_SLOT_DURATION_MS",
     ] {
         cmd.env_remove(key);
     }
@@ -255,4 +256,28 @@ fn help_does_not_echo_environment_credentials() {
     assert!(!help.contains("secret"));
     assert!(!help.contains("token=private"));
     assert!(help.contains("RONCHI_READ_UPSTREAM"));
+}
+
+#[test]
+fn slot_profile_flags_override_environment_and_reject_invalid_effective_values() {
+    let tmp = TempDir::new().unwrap();
+    error(
+        run(
+            tmp.path(),
+            &["up", "--json"],
+            &[("RONCHI_SLOT_DURATION_MS", "0")],
+        ),
+        2,
+        "invalid_argument",
+    );
+    error(
+        run(
+            tmp.path(),
+            &["up", "--slot-duration-ms", "400", "--json"],
+            &[("RONCHI_SLOT_DURATION_MS", "0")],
+        ),
+        4,
+        "unsupported_capability",
+    );
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
 }

@@ -257,7 +257,10 @@ pub async fn up(
                 );
             }
             let config = &live.configuration;
-            let compatible = explicit.mode.is_none_or(|v| v == config.mode)
+            let compatible = explicit
+                .slot_duration_ms
+                .is_none_or(|v| v == config.slot_duration_ms)
+                && explicit.mode.is_none_or(|v| v == config.mode)
                 && explicit
                     .read_upstream
                     .as_ref()
@@ -345,7 +348,15 @@ pub async fn up(
         control_address: None,
         journal_state: JournalState::Open,
         snapshot_seq: 0,
-        capabilities: vec!["lab.up".into(), "lab.status".into(), "lab.down".into()],
+        capabilities: ["lab.up", "lab.status", "lab.down"]
+            .into_iter()
+            .map(String::from)
+            .chain(
+                crate::rpc::BOOTSTRAP_METHODS
+                    .into_iter()
+                    .map(|method| format!("rpc.{method}")),
+            )
+            .collect(),
         failure: None,
         failure_exit: None,
         versions: std::collections::BTreeMap::from([
@@ -369,12 +380,23 @@ pub async fn up(
     loop {
         if let Ok(manifest) = ws.manifest(&id) {
             if manifest.state == Lifecycle::Ready {
-                let manifest = authenticated(&ws, &manifest).await?;
-                drop(lease);
-                return Ok(LabResult {
-                    manifest,
-                    selection_basis: "current".into(),
-                });
+                let gate = workspace::open_private(&dir.join("readiness.gate"), true)?;
+                if fs2::FileExt::try_lock_exclusive(&gate).is_ok() {
+                    let manifest = ws.manifest(&id)?;
+                    if manifest.state == Lifecycle::Ready {
+                        let manifest = authenticated(&ws, &manifest).await?;
+                        if manifest.state != Lifecycle::Ready || manifest.health != "healthy" {
+                            let mut error=LabError::internal("Lab health failed before the startup response; inspect retained evidence").for_lab(&id);
+                            error.effects = "applied";
+                            return Err(error);
+                        }
+                        drop(lease);
+                        return Ok(LabResult {
+                            manifest,
+                            selection_basis: "current".into(),
+                        });
+                    }
+                }
             }
             if manifest.state == Lifecycle::Failed {
                 let _ = child.wait();

@@ -98,6 +98,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
     let mut health = handle.subscribe();
     let (sender, mut stops) = tokio::sync::mpsc::channel(1);
     let control = Control {
+        writer: handle.clone(),
         manifest: Arc::new(RwLock::new(manifest.clone())),
         token,
         stop: sender,
@@ -105,7 +106,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
     let starting = event(
         "lab.starting",
         started,
-        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"pending","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
+        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"local-bootstrap-v1","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
     );
     if let Err(error) = append(&handle, starting).await {
         let _ = tokio::task::spawn_blocking(move || writer.shutdown(None)).await;
@@ -139,13 +140,22 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         m.rpc_address = Some(rpc.local_addr()?);
         m.control_address = Some(listener.local_addr()?);
     }
+    let clock = crate::simulator::clock::Clock::realtime(
+        crate::simulator::clock::ClockProfile {
+            slot_duration_ms: manifest.configuration.slot_duration_ms,
+            ..Default::default()
+        },
+        manifest.lab_id.as_bytes(),
+    )
+    .map_err(LabError::invalid)?;
+    let rpc_api = crate::rpc::Rpc::new(clock, handle.clone(), started);
     let rpc_stop = CancellationToken::new();
     let rpc_force = CancellationToken::new();
     let control_stop = CancellationToken::new();
     let control_force = CancellationToken::new();
     let mut rpc_task = tokio::spawn(network::serve(
         rpc,
-        Handler::Rpc,
+        Handler::Rpc(rpc_api.clone()),
         rpc_stop.clone(),
         rpc_force.clone(),
     ));
@@ -173,11 +183,13 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
             let mut m=control.manifest.write().unwrap_or_else(|e|e.into_inner());
             m.state=Lifecycle::Ready; m.health="healthy".into(); m.snapshot_seq=seq;
         }
+        rpc_api.set_ready(true);
         publish(&control,&handle).await?;
         drop(gate);
         Ok::<(),LabError>(())
     }.await;
     if let Err(error) = startup {
+        rpc_api.set_ready(false);
         rpc_stop.cancel();
         rpc_force.cancel();
         control_stop.cancel();
@@ -213,6 +225,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
             m.health = "failed".into();
         }
     }
+    rpc_api.set_ready(false);
     rpc_stop.cancel();
     if force {
         rpc_force.cancel();

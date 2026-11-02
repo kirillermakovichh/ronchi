@@ -53,8 +53,9 @@ The CLI implements persistent `up`, `status`, and `down` for simulator lifecycle
 Startup validates configuration before creating workspace files or opening listeners.
 Unsupported Surfpool, Read-through, and initial Case settings return exit `4` before allocating resources.
 Help, version, and schemas for `lab.up`, `lab.status`, and `lab.down` work without project access.
-The readiness response lists the implemented lifecycle capabilities.
-Solana RPC methods remain task 4 onward; the bound RPC listener returns HTTP `501` with `unsupported_capability`.
+The readiness response lists implemented lifecycle and RPC capabilities.
+The bound RPC listener implements the [local bootstrap profile](solana-rpc-contract.md#implemented-bootstrap-profile).
+Other methods remain explicit unsupported capabilities until their owning tasks.
 This slice does not claim transaction simulation, execution, Case coverage, Findings, or dashboard availability.
 
 `--project <directory>` selects an existing directory.
@@ -74,7 +75,9 @@ The following flat keys use flag, environment, file, then default precedence:
 | `rpc_listen` | `--rpc-listen` | `RONCHI_RPC_LISTEN` | `127.0.0.1:8899` |
 | `control_listen` | `--control-listen` | `RONCHI_CONTROL_LISTEN` | `127.0.0.1:8900` |
 | `initial_case` | `--case` | `RONCHI_INITIAL_CASE` | absent |
+| `slot_duration_ms` | `--slot-duration-ms` | `RONCHI_SLOT_DURATION_MS` | `400` |
 
+`slot_duration_ms` accepts integer values from 1 through 60000.
 Modes are `simulator` and `surfpool`.
 Datasource values must be absolute HTTP or HTTPS URLs.
 Simulator rejects a Surfpool datasource; Surfpool rejects a Read Upstream.

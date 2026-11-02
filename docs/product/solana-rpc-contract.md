@@ -26,6 +26,49 @@ In simulator mode, these methods use one coherent local Simulated Chain State:
 The native Ronchi version and its partial compatibility boundary remain explicit in Lab information.
 The implementation must verify the reported compatibility profile before making a compatibility claim.
 
+### Implemented bootstrap profile
+
+Task 4 implements `getHealth`, `getVersion`, `getGenesisHash`, `getSlot`, `getBlockHeight`, `getLatestBlockhash`, and `isBlockhashValid`.
+The profile is `local-bootstrap-v1`.
+`getVersion` reports `0.0.0-ronchi.<native-version>` and an explicit partial-profile extension.
+It does not claim an Agave release or feature set.
+The genesis identity and blockhashes derive from a domain-separated local Lab identity.
+No public network identity, version, or datasource is copied.
+
+Production time derives from a monotonic clock at rate 1:1.
+A controlled time source is injectable through the Rust API for HTTP verification; it is not remotely writable.
+The default slot lasts 400 ms and each slot produces one block.
+The initial slot and height are zero and remain separate coordinates from elapsed nanoseconds.
+The confirmed view trails processed time by 2 seconds; finalized trails by 4 seconds.
+These are controlled simulator views, not validator votes or consensus-depth claims.
+The default commitment is finalized.
+Context checks use the selected view, including `minContextSlot` on slot, height, latest-hash, and validity methods.
+A future minimum returns `-32016` with the actual `contextSlot`.
+
+Each generated blockhash remains valid through its issue height plus 150 blocks, inclusive.
+A hash not yet present in the selected view is unavailable there.
+Validity uses local block height; it does not use elapsed seconds or an unrelated public bound.
+The implementation derives a bounded recent window without retaining unlimited clock history in memory.
+
+The HTTP request budget is 64 KiB and the batch maximum is 64 elements.
+Responses are capped at 256 KiB; requests have a 30-second ordinary deadline.
+One HTTP exchange uses one connection in this initial resource profile.
+Notifications execute without JSON-RPC responses; an all-notification exchange returns empty HTTP `204`.
+Mixed batches retain per-element IDs, errors, internal identities, and Journal records.
+Oversized or empty batches are rejected before dispatching elements.
+Malformed JSON uses `-32700`; invalid envelopes use `-32600`; invalid method parameters use `-32602`.
+Unknown methods use `-32601`.
+Known but unimplemented capabilities use `-32000` with `data.code:unsupported_capability`.
+No error path forwards requests or executes instructions.
+
+Journal registrations and prepared-response facts precede observed transport completion.
+A forced/cancelled or failed transport remains separate from the prepared result.
+`http_write_completed` records server transport completion; client receipt and application outcome remain unknown.
+
+Method selection and bank/context semantics were cross-checked against [Agave v3.0.10 RPC source](https://github.com/anza-xyz/agave/blob/v3.0.10/rpc/src/rpc.rs).
+The official method-page fetch returned HTTP `429` in this session; the checked-in references and pinned implementation provide the available evidence.
+This bootstrap verification does not establish the full accepted format matrix.
+
 ## Transaction formats and encodings
 
 All transaction formats already present on Solana are in scope.

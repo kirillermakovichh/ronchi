@@ -20,16 +20,24 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 pub struct Control {
+    pub writer: crate::journal::WriterHandle,
     pub manifest: Arc<RwLock<Manifest>>,
     pub token: String,
     pub stop: mpsc::Sender<bool>,
 }
 impl Control {
     pub fn snapshot(&self) -> Manifest {
-        self.manifest
+        let mut manifest = self
+            .manifest
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .clone();
+        let status = self.writer.status();
+        manifest.snapshot_seq = status.snapshot_seq;
+        if status.health == crate::journal::WriterHealth::Failed {
+            manifest.health = "failed".into();
+        }
+        manifest
     }
 }
 #[derive(Serialize, Deserialize)]

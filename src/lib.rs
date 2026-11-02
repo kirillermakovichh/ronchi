@@ -5,6 +5,8 @@ pub mod journal;
 pub mod lab;
 mod network;
 pub mod process;
+pub mod rpc;
+pub mod simulator;
 pub mod workspace;
 use clap::{Parser, Subcommand};
 use config::{Mode, Settings};
@@ -51,6 +53,8 @@ enum Command {
         control_listen: Option<SocketAddr>,
         #[arg(long = "case", env = "RONCHI_INITIAL_CASE", hide_env_values = true)]
         initial_case: Option<String>,
+        #[arg(long, env = "RONCHI_SLOT_DURATION_MS", hide_env_values = true)]
+        slot_duration_ms: Option<u64>,
     },
     /// Inspect a live or retained Lab
     Status,
@@ -184,6 +188,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             rpc_listen,
             control_listen,
             initial_case,
+            slot_duration_ms,
         } => {
             if cli.lab_id.is_some() {
                 return render_lab_error(
@@ -199,6 +204,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 rpc_listen,
                 control_listen,
                 initial_case,
+                slot_duration_ms,
             };
             let project = match project(cli.project.as_deref()) {
                 Ok(root) => root,
@@ -328,7 +334,7 @@ fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) 
         Err(error) => render_lab_error(json, error),
         Ok(result) => {
             let text = format!(
-                "{} · {:?} · {:?} · journal {:?} at {} · RPC {} (methods unavailable) · control {}",
+                "{} · {:?} · {:?} · journal {:?} at {} · RPC {} · control {}",
                 result.manifest.lab_id,
                 result.manifest.configuration.mode,
                 result.manifest.state,

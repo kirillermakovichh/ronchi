@@ -1,6 +1,6 @@
 //! Listener and connection tasks are owned, bounded, drained, and joined here.
 use bytes::Bytes;
-use http_body_util::Full;
+
 use hyper::{
     Request, Response,
     body::{Body, Incoming},
@@ -10,7 +10,7 @@ use hyper_util::{
     rt::{TokioIo, TokioTimer},
     service::TowerToHyperService,
 };
-use std::{convert::Infallible, time::Duration};
+use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -20,17 +20,15 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub enum Handler {
     Control(axum::Router),
-    Rpc,
-}
-async fn unsupported(_: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    Ok(Response::builder().status(501).header("content-type","application/json").body(Full::new(Bytes::from_static(br#"{"error":{"code":"unsupported_capability","message":"RPC methods are not implemented in this build"}}"#))).expect("Static response is valid"))
+    Rpc(crate::rpc::Rpc),
 }
 async fn connection<S, B>(
     stream: TcpStream,
     service: S,
     stop: CancellationToken,
     force: CancellationToken,
-) where
+) -> &'static str
+where
     S: Service<Request<Incoming>, Response = Response<B>> + 'static,
     S::Future: Send,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -45,9 +43,9 @@ async fn connection<S, B>(
         .max_headers(64);
     let future = builder.serve_connection(TokioIo::new(stream), service);
     tokio::pin!(future);
-    tokio::select! { _=force.cancelled()=>(), _=&mut future=>(), _=stop.cancelled()=>{
+    tokio::select! { _=force.cancelled()=>"cancelled", result=&mut future=>if result.is_ok(){"http_write_completed"}else{"transport_failed"}, _=stop.cancelled()=>{
         future.as_mut().graceful_shutdown();
-        tokio::select! { _=force.cancelled()=>(), _=&mut future=>() }
+        tokio::select! { _=force.cancelled()=>"cancelled", result=&mut future=>if result.is_ok(){"http_write_completed"}else{"transport_failed"} }
     } }
 }
 pub async fn serve(
@@ -67,8 +65,12 @@ pub async fn serve(
                 if tasks.len()>=64 { drop(stream); continue; }
                 let stop=stop.clone(); let force=force.clone(); let handler=handler.clone();
                 tasks.spawn(async move { match handler {
-                    Handler::Control(router)=>connection(stream,TowerToHyperService::new(router),stop,force).await,
-                    Handler::Rpc=>connection(stream,service_fn(unsupported),stop,force).await,
+                    Handler::Control(router)=>{connection(stream,TowerToHyperService::new(router),stop,force).await;},
+                    Handler::Rpc(rpc)=>{
+                        let exchange=rpc.exchange();let handler=exchange.clone();
+                        let outcome=connection(stream,service_fn(move|request|{let handler=handler.clone();async move{handler.handle(request).await}}),stop,force).await;
+                        exchange.finish(outcome).await;
+                    },
                 }});
             }
         }

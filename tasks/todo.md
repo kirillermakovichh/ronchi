@@ -91,10 +91,16 @@ Checkpoints record results and do not require another approval interview.
 
 ### 4. Local clock and bootstrap reads
 
-- [ ] **Accept:** Expose bounded HTTP JSON-RPC for bootstrap, slots/heights, blockhashes, and validity; advance the coherent clock without polling.
+- [x] **Accept:** Expose bounded HTTP JSON-RPC for bootstrap, slots/heights, blockhashes, and validity; advance the coherent clock without polling.
 - **Verify:** Parameter errors, commitment views, `minContextSlot`, clock boundaries, and rejected unknown/write forwarding.
 - **Dependencies:** 3. **Scope:** Medium. **Likely files:** `src/rpc.rs`, `src/rpc/methods.rs`, `src/simulator.rs`, `src/simulator/clock.rs`, `tests/rpc_clock.rs`.
 - **Source:** [RPC contract](../docs/product/solana-rpc-contract.md).
+
+- **Implemented:** Bounded JSON-RPC 2.0 over direct Hyper, seven local bootstrap methods, synthetic per-Lab identity, monotonic 1:1 time, separate slot/height/time coordinates, commitment views, inclusive local hash validity, and strict method configuration.
+- **Verification:** `cargo test --locked --test rpc_clock` passed (4 HTTP histories). Tests cover IDs including large numbers, malformed envelopes, notifications, mixed/maximum/oversized batches, body limits, unsupported methods, parameter errors, no-traffic advancement, commitment/min-context views, and validity before/at/after the bound.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (40 tests including the Journal subprocess fixture), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- **Evidence:** Per-element registrations and prepared responses precede transport completion records. A completed server write never establishes a Client Outcome.
+- **Boundary:** Transaction methods remain task 5; full format/encoding coverage remains task 6. No forwarding, execution, or Fault selection is implemented.
 
 ### 5. Submission identity and lifecycle lookup
 
