@@ -174,7 +174,8 @@ Watch subscribers observe health and the committed watermark separately from Jou
 Explicit blocking shutdown closes admission, drains accepted groups, writes a supplied terminal event atomically, and joins the thread.
 If the writer has failed, it never writes a clean finalization marker.
 Creation and joining belong outside Tokio worker threads.
-The lifecycle owner supplies cancellation deadlines and failure-driven RPC shutdown in task 3.
+The lifecycle owner supplies cancellation deadlines and failure-driven listener shutdown in task 3.
+Bounded lifecycle manifest replacement shares the disk account and its terminal reserve.
 Disk admission uses the whole selected Lab directory, including nested owned files, SQLite database, WAL, SHM, retained content, attachments, and diagnostics when those files exist.
 It counts the greater of logical length and allocated bytes on Unix.
 No attachment or logging subsystem is implied by this accounting.

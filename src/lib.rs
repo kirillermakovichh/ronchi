@@ -1,5 +1,11 @@
 pub mod config;
+mod control;
+mod files;
 pub mod journal;
+pub mod lab;
+mod network;
+pub mod process;
+pub mod workspace;
 use clap::{Parser, Subcommand};
 use config::{Mode, Settings};
 use schemars::JsonSchema;
@@ -14,33 +20,50 @@ use std::{
 #[derive(Parser)]
 #[command(version, about = "Local reliability lab for blockchain applications")]
 pub struct Cli {
+    /// Emit one version-1 JSON response envelope
     #[arg(long, global = true)]
     json: bool,
+    /// Select an existing project directory
     #[arg(long, global = true)]
     project: Option<PathBuf>,
+    /// Select a project-local Lab name (default: default)
+    #[arg(long, global = true, conflicts_with = "lab_id")]
+    lab: Option<String>,
+    /// Select an exact Lab ID; mutations require the current live target
+    #[arg(long, global = true)]
+    lab_id: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Start a Lab (not implemented in this build)
+    /// Start a persistent Lab and wait for lifecycle readiness
     Up {
-        #[arg(long, env = "RONCHI_MODE")]
+        #[arg(long, env = "RONCHI_MODE", hide_env_values = true)]
         mode: Option<Mode>,
-        #[arg(long, env = "RONCHI_READ_UPSTREAM")]
+        #[arg(long, env = "RONCHI_READ_UPSTREAM", hide_env_values = true)]
         read_upstream: Option<String>,
-        #[arg(long, env = "RONCHI_SURFPOOL_DATASOURCE")]
+        #[arg(long, env = "RONCHI_SURFPOOL_DATASOURCE", hide_env_values = true)]
         surfpool_datasource: Option<String>,
-        #[arg(long, env = "RONCHI_RPC_LISTEN")]
+        #[arg(long, env = "RONCHI_RPC_LISTEN", hide_env_values = true)]
         rpc_listen: Option<SocketAddr>,
-        #[arg(long, env = "RONCHI_CONTROL_LISTEN")]
+        #[arg(long, env = "RONCHI_CONTROL_LISTEN", hide_env_values = true)]
         control_listen: Option<SocketAddr>,
-        #[arg(long = "case", env = "RONCHI_INITIAL_CASE")]
+        #[arg(long = "case", env = "RONCHI_INITIAL_CASE", hide_env_values = true)]
         initial_case: Option<String>,
     },
+    /// Inspect a live or retained Lab
+    Status,
+    /// Stop the current named Lab and retain evidence
+    Down {
+        #[arg(long)]
+        force: bool,
+    },
+    #[command(name = "__daemon", hide = true)]
+    Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down"])]
         operation: String,
     },
 }
@@ -57,6 +80,8 @@ pub struct OperationError {
 pub struct ErrorEnvelope {
     pub contract_version: u32,
     pub request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lab_id: Option<String>,
     pub error: OperationError,
 }
 #[derive(Serialize, JsonSchema)]
@@ -81,6 +106,7 @@ fn failure(json: bool, exit: i32, code: &str, message: String, phase: &str, reco
     let envelope = ErrorEnvelope {
         contract_version: 1,
         request_id: format!("cli-{}", std::process::id()),
+        lab_id: None,
         error: OperationError {
             code: code.into(),
             message: message.clone(),
@@ -133,9 +159,18 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             );
         }
     };
+    let name = cli.lab.as_deref().unwrap_or("default");
+    if !workspace::identifier(name) {
+        return render_lab_error(cli.json, lab::LabError::invalid("Invalid Lab name"));
+    }
     match cli.command {
         Command::Schema { operation } => {
-            let value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":false,"request":schemars::schema_for!(UpRequest),"response":schemars::schema_for!(ErrorEnvelope)});
+            let request = match operation.as_str() {
+                "lab.up" => schemars::schema_for!(UpRequest),
+                "lab.status" => schemars::schema_for!(StatusRequest),
+                _ => schemars::schema_for!(DownRequest),
+            };
+            let value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":schemars::schema_for!(LabEnvelope)});
             match write_output(true, &value, "", false) {
                 Ok(()) => 0,
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
@@ -150,40 +185,176 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             control_listen,
             initial_case,
         } => {
-            let result = std::env::current_dir()
-                .map_err(|_| "Current directory is unavailable".to_string())
-                .and_then(|cwd| config::discover(cli.project.as_deref(), &cwd))
-                .and_then(|project| {
-                    config::resolve(
-                        project,
-                        Settings {
-                            schema_version: None,
-                            mode,
-                            read_upstream,
-                            surfpool_datasource,
-                            rpc_listen,
-                            control_listen,
-                            initial_case,
-                        },
-                    )
-                });
-            match result {
-                Err(message) => failure(
+            if cli.lab_id.is_some() {
+                return render_lab_error(
                     cli.json,
-                    2,
-                    "invalid_argument",
-                    message,
-                    "configuration",
-                    "Correct the project path and startup configuration",
-                ),
-                Ok(_) => failure(
-                    cli.json,
-                    4,
-                    "unsupported_capability",
-                    "Lab startup is not implemented in this build".into(),
-                    "startup",
-                    "Use a build with Journal and Lab lifecycle support",
-                ),
+                    lab::LabError::invalid("up selects a name, not a retained Lab ID"),
+                );
+            }
+            let settings = Settings {
+                schema_version: None,
+                mode,
+                read_upstream,
+                surfpool_datasource,
+                rpc_listen,
+                control_listen,
+                initial_case,
+            };
+            let project = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            let (configuration, settings) = match config::resolve_requested(project, settings) {
+                Ok(c) => c,
+                Err(message) => return render_lab_error(cli.json, lab::LabError::invalid(message)),
+            };
+            render_lab_result(cli.json, run_async(lab::up(configuration, settings, name)))
+        }
+        Command::Status => {
+            let project = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            render_lab_result(
+                cli.json,
+                run_async(lab::status(project, name, cli.lab_id.as_deref())),
+            )
+        }
+        Command::Down { force } => {
+            let project = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            render_lab_result(
+                cli.json,
+                run_async(lab::down(project, name, cli.lab_id.as_deref(), force)),
+            )
+        }
+        Command::Daemon => {
+            let Some(id) = cli.lab_id else {
+                return 2;
+            };
+            let project = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(_) => return 2,
+            };
+            if process::detach().is_err() {
+                return 6;
+            }
+            match run_async(lab::daemon::run(project, id)) {
+                Ok(()) => 0,
+                Err(error) => error.exit,
+            }
+        }
+    }
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(untagged)]
+enum LabEnvelope {
+    Success {
+        contract_version: u32,
+        request_id: String,
+        lab_id: String,
+        result: Box<lab::LabResult>,
+    },
+    Error(ErrorEnvelope),
+}
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct StatusRequest {
+    contract_version: u32,
+    request_id: String,
+    lab_id: Option<String>,
+    name: Option<String>,
+}
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct DownRequest {
+    contract_version: u32,
+    request_id: String,
+    name: String,
+    force: bool,
+}
+fn project(explicit: Option<&std::path::Path>) -> Result<PathBuf, lab::LabError> {
+    config::discover(explicit, &std::env::current_dir()?).map_err(lab::LabError::invalid)
+}
+fn run_async<T>(
+    future: impl std::future::Future<Output = Result<T, lab::LabError>>,
+) -> Result<T, lab::LabError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|_| lab::LabError::internal("Cannot initialize runtime"))?;
+    let result = runtime.block_on(future);
+    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+    result
+}
+fn render_lab_error(json: bool, error: lab::LabError) -> i32 {
+    let envelope = ErrorEnvelope {
+        contract_version: 1,
+        request_id: format!("cli-{}", std::process::id()),
+        lab_id: error.lab_id,
+        error: OperationError {
+            code: error.code.into(),
+            message: error.message.clone(),
+            phase: error.phase.into(),
+            retryable: false,
+            effects: error.effects.into(),
+            recovery:
+                "Inspect ronchi status and correct the reported configuration or resource failure"
+                    .into(),
+        },
+    };
+    let envelope = LabEnvelope::Error(envelope);
+    match write_output(
+        json,
+        &envelope,
+        &format!(
+            "{}: {}. Inspect ronchi status",
+            error.code,
+            error.message.escape_default()
+        ),
+        true,
+    ) {
+        Ok(()) => error.exit,
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
+        Err(_) => 6,
+    }
+}
+fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) -> i32 {
+    match result {
+        Err(error) => render_lab_error(json, error),
+        Ok(result) => {
+            let text = format!(
+                "{} · {:?} · {:?} · journal {:?} at {} · RPC {} (methods unavailable) · control {}",
+                result.manifest.lab_id,
+                result.manifest.configuration.mode,
+                result.manifest.state,
+                result.manifest.journal_state,
+                result.manifest.snapshot_seq,
+                result
+                    .manifest
+                    .rpc_address
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "unavailable".into()),
+                result
+                    .manifest
+                    .control_address
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "unavailable".into())
+            );
+            let envelope = LabEnvelope::Success {
+                contract_version: 1,
+                request_id: format!("cli-{}", std::process::id()),
+                lab_id: result.manifest.lab_id.clone(),
+                result: Box::new(result),
+            };
+            match write_output(json, &envelope, &text, false) {
+                Ok(()) => 0,
+                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
+                Err(_) => 6,
             }
         }
     }

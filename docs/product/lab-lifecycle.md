@@ -1,6 +1,6 @@
 # Persistent Lab lifecycle
 
-Status: accepted initial product contract, pending implementation and validation.
+Status: accepted product contract. Task 3 implements the simulator lifecycle slice; RPC methods, Cases, Surfpool, and dashboard capabilities follow in their own tasks.
 This document refines [ADR-0013](../adr/0013-managed-surfpool-execution-mode.md), [ADR-0014](../adr/0014-project-local-workspace.md), [ADR-0015](../adr/0015-persistent-lab-first.md), and [ADR-0016](../adr/0016-continuous-lab-journal.md).
 The native stack remains defined by [ADR-0019](../adr/0019-resource-efficient-rust-core.md).
 
@@ -49,12 +49,13 @@ Case changes use `case arm` and `case disarm` without restarting it.
 
 ### Implemented configuration surface
 
-The initial CLI validates startup settings without starting a Lab.
-`up` returns `unsupported_capability` with exit `4` after successful validation.
-Validation creates no workspace files or listeners.
-Help, version, and `schema lab.up` do not read project configuration.
-The schema advertises startup as unimplemented and describes its current error response.
-Other operations and successful startup responses arrive with their implementation slices.
+The CLI implements persistent `up`, `status`, and `down` for simulator lifecycle controls.
+Startup validates configuration before creating workspace files or opening listeners.
+Unsupported Surfpool, Read-through, and initial Case settings return exit `4` before allocating resources.
+Help, version, and schemas for `lab.up`, `lab.status`, and `lab.down` work without project access.
+The readiness response lists the implemented lifecycle capabilities.
+Solana RPC methods remain task 4 onward; the bound RPC listener returns HTTP `501` with `unsupported_capability`.
+This slice does not claim transaction simulation, execution, Case coverage, Findings, or dashboard availability.
 
 `--project <directory>` selects an existing directory.
 `--json` selects the version-1 error envelope, including parser failures.
@@ -142,6 +143,65 @@ An incompatible live daemon requires an explicit stop; a new binary never takes 
 If startup fails, stop only acquired resources and retain its failed manifest, diagnostics, and any interrupted Journal.
 If the initiating `up` is cancelled before readiness, cancel that startup and perform the same cleanup.
 Once readiness is committed, caller cancellation does not stop the Lab.
+
+### Implemented native ownership
+
+The workspace uses `ronchi/names/<name>.json` for the selected immutable ID.
+Per-name operation locks serialize CLI start and stop decisions.
+A separate owner lock remains held for the entire daemon lifetime.
+The daemon starts in its own operating-system session with no inherited terminal streams.
+CLI exit, pipe closure, and terminal closure do not stop a ready daemon.
+
+Startup allocates a fresh random ID and 256-bit control credential.
+Workspace directories use mode `0700`; newly created metadata and credential files use mode `0600`.
+Atomic replacement writes and syncs a temporary file, renames it, and syncs the parent directory.
+Metadata reads and writes are bounded to 64 KiB.
+Manifest publication after Journal creation shares the Journal disk accounting lock and uses reserved lifecycle capacity.
+The manifest records requested configuration, actual endpoints, component versions, persistence policy, and process identity.
+
+The startup CLI holds a lease until readiness publication.
+A gate serializes publication with cancellation inspection.
+A lost startup lease aborts pre-readiness startup and joins acquired resources.
+If readiness won the race, cancellation reports applied effects and leaves the Lab running.
+If completion cannot be established within the cleanup bound, report unknown effects instead of claiming cancellation completed.
+The CLI retains its direct child handle until this decision; it never kills a process selected from a manifest PID.
+One SIGINT receiver remains registered throughout each start or stop wait.
+
+`lab.starting` records build and persistence provenance before listener setup.
+`lab.ready` commits before readiness publication.
+`lab.stop_requested` precedes drain and the terminal lifecycle record.
+Normal completion commits `lab.finalized`; force, failed cleanup, or abnormal recovery exposes interruption.
+A failed startup retains its manifest and any committed startup Journal.
+A storage failure stops admission and settles owned connections without deleting acknowledged evidence.
+If failure metadata cannot be written, status derives interruption from retained evidence and the absent owner.
+
+Repeated `up` checks settings explicitly supplied by flags, environment, or the project file.
+Omitted defaults do not replace a running Lab's configuration.
+A mismatch requires an explicit stop and new start.
+`status --lab-id <id>` remains available when another Lab reuses the same name.
+`down --lab-id <id>` accepts only the current live target; a historical selection returns `state_conflict`.
+Stopped or interrupted results omit live endpoints.
+A lost stop response triggers bounded status inspection, without resending the mutation.
+
+Control uses a loopback-only address, an exact Host check, and the per-Lab bearer token.
+Requests with an Origin header are rejected; no browser control session is implemented yet.
+The dashboard ticket/cookie flow remains task 14.
+Each listener owns at most 64 connection tasks.
+HTTP headers are bounded to 32 KiB and 64 fields, with a 30-second header deadline.
+Control JSON bodies are bounded to 1 KiB with a 30-second handler deadline.
+Control clients wait at most 2 seconds for one bounded 64 KiB response.
+Shutdown stops RPC admission, joins connection tasks, and joins the Journal writer before releasing ownership.
+Normal drain is bounded to 25 seconds; owned cleanup shares one 5-second deadline after drain or force.
+The CLI confirms daemon process termination before reporting successful stop.
+
+OS birth identity uses microsecond process start information on macOS and kernel start ticks on Linux.
+The authenticated response must match the complete recorded process identity, including the recorded executable path and inode.
+A rebuilt executable file does not create a new daemon birth identity.
+No retained PID alone authorizes a signal or name takeover.
+Recorded children are inspected before name reuse.
+A live child whose cleanup capability is unavailable, or an unverifiable child identity, causes a conflict.
+This build starts no managed children; verified Surfpool ownership and cleanup remain task 17.
+The process tests were executed on macOS; Linux code is present but has not been exercised in this session.
 
 ## Case changes and request deadlines
 

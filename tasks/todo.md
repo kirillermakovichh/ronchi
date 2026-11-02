@@ -33,7 +33,7 @@ Checkpoints record results and do not require another approval interview.
 
 - **Completed slice:** Native package, fallible clap parsing, strict versioned TOML, canonical project discovery, flag/environment/file/default precedence, loopback and authority validation, and generated schemas from typed settings/errors.
 - **Verification:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (6 process/config tests), `cargo clippy --locked --all-targets -- -D warnings`, `cargo run --locked -- --help`, and `cargo run --locked -- --version` passed.
-- **Boundary:** `up` validates without writes and returns exit `4` (`unsupported_capability`). Lab startup, runtime limits, and successful operation schemas remain assigned to later slices.
+- **Boundary at task 1 completion:** `up` validated without writes and returned exit `4`. Task 3 supersedes this startup limitation. Runtime-limit configuration keys remain unimplemented.
 
 ### 2. Durable Journal admission
 
@@ -69,15 +69,23 @@ Checkpoints record results and do not require another approval interview.
 
 ### 3. Persistent Lab controls
 
-- [ ] **Accept:** Implement authenticated loopback control, background readiness, immutable IDs, name resolution, and bounded stop; finalize only after owned work/resources settle.
+- [x] **Accept:** Implement authenticated loopback control, background readiness, immutable IDs, name resolution, and bounded stop; finalize only after owned work/resources settle.
 - **Verify:** Concurrent starts, occupied/dynamic ports, cancellation around readiness, terminal closure, force stop, and historical lookup through actual processes.
 - **Dependencies:** 1, 2. **Scope:** Medium. **Likely files:** `src/lab.rs`, `src/control.rs`, `src/workspace.rs`, `src/process.rs`, `tests/lab_lifecycle.rs`.
 - **Source:** [Lifecycle](../docs/product/lab-lifecycle.md).
 
+- **Implemented slice:** Persistent simulator lifecycle controls, canonical project ownership, atomic per-Lab metadata, operation/lifetime locks, random immutable IDs and credentials, authenticated identity reconciliation, dynamic ports, cancellation, bounded owned connection drain, and retained Journal lookup.
+- **Verification:** `cargo test --locked` passed with 14 process tests: concurrent starts, occupied ports, compatibility, exact historical IDs, fresh names/credentials, actual PTY closure, cancellation before locking and at the readiness gate, force stop, forged birth identity, daemon death, rebuilt binary files, unknown recorded children, and fatal disk quota exhaustion.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (35 tests including the Journal subprocess fixture), `cargo clippy --locked --all-targets -- -D warnings`, `cargo run --locked -- --help`, and `cargo run --locked -- --version` passed.
+- **Failure fixes:** A persistent SIGINT subscription avoids cancellation gaps. Status inspection preserves an accepted shutdown when closing control connections loses its response.
+- **Boundary:** Readiness lists lifecycle controls only. RPC methods return explicit HTTP `501`; protocol state/methods, Cases, dashboard sessions, and managed Surfpool remain their assigned later tasks. macOS process behavior is verified; Linux remains unverified here.
+
 ### Checkpoint A
 
-- [ ] CLI exit leaves a ready Lab alive; explicit stop retains readable evidence and creates no global persistent files.
-- [ ] Record accumulated build, process, persistence, and failure-check results.
+- [x] CLI exit leaves a ready Lab alive; explicit stop retains readable evidence and creates no global persistent files.
+- [x] Record accumulated build, process, persistence, and failure-check results.
+- **Observed:** CLI exit and real PTY closure leave the authenticated daemon ready. Normal stop confirms process exit and a readable finalized Journal. Force/death/storage failures retain interrupted evidence. An independent disposable listener and unrelated helper process remain alive. Workspace inspection and code review locate all persistent product files under the selected project.
+- **Checks:** The accumulated 35-test suite, locked build, formatting, and Clippy passed. No protocol-fidelity or production-readiness claim follows from this lifecycle checkpoint.
 
 ## First RPC Investigation
 

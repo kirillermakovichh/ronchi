@@ -19,6 +19,13 @@ fn run(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     cmd.current_dir(cwd)
         .args(args)
         .envs(env.iter().copied())
+        .args(
+            if args.first() == Some(&"up") && !args.contains(&"--case") {
+                vec!["--case", "pending"]
+            } else {
+                vec![]
+            },
+        )
         .output()
         .unwrap()
 }
@@ -149,7 +156,7 @@ fn introspection_never_reads_configuration() {
     }
     let out = run(tmp.path(), &["schema", "lab.up"], &[]);
     let schema: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(schema["implemented"], false);
+    assert_eq!(schema["implemented"], true);
     assert_eq!(
         schema["request"]["$defs"]["Settings"]["additionalProperties"],
         false
@@ -229,4 +236,23 @@ fn listener_validation_and_secret_redaction() {
     );
     assert!(!String::from_utf8_lossy(&out.stdout).contains("secret"));
     error(out, 2, "invalid_argument");
+}
+
+#[test]
+fn help_does_not_echo_environment_credentials() {
+    let tmp = TempDir::new().unwrap();
+    let output = run(
+        tmp.path(),
+        &["up", "--help"],
+        &[(
+            "RONCHI_READ_UPSTREAM",
+            "https://user:secret@example.test/?token=private",
+        )],
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(!help.contains("secret"));
+    assert!(!help.contains("token=private"));
+    assert!(help.contains("RONCHI_READ_UPSTREAM"));
 }

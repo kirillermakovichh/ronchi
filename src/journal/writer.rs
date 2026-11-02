@@ -93,6 +93,14 @@ impl CommitReceipt {
 }
 
 impl WriterHandle {
+    /// Publishes bounded lifecycle metadata against the same Lab disk budget.
+    pub fn publish_metadata(&self, data: &[u8]) -> Result<(), JournalError> {
+        let result = self.shared.budget.publish_metadata(data);
+        if result.is_err() {
+            self.shared.fail();
+        }
+        result
+    }
     pub fn disk_usage(&self) -> Result<DiskUsage, JournalError> {
         self.shared.budget.usage()
     }

@@ -8,7 +8,7 @@ use std::{
 pub const DEFAULT_DISK_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MIN_SHUTDOWN_RESERVE: u64 = 64 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct DiskLimits {
     pub total_bytes: u64,
     pub shutdown_reserve_bytes: u64,
@@ -91,6 +91,23 @@ impl Budget {
         account.page_size = page_size;
         account.pages = pages;
         account.check(0, true)
+    }
+    pub(super) fn publish_metadata(&self, data: &[u8]) -> Result<(), JournalError> {
+        if data.len() > 64 * 1024 {
+            return Err(JournalError::InvalidInput);
+        }
+        let mut account = self.lock();
+        let result = (|| {
+            let extra = (data.len() as u64 * 2)
+                + fs2::allocation_granularity(&account.root).map_err(io)? * 4;
+            account.check(extra, false)?;
+            crate::files::atomic_bytes(&account.root.join("manifest.json"), data).map_err(io)?;
+            account.check(0, false)
+        })();
+        if result.is_err() {
+            account.failed = true;
+        }
+        result
     }
     pub(super) fn failed(&self) -> bool {
         self.lock().failed

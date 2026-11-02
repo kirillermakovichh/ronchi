@@ -14,7 +14,7 @@ pub enum Mode {
     Surfpool,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub schema_version: Option<u32>,
@@ -26,7 +26,7 @@ pub struct Settings {
     pub initial_case: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct EffectiveConfig {
     pub project: PathBuf,
     pub mode: Mode,
@@ -57,6 +57,12 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, String> 
 }
 
 pub fn resolve(project: PathBuf, overrides: Settings) -> Result<EffectiveConfig, String> {
+    resolve_requested(project, overrides).map(|(configuration, _)| configuration)
+}
+pub fn resolve_requested(
+    project: PathBuf,
+    overrides: Settings,
+) -> Result<(EffectiveConfig, Settings), String> {
     let path = project.join("ronchi/config.toml");
     let file: Settings = match std::fs::read_to_string(path) {
         Ok(text) => {
@@ -69,6 +75,21 @@ pub fn resolve(project: PathBuf, overrides: Settings) -> Result<EffectiveConfig,
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
         Err(_) => return Err("Configuration cannot be read".into()),
+    };
+    let requested = Settings {
+        schema_version: None,
+        mode: overrides.mode.or(file.mode),
+        read_upstream: overrides
+            .read_upstream
+            .clone()
+            .or(file.read_upstream.clone()),
+        surfpool_datasource: overrides
+            .surfpool_datasource
+            .clone()
+            .or(file.surfpool_datasource.clone()),
+        rpc_listen: overrides.rpc_listen.or(file.rpc_listen),
+        control_listen: overrides.control_listen.or(file.control_listen),
+        initial_case: overrides.initial_case.clone().or(file.initial_case.clone()),
     };
     let mode = overrides.mode.or(file.mode).unwrap_or_default();
     let read_upstream = overrides.read_upstream.or(file.read_upstream);
@@ -110,13 +131,16 @@ pub fn resolve(project: PathBuf, overrides: Settings) -> Result<EffectiveConfig,
     }) {
         return Err("Initial Case must be a bounded identifier".into());
     }
-    Ok(EffectiveConfig {
-        project,
-        mode,
-        read_upstream,
-        surfpool_datasource,
-        rpc_listen,
-        control_listen,
-        initial_case,
-    })
+    Ok((
+        EffectiveConfig {
+            project,
+            mode,
+            read_upstream,
+            surfpool_datasource,
+            rpc_listen,
+            control_listen,
+            initial_case,
+        },
+        requested,
+    ))
 }
