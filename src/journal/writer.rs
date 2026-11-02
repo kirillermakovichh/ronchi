@@ -108,6 +108,17 @@ impl WriterHandle {
             }
         }
     }
+    pub fn try_append_reserved(
+        &self,
+        event: &Event,
+        reservation: TransitionReservation,
+    ) -> Result<CommitReceipt, JournalError> {
+        let encoded = encode(std::slice::from_ref(event))?;
+        if encoded[0].len() > 4096 {
+            return Err(JournalError::InvalidInput);
+        }
+        self.enqueue(encoded, Some(reservation.0))
+    }
     pub fn try_append_transition(
         &self,
         event: &Event,

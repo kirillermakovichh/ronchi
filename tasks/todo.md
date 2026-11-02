@@ -154,6 +154,20 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 5. **Scope:** Medium. **Likely files:** `src/cases.rs`, `src/cases/response_loss.rs`, `src/rpc/batch.rs`, `tests/response_loss.rs`, `tests/case_binding.rs`.
 - **Source:** [Cases and coverage](../docs/product/cases.md).
 
+#### 7a. Registration, durable selection, and HTTP withholding
+
+- [x] Bind immutable policies in shared registration order, commit acceptance/ledger atomically, and withhold real HTTP responses with bounded capacity and owned completion evidence.
+
+- **Verified:** All four locked checks passed: formatting, check, test (61 tests), and Clippy with `-D warnings`. The first raw HTTP history proves header/body silence, autonomous finalization, ordinary duplicate reply, transport EOF, and durable selection/start/boundary records. Scoped self-review checked commit-before-hold, explicit EOF, future evidence credits, and connection ownership. Public catalog/startup integration and the wider histories remain below.
+
+#### 7b. Public Case operations and startup
+
+- [ ] Expose list/arm/disarm, startup Case, active status, strict errors, and schemas without restarting the Lab.
+
+#### 7c. Histories and Checkpoint B
+
+- [ ] Verify retries, races, switching, batches, capacity, failures, cancellation/shutdown, and a reproducible response-loss/status workflow.
+
 ### Checkpoint B
 
 - [ ] A real HTTP client submits, loses the response, and queries the original signature without restarting the Lab.

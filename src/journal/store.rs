@@ -85,7 +85,7 @@ impl JournalStore {
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.pragma_update(None, "cache_spill", "OFF")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.pragma_update(None, "max_page_count", 16)?;
+        connection.pragma_update(None, "max_page_count", 32)?;
         connection.pragma_update(None, "wal_autocheckpoint", 1000)?;
         let foreign_keys: u32 = connection.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
         let spill: u32 = connection.query_row("PRAGMA cache_spill", [], |r| r.get(0))?;
@@ -97,6 +97,7 @@ impl JournalStore {
         tx.execute_batch(SCHEMA)?;
         tx.execute_batch(super::transactions::SCHEMA)?;
         tx.execute_batch(super::nonces::SCHEMA)?;
+        tx.execute_batch(super::response_loss::SCHEMA)?;
         tx.execute("INSERT INTO journal VALUES(1,?1,0,'open')", [lab_id])?;
         tx.commit()?;
         let pages: u32 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
@@ -211,7 +212,7 @@ impl JournalReader {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if !matches!(version, 1..=3) {
+        if !matches!(version, 1..=4) {
             return Err(JournalError::UnsupportedSchema);
         }
         Ok(Self {

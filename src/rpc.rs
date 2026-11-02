@@ -13,7 +13,7 @@ use std::{
     convert::Infallible,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -77,7 +77,7 @@ struct State {
     pub clock: Clock,
     writer: WriterHandle,
     ready: AtomicBool,
-    registration: AtomicU64,
+    policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     started: Instant,
     transactions: crate::simulator::transactions::Transactions,
     owner: Mutex<Option<crate::simulator::transactions::Owner>>,
@@ -87,6 +87,7 @@ struct State {
 pub(crate) struct Exchange {
     rpc: Rpc,
     boundaries: Arc<Mutex<Vec<Value>>>,
+    pub(crate) hold: Arc<crate::cases::Hold>,
 }
 impl Rpc {
     pub fn new(clock: Clock, writer: WriterHandle, started: Instant) -> Self {
@@ -100,11 +101,13 @@ impl Rpc {
         state: crate::protocol::state::ProtocolState,
     ) -> Result<Self, String> {
         state.validate()?;
+        let (policy_status, _) = tokio::sync::watch::channel(crate::cases::Binding::default());
         let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
             clock.clone(),
             writer.clone(),
             started,
             state,
+            policy_status.clone(),
         );
         let (initialized, _) = tokio::sync::watch::channel(None);
         Ok(Self(Arc::new(State {
@@ -114,9 +117,21 @@ impl Rpc {
             clock,
             writer,
             ready: AtomicBool::new(false),
-            registration: AtomicU64::new(0),
+            policy_status,
             started,
         })))
+    }
+    pub async fn arm_case(
+        &self,
+        args: crate::cases::Arm,
+    ) -> Result<crate::cases::Binding, RpcError> {
+        self.0.transactions.change(Some(args)).await
+    }
+    pub async fn disarm_case(&self) -> Result<crate::cases::Binding, RpcError> {
+        self.0.transactions.change(None).await
+    }
+    pub fn case_status(&self) -> crate::cases::Binding {
+        self.0.policy_status.borrow().clone()
     }
     pub fn set_ready(&self, ready: bool) {
         self.0.ready.store(ready, Ordering::SeqCst);
@@ -186,6 +201,7 @@ impl Rpc {
         Exchange {
             rpc: self.clone(),
             boundaries: Arc::new(Mutex::new(Vec::new())),
+            hold: Default::default(),
         }
     }
     async fn record(&self, kind: &str, items: Vec<Value>) -> Result<(), RpcError> {
@@ -210,17 +226,40 @@ impl Rpc {
 }
 impl Exchange {
     pub(crate) async fn finish(&self, transport: &str) {
+        self.hold.abort.cancel();
+        let held = self.hold.deadline().is_some();
         let values =
             std::mem::take(&mut *self.boundaries.lock().unwrap_or_else(|e| e.into_inner()));
         let values = values
             .into_iter()
             .map(|mut value| {
                 value["transport"] = json!(transport);
+                if held {
+                    value["shared_withholding"] = json!(true);
+                    value["prepared_response"] = value["rpc_response"].clone();
+                    value["rpc_response"] = json!("no_transport_response");
+                }
                 value["client_receipt"] = json!("unknown");
                 value
             })
             .collect();
-        let _ = self.rpc.record("rpc.boundary", values).await;
+        if held {
+            let result = self
+                .hold
+                .record(
+                    &self.rpc.0.writer,
+                    self.rpc.0.started,
+                    "rpc.boundary",
+                    values,
+                )
+                .await;
+            if result.is_err() {
+                self.rpc.0.writer.fail_fatal();
+            }
+        } else {
+            let _ = self.rpc.record("rpc.boundary", values).await;
+        }
+        self.hold.release();
     }
     pub(crate) async fn handle(
         &self,
@@ -241,6 +280,9 @@ impl Exchange {
                     )),
                 ),
             };
+        if self.hold.deadline().is_some() {
+            std::future::pending::<()>().await;
+        }
         Ok(response)
     }
     async fn process(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
@@ -284,12 +326,17 @@ impl Exchange {
             Ok(value) => (false, vec![value], false),
             Err(_) => (false, vec![Value::Null], true),
         };
-        let registration = self.rpc.0.registration.fetch_add(1, Ordering::SeqCst) + 1;
+        let binding = match self.rpc.0.transactions.register().await {
+            Ok(binding) => binding,
+            Err(failure) => return http_response(503, Some(error(Value::Null, failure))),
+        };
+        let registration = binding.registration_seq;
+        let batch_size = items.len();
         let mut prepared = Vec::new();
         let mut responses = Vec::new();
         let mut received = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
-            let reference = json!({"registration_seq":registration,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}")});
+            let reference = json!({"registration_seq":registration,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size});
             let valid = item.is_object()
                 && item.get("jsonrpc") == Some(&json!("2.0"))
                 && item.get("method").is_some_and(Value::is_string)
@@ -301,7 +348,9 @@ impl Exchange {
                     .is_none_or(|p| p.is_array() || p.is_object());
             let mut registration_fact = reference.clone();
             let method = item.get("method").and_then(Value::as_str).unwrap_or("");
-            registration_fact["method"] = json!(if BOOTSTRAP_METHODS.contains(&method) {
+            registration_fact["method"] = json!(if BOOTSTRAP_METHODS.contains(&method)
+                || crate::simulator::transactions::TRANSACTION_METHODS.contains(&method)
+            {
                 method
             } else {
                 "unsupported_or_invalid"
@@ -352,6 +401,7 @@ impl Exchange {
                         item["method"].as_str().unwrap_or(""),
                         item.get("params").unwrap_or(&Value::Null),
                         reference.clone(),
+                        self.hold.clone(),
                     )
                     .await
             } else {

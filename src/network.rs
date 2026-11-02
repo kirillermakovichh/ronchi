@@ -68,8 +68,21 @@ pub async fn serve(
                     Handler::Control(router)=>{connection(stream,TowerToHyperService::new(router),stop,force).await;},
                     Handler::Rpc(rpc)=>{
                         let exchange=rpc.exchange();let handler=exchange.clone();
-                        let outcome=connection(stream,service_fn(move|request|{let handler=handler.clone();async move{handler.handle(request).await}}),stop,force).await;
+                        let monitor=stream.into_std().and_then(|stream|{let cloned=stream.try_clone()?;Ok((tokio::net::TcpStream::from_std(stream)?,tokio::net::TcpStream::from_std(cloned)?))});
+                        if let Ok((stream,peer))=monitor {
+                        let outcome={let future=connection(stream,service_fn(move|request|{let handler=handler.clone();async move{handler.handle(request).await}}),stop,force);
+                        tokio::pin!(future);
+                        let held=async {
+                            exchange.hold.started.cancelled().await;
+                            let deadline=exchange.hold.deadline().expect("started hold has deadline");
+                            let mut byte=[0u8;1];
+                            tokio::select!{_ = tokio::time::sleep_until(deadline)=>"withholding_deadline",result=peer.peek(&mut byte)=>match result{Ok(0)=>"peer_closed_while_withheld",Ok(_)=>"unexpected_data_while_withheld",Err(_)=>"transport_failed_while_withheld"}}
+                        };
+                        tokio::select!{outcome=&mut future=>outcome,outcome=held=>outcome}};
+                        drop(peer);
+                        let outcome=if exchange.hold.deadline().is_some()&&outcome=="http_write_completed"{"peer_closed_while_withheld"}else{outcome};
                         exchange.finish(outcome).await;
+                        } else {exchange.finish("transport_setup_failed").await;}
                     },
                 }});
             }

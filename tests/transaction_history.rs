@@ -22,6 +22,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 struct Server {
+    rpc: Rpc,
     address: SocketAddr,
     time: ManualTime,
     stop: CancellationToken,
@@ -56,8 +57,9 @@ impl Server {
         let address = listener.local_addr().unwrap();
         let stop = CancellationToken::new();
         let force = CancellationToken::new();
-        let task = tokio::spawn(rpc.serve(listener, stop.clone(), force.clone()));
+        let task = tokio::spawn(rpc.clone().serve(listener, stop.clone(), force.clone()));
         Self {
+            rpc,
             address,
             time,
             stop,
@@ -1550,4 +1552,79 @@ async fn exact_packet_bounds_for_all_formats_preserve_binary_and_reject_one_extr
         );
         assert!(server.stop(false).await);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn response_loss_silence_retains_identity_and_autonomous_status() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    server.rpc.wait_initialized().await.unwrap();
+    server
+        .rpc
+        .arm_case(ronchi::cases::Arm {
+            hold_ms: 300,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (signature, wire) = signed(&server.hash().await, 40, false);
+    let body =
+        json!({"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":send(&wire)}).to_string();
+    let mut stream = tokio::net::TcpStream::connect(server.address)
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "POST / HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\n\r\n{}",
+                server.address,
+                body.len(),
+                body
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    server.phase(&signature, Phase::Pending).await;
+    let mut bytes = [0; 1];
+    assert!(
+        tokio::time::timeout(Duration::from_millis(40), stream.read(&mut bytes))
+            .await
+            .is_err()
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server.phase(&signature, Phase::Finalized).await;
+    assert_eq!(
+        server
+            .call("getSignatureStatuses", statuses(&signature))
+            .await["result"]["value"][0]["confirmationStatus"],
+        "finalized"
+    );
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), stream.read(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
+    assert!(server.stop(false).await);
+    let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+    assert!(reader.response_loss(&signature).unwrap().is_some());
+    let mut started = 0;
+    let mut ended = 0;
+    for seq in 1..=reader.snapshot(false).unwrap().snapshot_seq {
+        let event = reader.event(seq).unwrap().unwrap();
+        if event.kind == "fault.withholding_started" {
+            started += 1;
+        }
+        if event.kind == "rpc.boundary" && event.data["transport"] == "withholding_deadline" {
+            ended += 1;
+            assert_eq!(event.data["client_receipt"], "unknown");
+        }
+    }
+    assert_eq!((started, ended), (1, 1));
 }

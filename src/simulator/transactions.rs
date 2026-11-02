@@ -54,7 +54,9 @@ enum Operation {
         crate::protocol::fees::FeeMessage,
         crate::rpc::methods::ContextConfig,
     ),
-    Submit(SignedTransaction, Value),
+    Submit(SignedTransaction, Value, std::sync::Arc<crate::cases::Hold>),
+    Register,
+    Change(Option<crate::cases::Arm>),
     Statuses(Vec<String>, bool),
     Lookup(String, LookupConfig),
 }
@@ -73,6 +75,9 @@ pub(crate) struct Owner {
     clock: Clock,
     started: Instant,
     state: crate::protocol::state::ProtocolState,
+    binding: crate::cases::Binding,
+    policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
+    holds: std::sync::Arc<tokio::sync::Semaphore>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
 }
 impl Transactions {
@@ -81,6 +86,7 @@ impl Transactions {
         writer: WriterHandle,
         started: Instant,
         state: crate::protocol::state::ProtocolState,
+        policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     ) -> (Self, Owner) {
         let (sender, receiver) = mpsc::channel(64);
         (
@@ -92,16 +98,20 @@ impl Transactions {
                 clock,
                 started,
                 state,
+                binding: Default::default(),
+                policy_status,
+                holds: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
                 credits: BTreeMap::new(),
             },
         )
     }
-    pub async fn execute(
+    pub(crate) async fn execute(
         &self,
         clock: &Clock,
         method: &str,
         params: &Value,
         reference: Value,
+        hold: std::sync::Arc<crate::cases::Hold>,
     ) -> Result<Value, RpcError> {
         let args = crate::rpc::methods::positional(params)?;
         let operation = match method {
@@ -160,7 +170,7 @@ impl Transactions {
                 })
                 .await
                 .map_err(|_| RpcError::internal())??;
-                Operation::Submit(signed, reference)
+                Operation::Submit(signed, reference, hold)
             }
             "getSignatureStatuses" => {
                 if args.is_empty() || args.len() > 2 {
@@ -212,6 +222,23 @@ impl Transactions {
             }
             _ => return Err(RpcError::unsupported("Unknown transaction operation")),
         };
+        self.job(operation).await
+    }
+    pub(crate) async fn register(&self) -> Result<crate::cases::Binding, RpcError> {
+        serde_json::from_value(self.job(Operation::Register).await?)
+            .map_err(|_| RpcError::internal())
+    }
+    pub(crate) async fn change(
+        &self,
+        args: Option<crate::cases::Arm>,
+    ) -> Result<crate::cases::Binding, RpcError> {
+        if let Some(args) = &args {
+            args.validate()?;
+        }
+        serde_json::from_value(self.job(Operation::Change(args)).await?)
+            .map_err(|_| RpcError::internal())
+    }
+    async fn job(&self, operation: Operation) -> Result<Value, RpcError> {
         let (reply, result) = oneshot::channel();
         self.sender
             .try_send(Job { operation, reply })
@@ -272,6 +299,7 @@ impl Owner {
         &mut self,
         signed: SignedTransaction,
         reference: Value,
+        hold: std::sync::Arc<crate::cases::Hold>,
     ) -> Result<Value, RpcError> {
         let signature = signed.signature.clone();
         let key = signature.clone();
@@ -323,6 +351,26 @@ impl Owner {
                 message: "Pending lifecycle capacity is exhausted".into(),
                 data: Some(json!({"code":"capacity_exceeded"})),
             });
+        }
+        let binding: crate::cases::Binding = serde_json::from_value(reference["binding"].clone())
+            .map_err(|_| RpcError::internal())?;
+        let selected =
+            binding.selects(&signature, reference["responds"].as_bool().unwrap_or(false));
+        if selected {
+            hold.reserve(
+                &self.holds,
+                binding
+                    .policy
+                    .as_ref()
+                    .expect("selected policy")
+                    .settings
+                    .max_held,
+            )?;
+            hold.reserve_evidence(
+                self.writer.clone(),
+                reference["batch_size"].as_u64().unwrap_or(1) as usize,
+            )
+            .await?;
         }
         let writer = self.writer.clone();
         let credits = tokio::task::spawn_blocking(move || {
@@ -388,10 +436,24 @@ impl Owner {
             self.started,
             json!({"signature":signature,"digest":signed.digest,"admission":"accepted","request":reference}),
         );
-        self.append(vec![attempt, accepted_fact])
-            .await
-            .map_err(|_| RpcError::internal())?;
+        let mut facts = vec![attempt, accepted_fact];
+        if selected {
+            facts.push(crate::lab::event("fault.response_loss_selected",self.started,json!({"signature":signature,"request":reference,"policy":binding.policy,"consumed":true})));
+        }
+        self.append(facts).await.map_err(|_| RpcError::internal())?;
         self.credits.insert(signature.clone(), credits);
+        if selected && hold.deadline().is_none() && !hold.abort.is_cancelled() {
+            hold.record(&self.writer,self.started,"fault.withholding_started",vec![json!({"request":reference,"signature":signature,"hold_ms":binding.policy.as_ref().expect("selected policy").settings.hold_ms})]).await.map_err(|_|RpcError::internal())?;
+            hold.selected(
+                binding
+                    .policy
+                    .as_ref()
+                    .expect("selected policy")
+                    .settings
+                    .hold_ms,
+            );
+        }
+
         Ok(json!(signature))
     }
     async fn advance_due(
@@ -518,7 +580,41 @@ impl Owner {
                 let value = valid.then_some(fee);
                 Ok(json!({"context":{"slot":view.slot},"value":value}))
             }
-            Operation::Submit(signed, reference) => self.submit(signed, reference).await,
+            Operation::Submit(signed, reference, hold) => {
+                self.submit(signed, reference, hold).await
+            }
+            Operation::Register => {
+                self.binding.registration_seq = self
+                    .binding
+                    .registration_seq
+                    .checked_add(1)
+                    .ok_or_else(RpcError::internal)?;
+                serde_json::to_value(&self.binding).map_err(|_| RpcError::internal())
+            }
+            Operation::Change(args) => {
+                let seq = self
+                    .binding
+                    .registration_seq
+                    .checked_add(1)
+                    .ok_or_else(RpcError::internal)?;
+                let binding = crate::cases::Binding {
+                    registration_seq: seq,
+                    policy: args.map(|settings| crate::cases::Policy {
+                        revision: seq,
+                        settings,
+                    }),
+                };
+                self.append(vec![crate::lab::event(
+                    "case.changed",
+                    self.started,
+                    json!({"binding":binding}),
+                )])
+                .await
+                .map_err(|_| RpcError::internal())?;
+                self.binding = binding.clone();
+                self.policy_status.send_replace(binding.clone());
+                serde_json::to_value(binding).map_err(|_| RpcError::internal())
+            }
             Operation::Statuses(signatures, history) => {
                 let processed = self.clock.view_at(at, Commitment::Processed);
                 let finalized = self.clock.view_at(at, Commitment::Finalized);

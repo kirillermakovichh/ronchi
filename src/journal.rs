@@ -3,6 +3,7 @@
 mod budget;
 pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
 mod nonces;
+mod response_loss;
 mod store;
 mod transactions;
 pub use transactions::{TransactionPhase, TransactionRecord};

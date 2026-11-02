@@ -135,7 +135,7 @@ impl Budget {
             let growth = add(
                 add(
                     bytes.div_ceil(account.page_size - 128),
-                    mul(encoded.len() as u64, 10)?,
+                    mul(encoded.len() as u64, 12)?,
                 )?,
                 16,
             )?;
