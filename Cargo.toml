@@ -24,8 +24,8 @@ bytes = "1"
 bs58 = "0.5"
 sha2 = "0.11"
 base64 = "0.22"
-solana-transaction = { version = "6.0.0", features = ["wincode", "verify", "serde"] }
-solana-message = { version = "6.0.0", features = ["wincode", "serde"] }
+solana-transaction = { version = "=6.0.0", features = ["wincode", "verify", "serde"] }
+solana-message = { version = "=6.0.0", features = ["wincode", "serde"] }
 wincode = "0.6"
 getrandom = "0.4"
 libc = "0.2"

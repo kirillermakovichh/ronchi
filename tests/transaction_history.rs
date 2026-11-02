@@ -662,3 +662,101 @@ async fn acceptance_projection_failure_rolls_back_signed_identity_and_attempt() 
         ));
     }
 }
+
+/// SIMD-0385 wire assembled without the production codec.
+fn signed_v1(hash: &str, seed: u8) -> (String, Vec<u8>) {
+    let signer = SigningKey::from_bytes(&[seed; 32]);
+    let mut message = vec![0x81, 1, 0, 0];
+    message.extend_from_slice(&0u32.to_le_bytes());
+    message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+    message.extend_from_slice(&[0, 1]); // instruction count, address count
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    let signature = signer.sign(&message).to_bytes();
+    let mut wire = message;
+    wire.extend_from_slice(&signature);
+    (bs58::encode(signature).into_string(), wire)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn independent_three_format_binary_roundtrips_and_client_version_limits() {
+    for version in [-1, 0, 1] {
+        let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+        let hash = server.hash().await;
+        let (signature, wire) = if version == 1 {
+            signed_v1(&hash, 21)
+        } else {
+            signed(&hash, 21, version == 0)
+        };
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        assert_eq!(
+            server
+                .call(
+                    "sendTransaction",
+                    json!([bs58::encode(&wire).into_string(),{"skipPreflight":true}])
+                )
+                .await["result"],
+            signature
+        );
+        server.time.advance(Duration::from_secs(6)).unwrap();
+        server.phase(&signature, Phase::Finalized).await;
+        for encoding in ["base64", "base58"] {
+            let reply = server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"encoding":encoding,"maxSupportedTransactionVersion":1}]),
+                )
+                .await;
+            let bytes = reply["result"]["transaction"][0].as_str().unwrap();
+            let decoded = if encoding == "base64" {
+                STANDARD.decode(bytes).unwrap()
+            } else {
+                bs58::decode(bytes).into_vec().unwrap()
+            };
+            assert_eq!(decoded, wire);
+        }
+        if version >= 0 {
+            assert_eq!(
+                server.call("getTransaction", json!([signature])).await["error"]["code"],
+                -32015
+            );
+        }
+        if version == 1 {
+            assert_eq!(
+                server
+                    .call(
+                        "getTransaction",
+                        json!([signature,{"maxSupportedTransactionVersion":0}])
+                    )
+                    .await["error"]["code"],
+                -32015
+            );
+            let reply = server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"maxSupportedTransactionVersion":1}]),
+                )
+                .await;
+            assert_eq!(reply["result"]["version"], 1);
+            assert_eq!(
+                reply["result"]["transaction"]["message"]["recentBlockhash"],
+                hash
+            );
+            assert!(reply["result"]["transaction"]["message"]["transactionConfig"].is_object());
+            assert_eq!(reply["result"]["transaction"]["signatures"][0], signature);
+        }
+        let mut trailing = wire.clone();
+        trailing.push(0);
+        assert_eq!(
+            server.call("sendTransaction", send(&trailing)).await["error"]["code"],
+            -32602
+        );
+        assert!(server.stop(false).await);
+        assert_eq!(
+            server.record(&signature).await.unwrap().wire_base64,
+            STANDARD.encode(wire)
+        );
+    }
+}

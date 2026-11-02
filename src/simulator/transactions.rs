@@ -426,19 +426,10 @@ impl Owner {
                 }) else {
                     return Ok(Value::Null);
                 };
-                if record.version >= 0
-                    && cfg
-                        .max_supported_transaction_version
-                        .is_none_or(|max| i16::from(max) < record.version)
-                {
-                    return Err(RpcError {
-                        code: -32015,
-                        message:
-                            "Transaction version exceeds the requesting client's declared support"
-                                .into(),
-                        data: Some(json!({"transactionVersion":record.version})),
-                    });
-                }
+                let version = crate::protocol::negotiate_version(
+                    record.version,
+                    cfg.max_supported_transaction_version,
+                )?;
                 let wire = record.wire_base64.clone();
                 let encoding = cfg.encoding.unwrap_or_else(|| "json".into());
                 let transaction = tokio::task::spawn_blocking(move || {
@@ -447,10 +438,8 @@ impl Owner {
                 .await
                 .map_err(|_| RpcError::internal())??;
                 let mut result = json!({"slot":record.processed_slot,"blockTime":null,"meta":null,"transaction":transaction});
-                if record.version >= 0 {
-                    result["version"] = json!(record.version);
-                } else if cfg.max_supported_transaction_version.is_some() {
-                    result["version"] = json!("legacy");
+                if let Some(version) = version {
+                    result["version"] = version;
                 }
                 Ok(result)
             }

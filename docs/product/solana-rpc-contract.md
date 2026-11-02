@@ -93,8 +93,10 @@ Simulator status success describes controlled progression, not program execution
 
 The selected official modular codec is `solana-transaction 6.0.0` with wincode.
 The current verified HTTP fixtures cover legacy and v0, base58/base64 submission, binary round trips, JSON lookup, and client version negotiation.
-V1 binary decoding uses the selected codec, but its independent fixture matrix remains task 6.
-V1 JSON, `jsonParsed`, lookup-table state, fee coverage, and durable nonce histories remain task 6.
+Independent manually assembled v1 wire fixtures also verify signature identity, binary round trips, version negotiation, and JSON lookup.
+V1 JSON uses `recentBlockhash` and `transactionConfig`, matching the [official Agave UI types](https://github.com/anza-xyz/agave/blob/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/transaction-status-client-types/src/lib.rs).
+Wire layout and bounds use official Solana SDK revision `3904641b3dbc94221bf7dc84042bb9acf2b0280a` (modular crates 6.0.0).
+`jsonParsed`, lookup-table state, fee coverage, and durable nonce histories remain subsequent task-6 slices.
 Missing nonce state returns a capability error; it does not use recent-hash expiry.
 These gaps do not narrow the accepted format scope below.
 Response-loss policy remains task 7.

@@ -111,13 +111,12 @@ pub fn encode_lookup(wire: &str, encoding: &str) -> Result<Value, RpcError> {
         "base58" => Ok(json!([bs58::encode(&bytes).into_string(), "base58"])),
         "json" => {
             let tx = decode_wire(&bytes)?;
-            if matches!(tx.message, VersionedMessage::V1(_)) {
-                return Err(RpcError::unsupported(
-                    "The v1 JSON projection is not verified by this partial profile; select base64",
-                ));
-            }
             let header = tx.message.header();
             let mut message = json!({"header":{"numRequiredSignatures":header.num_required_signatures,"numReadonlySignedAccounts":header.num_readonly_signed_accounts,"numReadonlyUnsignedAccounts":header.num_readonly_unsigned_accounts},"accountKeys":tx.message.static_account_keys().iter().map(ToString::to_string).collect::<Vec<_>>(),"recentBlockhash":tx.message.recent_blockhash().to_string(),"instructions":tx.message.instructions().iter().map(|ix|json!({"programIdIndex":ix.program_id_index,"accounts":ix.accounts,"data":bs58::encode(&ix.data).into_string()})).collect::<Vec<_>>()});
+            if let VersionedMessage::V1(v1) = &tx.message {
+                message["transactionConfig"] =
+                    serde_json::to_value(v1.config).map_err(|_| RpcError::internal())?;
+            }
             if let VersionedMessage::V0(v0) = &tx.message {
                 message["addressTableLookups"]=json!(v0.address_table_lookups.iter().map(|lookup|json!({"accountKey":lookup.account_key.to_string(),"writableIndexes":lookup.writable_indexes,"readonlyIndexes":lookup.readonly_indexes})).collect::<Vec<_>>());
             }
@@ -130,4 +129,20 @@ pub fn encode_lookup(wire: &str, encoding: &str) -> Result<Value, RpcError> {
         )),
         _ => Err(RpcError::params("Unsupported getTransaction encoding")),
     }
+}
+
+/// Legacy-only is the RPC default when the client omits version support.
+pub fn negotiate_version(version: i16, maximum: Option<u8>) -> Result<Option<Value>, RpcError> {
+    if version >= 0 && maximum.is_none_or(|max| i16::from(max) < version) {
+        return Err(RpcError {
+            code: -32015,
+            message: "Transaction version exceeds the requesting client's declared support".into(),
+            data: Some(json!({"transactionVersion":version})),
+        });
+    }
+    Ok(if version >= 0 {
+        Some(json!(version))
+    } else {
+        maximum.map(|_| json!("legacy"))
+    })
 }

@@ -121,6 +121,24 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 5. **Scope:** Medium; split by format if needed. **Likely files:** `src/protocol/formats.rs`, `src/protocol/lifetimes.rs`, `src/rpc/fees.rs`, `tests/format_matrix.rs`, `tests/fixtures/`.
 - **Source:** [Formats and encodings](../docs/product/solana-rpc-contract.md#transaction-formats-and-encodings).
 
+#### 6a. Formats and encodings
+
+- [x] Verify independent legacy/v0/v1 signed wire fixtures, base58/base64 round trips, malformed input, and client version limits with pinned official codecs.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (48 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. The new HTTP history uses manually assembled signed v1 wire and legacy/v0 fixtures, verifies both binary encodings and client version errors, rejects trailing bytes, and reopens retained bytes. Code review checked codec limits, identity, and negotiation. Solana modular crates are pinned to `=6.0.0`.
+
+#### 6b. Lookup tables and JSON
+
+- [ ] Resolve explicit local lookup state in protocol order; retain context; serialize JSON/parsed instructions and unknown-instruction fallback without inventing state.
+
+#### 6c. Fee queries
+
+- [ ] Quote fees through HTTP using an explicit version-aware local model, lifetime/context checks, and bounded decoding.
+
+#### 6d. Durable nonce
+
+- [ ] Preserve explicit nonce state and atomic advancement; verify nonce lifetime, retries, competing identities, missing state, and file-backed persistence.
+
 ### 7. Continuing Case and response loss
 
 - [ ] **Accept:** Bind policy in shared registration order, including batches; apply durable once-per-identity response loss with the 20-second hold.
