@@ -1,4 +1,5 @@
 //! Signed wire decoding is isolated from simulator state and RPC transport.
+pub mod fees;
 mod parsed;
 pub mod state;
 use crate::rpc::RpcError;

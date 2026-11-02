@@ -135,7 +135,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 6c. Fee queries
 
-- [ ] Quote fees through HTTP using an explicit version-aware local model, lifetime/context checks, and bounded decoding.
+- [x] Quote fees through HTTP using an explicit version-aware local model, lifetime/context checks, and bounded decoding.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (53 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. HTTP tests cover all message versions, context/lifetime, malformed input, unsupported parameters, priority rounding, default CU allocation, duplicate budgets, v1 fixed priority, and ignored v1 budget instructions. Self-review checked bounded decode, saturating arithmetic, state authority, and the quote/execution distinction.
 
 #### 6d. Durable nonce
 

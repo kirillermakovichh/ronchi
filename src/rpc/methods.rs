@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct ContextConfig {
+pub(crate) struct ContextConfig {
     #[serde(default)]
     pub commitment: Option<Commitment>,
     pub min_context_slot: Option<u64>,

@@ -96,7 +96,7 @@ The current verified HTTP fixtures cover legacy and v0, base58/base64 submission
 Independent manually assembled v1 wire fixtures also verify signature identity, binary round trips, version negotiation, and JSON lookup.
 V1 JSON uses `recentBlockhash` and `transactionConfig`, matching the [official Agave UI types](https://github.com/anza-xyz/agave/blob/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/transaction-status-client-types/src/lib.rs).
 Wire layout and bounds use official Solana SDK revision `3904641b3dbc94221bf7dc84042bb9acf2b0280a` (modular crates 6.0.0).
-Fee coverage and durable nonce histories remain subsequent task-6 slices.
+Durable nonce histories remain the next task-6 slice.
 Missing nonce state returns a capability error; it does not use recent-hash expiry.
 These gaps do not narrow the accepted format scope below.
 Response-loss policy remains task 7.
@@ -235,6 +235,18 @@ In Surfpool mode, direct Read-through remains disabled; Surfpool's datasource st
 
 Provide local `getFeeForMessage` for messages covered by the format contract.
 Use an explicit fee model compatible with the selected protocol profile and its version-specific message rules.
+The implemented local profile charges 5,000 lamports per required transaction signature and per signature declared by Ed25519/secp256k1/secp256r1 precompile instructions.
+For legacy/v0, priority fee is `ceil(CU limit * micro-lamports per CU / 1,000,000)`.
+An explicit CU limit is capped at 1,400,000.
+The all-active default allocates 3,000 CU per non-migrating builtin and 200,000 per other instruction, capped at 1,400,000.
+Duplicate or malformed legacy compute-budget settings return an explicit parameter error.
+V1 uses its header's total priority fee in lamports; ComputeBudget instructions do not configure v1, even when their data is invalid.
+Arithmetic saturates at the protocol's unsigned 64-bit limit.
+The method accepts a canonical base64 message and optional commitment/`minContextSlot` configuration.
+Unavailable recent hashes return a null quote; missing required lookup state returns `state_unavailable`.
+The context uses the selected local commitment view.
+No transaction signature or client version negotiation parameter is required for this message query.
+Fee rules were checked against [Agave fee/budget code](https://github.com/anza-xyz/agave/tree/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/fee) and SIMD-0385 blob `8e9cd5ef29497711e9e50016833e72d6928bbaa7`.
 The result is a quote, not evidence that a fee was charged.
 The simulator does not deduct it from a real account balance.
 See the official [method contract](https://solana.com/docs/rpc/http/getfeeformessage).

@@ -18,8 +18,12 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-pub const TRANSACTION_METHODS: [&str; 3] =
-    ["sendTransaction", "getSignatureStatuses", "getTransaction"];
+pub const TRANSACTION_METHODS: [&str; 4] = [
+    "sendTransaction",
+    "getSignatureStatuses",
+    "getTransaction",
+    "getFeeForMessage",
+];
 const MAX_ACTIVE: usize = 128;
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -46,6 +50,10 @@ struct LookupConfig {
 }
 
 enum Operation {
+    Fee(
+        crate::protocol::fees::FeeMessage,
+        crate::rpc::methods::ContextConfig,
+    ),
     Submit(SignedTransaction, Value),
     Statuses(Vec<String>, bool),
     Lookup(String, LookupConfig),
@@ -97,6 +105,24 @@ impl Transactions {
     ) -> Result<Value, RpcError> {
         let args = crate::rpc::methods::positional(params)?;
         let operation = match method {
+            "getFeeForMessage" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(RpcError::params(
+                        "Expected a base64 message and optional context configuration",
+                    ));
+                }
+                let encoded = args[0]
+                    .as_str()
+                    .ok_or_else(|| RpcError::params("Expected a base64 message"))?
+                    .to_owned();
+                let cfg = crate::rpc::methods::config(args.get(1))?;
+                let message = tokio::task::spawn_blocking(move || {
+                    crate::protocol::fees::FeeMessage::decode(&encoded)
+                })
+                .await
+                .map_err(|_| RpcError::internal())??;
+                Operation::Fee(message, cfg)
+            }
             "sendTransaction" => {
                 if args.is_empty() || args.len() > 2 {
                     return Err(RpcError::params(
@@ -421,6 +447,22 @@ impl Owner {
     }
     async fn query(&mut self, operation: Operation, at: Duration) -> Result<Value, RpcError> {
         match operation {
+            Operation::Fee(message, cfg) => {
+                let view = self.clock.view_at(at, cfg.commitment.unwrap_or_default());
+                if cfg.min_context_slot.is_some_and(|slot| slot > view.slot) {
+                    return Err(RpcError {
+                        code: -32016,
+                        message: "Minimum context slot has not been reached".into(),
+                        data: Some(json!({"contextSlot":view.slot})),
+                    });
+                }
+                let fee = message.quote(&self.state, view.slot)?;
+                let value = self
+                    .clock
+                    .hash_height(&message.blockhash(), view)
+                    .map(|_| fee);
+                Ok(json!({"context":{"slot":view.slot},"value":value}))
+            }
             Operation::Submit(signed, reference) => self.submit(signed, reference).await,
             Operation::Statuses(signatures, history) => {
                 let processed = self.clock.view_at(at, Commitment::Processed);

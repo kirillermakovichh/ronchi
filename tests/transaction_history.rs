@@ -946,3 +946,155 @@ async fn lookup_warmup_bad_index_and_unknown_program_are_explicit() {
     assert_eq!(ix["accounts"][1], key(52));
     assert!(server.stop(false).await);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fee_quotes_use_message_versions_and_selected_lifetime_context_over_http() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    let hash = server.hash().await;
+    for version in [-1, 0, 1] {
+        let (_, wire) = if version == 1 {
+            signed_v1(&hash, 26)
+        } else {
+            signed(&hash, 26, version == 0)
+        };
+        let message = if version == 1 {
+            &wire[..wire.len() - 64]
+        } else {
+            &wire[65..]
+        };
+        let quote = server
+            .call("getFeeForMessage", json!([STANDARD.encode(message)]))
+            .await;
+        assert_eq!(quote["result"]["value"], 5000);
+        assert_eq!(quote["result"]["context"]["slot"], 0);
+    }
+    assert_eq!(
+        server.call("getFeeForMessage", json!(["!"])).await["error"]["code"],
+        -32602
+    );
+    let (_, wire) = signed(&hash, 26, false);
+    let message = STANDARD.encode(&wire[65..]);
+    assert_eq!(
+        server
+            .call("getFeeForMessage", json!([message,{"minContextSlot":1}]))
+            .await["error"]["code"],
+        -32016
+    );
+    assert_eq!(
+        server
+            .call("getFeeForMessage", json!([message,{"encoding":"base58"}]))
+            .await["error"]["code"],
+        -32602
+    );
+    server.time.advance(Duration::from_millis(60_400)).unwrap();
+    assert!(
+        server
+            .call(
+                "getFeeForMessage",
+                json!([message,{"commitment":"processed"}])
+            )
+            .await["result"]["value"]
+            .is_null()
+    );
+    assert_eq!(
+        server
+            .call(
+                "getFeeForMessage",
+                json!([message,{"commitment":"finalized"}])
+            )
+            .await["result"]["value"],
+        5000
+    );
+    assert!(server.stop(false).await);
+}
+
+fn budget_message(hash: &str, instructions: Vec<Vec<u8>>, version: i16, priority: u64) -> Vec<u8> {
+    let signer = SigningKey::from_bytes(&[27; 32]);
+    let program = bs58::decode("ComputeBudget111111111111111111111111111111")
+        .into_vec()
+        .unwrap();
+    let mut message = if version == 1 {
+        vec![0x81, 1, 0, 1]
+    } else if version == 0 {
+        vec![0x80, 1, 0, 1, 2]
+    } else {
+        vec![1, 0, 1, 2]
+    };
+    if version == 1 {
+        message.extend_from_slice(&3u32.to_le_bytes());
+        message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+        message.extend_from_slice(&[instructions.len() as u8, 2]);
+    }
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    message.extend_from_slice(&program);
+    if version == 1 {
+        message.extend_from_slice(&priority.to_le_bytes());
+    } else {
+        message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+        message.push(instructions.len() as u8);
+    }
+    for data in instructions {
+        message.extend_from_slice(&[1, 0]);
+        if version == 1 {
+            message.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        } else {
+            message.push(data.len() as u8);
+        }
+        message.extend(data);
+    }
+    if version == 0 {
+        message.push(0);
+    }
+    message
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fee_priority_rounding_duplicate_budget_and_v1_header_rules() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    let hash = server.hash().await;
+    let mut limit = vec![2];
+    limit.extend_from_slice(&100_001u32.to_le_bytes());
+    let mut price = vec![3];
+    price.extend_from_slice(&11u64.to_le_bytes());
+    for version in [-1, 0] {
+        let message = budget_message(&hash, vec![limit.clone(), price.clone()], version, 0);
+        assert_eq!(
+            server
+                .call("getFeeForMessage", json!([STANDARD.encode(message)]))
+                .await["result"]["value"],
+            5002
+        );
+        let duplicate = budget_message(&hash, vec![limit.clone(), limit.clone()], version, 0);
+        assert_eq!(
+            server
+                .call("getFeeForMessage", json!([STANDARD.encode(duplicate)]))
+                .await["error"]["code"],
+            -32602
+        );
+    }
+    let default = budget_message(&hash, vec![price.clone()], -1, 0);
+    assert_eq!(
+        server
+            .call("getFeeForMessage", json!([STANDARD.encode(default)]))
+            .await["result"]["value"],
+        5001
+    );
+    let ignored = budget_message(&hash, vec![vec![255]], 1, 9);
+    assert_eq!(
+        server
+            .call("getFeeForMessage", json!([STANDARD.encode(ignored)]))
+            .await["result"]["value"],
+        5009
+    );
+    let message = budget_message(&hash, vec![], 1, 123);
+    assert_eq!(
+        server
+            .call("getFeeForMessage", json!([STANDARD.encode(message)]))
+            .await["result"]["value"],
+        5123
+    );
+    assert_eq!(
+        server.call("getRecentPrioritizationFees", json!([])).await["error"]["data"]["code"],
+        "unsupported_capability"
+    );
+    assert!(server.stop(false).await);
+}
