@@ -51,6 +51,8 @@ A transport deadline can leave mutation effects unknown; inspect status before a
 Authenticated control routes are `GET /v1/labs/{id}/cases`, `POST /v1/labs/{id}/case/arm`, and `POST /v1/labs/{id}/case/disarm`.
 Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, and `signatures`.
 Unknown arm keys return a structured `invalid_argument` without changing policy.
+Disarm accepts an empty body or `{}` and rejects supplied settings.
+Transient control-queue capacity returns `state_conflict`; Journal failure returns a product error and fails the Lab.
 The CLI uses these routes and the same core mutation operation.
 `schema case.list`, `schema case.arm`, and `schema case.disarm` work offline.
 Status exposes `active_case`, `case_registration_seq`, and bounded `held_effects` with original policy revision and remaining real milliseconds.

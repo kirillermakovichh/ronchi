@@ -1,6 +1,6 @@
 # Cases and coverage
 
-Status: initial design contract with a separate candidate catalog. No runtime implementation has verified these Cases. Names, parameters, and YAML syntax are not stable APIs.
+Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. Other families and Surfpool response loss remain planned. Names, parameters, and YAML syntax are not stable APIs.
 This document owns Case scope and catalog status; [overview.md](overview.md) owns the overall product definition.
 
 ## Continuing Case model
@@ -63,7 +63,8 @@ It contains five failure families:
 | Stalled confirmation | Progress remains below the backend's expected commitment | `tx-confirmation-stalls`, `finality-delayed` |
 | Expired recent blockhash submission | A transaction is submitted with an expired hash; rebuilding and reconciliation behavior become observable | `tx-blockhash-expired` |
 
-These are accepted failure families with prototype defaults below, not implemented support or a release-order promise.
+These are accepted failure families with prototype defaults below, not a release-order promise.
+Family names alone do not advertise implementation; the verified claim and public catalog identify the implemented subset.
 The names remain illustrative identifiers for the specified variants.
 Do not infer another rejection code or terminal status from a name.
 The first reference incident remains `tx-response-lost` with the [Withdrawal Relayer](reference-application.md).
@@ -171,14 +172,15 @@ When the configured processing delay elapses, the status entry becomes an object
 The successful processing outcome is distinct from later confirmation levels.
 See the official [`getSignatureStatuses` contract](https://solana.com/docs/rpc/http/getsignaturestatuses).
 
-Standard RPC parameters and remaining status-response fields follow the [RPC contract](solana-rpc-contract.md); implementation verification is pending.
+Standard RPC parameters and status-response fields follow the [verified local RPC profile](solana-rpc-contract.md#verified-local-format-matrix).
 The prototype [Custom Case contract](custom-cases.md) exposes bounded primitive parameters.
 This default applies to simulator mode; Surfpool retains authority over its actual local execution result.
 
-### tx-response-lost Coverage Claim (design)
+### tx-response-lost Coverage Claim
 
-This is the first design Coverage Claim for the agreed Case behavior.
-It defines intended coverage and limitations; no runtime implementation has verified it yet.
+This claim records the verified simulator behavior and the accepted remaining mode boundary.
+The native CLI/control and HTTP histories described below verify the simulator implementation.
+Surfpool behavior remains a requirement for its later implementation, not a verified capability.
 
 | Area | Claim |
 | --- | --- |
@@ -187,16 +189,56 @@ It defines intended coverage and limitations; no runtime implementation has veri
 | Identity and repetition | [One response-loss Fault per affected identity for the lifetime of a Lab](#tx-response-lost-identity-and-repetition), with separate evidence for each submission attempt. |
 | RPC boundary | [Hold the affected request without a response for up to 20 seconds of real time, then terminate it without an HTTP or JSON-RPC response](#tx-response-lost-response-withholding). Observable client cancellation or disconnect can end the hold earlier. |
 | Simulator history | Retain acceptance independently of response loss. Follow the [configurable successful processing and confirmation schedule](#tx-response-lost-default-simulated-outcome), with default transitions at 2, 4, and 6 seconds of simulator time. |
-| Surfpool history | Surfpool owns transaction state and the actual local execution result. Ronchi can withhold an observed successful submission response; it does not force execution success or replace the backend's duplicate-handling result. |
+| Surfpool history (planned) | Surfpool owns transaction state and the actual local execution result. Ronchi can withhold an observed successful submission response; it does not force execution success or replace the backend's duplicate-handling result. |
 | Case changes | [Bind policy at request registration](#continuing-case-model). [Already held requests keep their original deadline](#tx-response-lost-case-switching). Preserve the Lab's record of affected transaction identities across reactivation. |
 | Required evidence | Received requests and signatures, selected Case and settings, the shared registration/control order, simulator acceptance or the local backend's acceptance response, applied Faults, RPC Boundary Results, and any observed lifecycle changes and later RPC actions. Each statement identifies its evidence source. |
-| Supported Findings | Explain observed acceptance, response withholding, and later status queries, transaction lookups, or resubmissions for the same signature. State what later status or transaction content the RPC boundary returned when that exchange was recorded. |
+| Intended Findings (task 9) | Explain observed acceptance, response withholding, and later status queries, transaction lookups, or resubmissions for the same signature. State what later status or transaction content the RPC boundary returned when that exchange was recorded. |
 | Verdict boundary | A base Investigation can be useful without a Verdict. A Verdict requires configured Checks and sufficient evidence; the [Reference Application](reference-application.md) can supply known intent correlation and application observations. |
 | Unavailable conclusions | RPC-only evidence does not establish a Client Outcome, final business-operation state, or shared intent between different signatures. Simulator state does not establish program execution, balance changes, or duplicate economic execution. |
 
 The accepted [RPC contract](solana-rpc-contract.md) defines format coverage, request behavior, Read-through, and the initial clock profile.
-Complete wire schemas, compatible backend versions, and runtime verification remain implementation work.
+The verified local format matrix covers legacy/v0/v1 and explicit nonce/lookup state.
+Backend-version compatibility and Surfpool runtime verification remain implementation work.
 Any missing required capability must be declared as unsupported or as a limit on the available conclusions.
+
+#### Verified implementation histories
+
+The runtime uses one bounded owner to order RPC registrations and Case changes.
+A batch binds one immutable policy; its elements select in index order.
+Only a new accepted signed identity with a response ID and matching signature filter can consume selection.
+A notification may create protocol state without consuming a Fault; an existing lifecycle is never treated as a new acceptance on retry.
+The SQLite ledger persists selected identities without eviction across disarm and reactivation.
+Acceptance, required signed bytes, and `fault.response_loss_selected` commit atomically.
+The implementation separately records `fault.withholding_started`, prepared source results, and `rpc.boundary` after actual transport closure.
+A committed selection without a later observation does not establish that withholding was observed.
+
+The default real hold is 20,000 ms; bounded settings can lower it.
+HTTP tests use explicit short profiles and an independent controlled simulator clock.
+A Rust-only scheduling pause establishes a no-Case registration before a later arm without relying on sleeps; no remote pause control exists.
+Tests read the socket to prove no headers/body arrive and then observe EOF.
+They cover independent 2/4/6 progression, concurrent retries, distinct signatures sharing a hash, signature filters, notifications, invalid/preflight errors, disarm/reactivation, and shorter/longer policy replacement.
+Batch tests verify two selected identities occupy one held transport, retain other processing evidence, and give each element a shared boundary effect.
+Capacity tests reject new admission without creating an identity and release the slot after observed peer closure.
+A real SQLite ledger-write failure rolls back acceptance and selection together without beginning a hold.
+Normal drain retains the original deadline; force cancellation preserves identity.
+A native process history stops while the transport is still held and verifies finalized normal shutdown versus interrupted force shutdown after completion evidence settles.
+Legacy/v0/v1 nonce histories retain exact bytes and advance the nonce once despite response loss and retry.
+
+Future evidence capacity is reserved before irreversible acceptance: one start record plus prepared-result and boundary records for every element.
+The hold slot remains owned until transport closes and its completion evidence settles.
+An ordinary Case-capacity error is separate from a fatal Journal error.
+The simulator does not execute programs, forward writes, infer a client timeout, or establish a business outcome.
+The Findings engine, Custom YAML engine, and MCP adapter remain their own tasks.
+
+Checkpoint B is reproducible with:
+
+```bash
+cargo test --locked --test lab_lifecycle checkpoint_b_native_http_loses_response_then_tracks_original_signature_without_restart -- --nocapture
+```
+
+That history starts a native Lab, arms a short explicit hold, sends an independently signed transaction over HTTP, observes EOF without a response, and queries the original signature until processed.
+It verifies unchanged Lab/process identity and reopens acceptance/selection/withholding/transport evidence after force stop.
+Client receipt remains `unknown` in Journal evidence; the test's socket observations do not create application or economic conclusions.
 
 ### RPC unavailability or timeout
 

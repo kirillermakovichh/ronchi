@@ -1628,3 +1628,6 @@ async fn response_loss_silence_retains_identity_and_autonomous_status() {
     }
     assert_eq!((started, ended), (1, 1));
 }
+
+#[path = "cases/response_loss.rs"]
+mod response_loss_cases;

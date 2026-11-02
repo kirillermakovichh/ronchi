@@ -1,7 +1,7 @@
 # Product baseline and development plan
 
-Status: all eight initial design outcomes are recorded. Runtime implementation and empirical validation remain pending.
-Current position: ready for the first development slice in [tasks/todo.md](todo.md).
+Status: all eight initial design outcomes are recorded. This file owns design decisions; [todo.md](todo.md) records runtime implementation and scoped verification.
+Current position: follow the next unchecked task in [tasks/todo.md](todo.md).
 Use the [implementation handoff](implementation-handoff.md) to start a coding session and follow the local commit workflow.
 
 This plan preserves the completed discussion topics and the implementation handoff.
@@ -19,7 +19,7 @@ The [open questions](../docs/open-questions.md) retain the unresolved and delibe
   - Recorded: [guidance boundary](../docs/product/overview.md#product-value) and [expected no-SDK result and usefulness criterion](../docs/product/workflows.md#first-no-sdk-investigation).
 - [x] **2. Exact behavior of the first Case.** Define `tx-response-lost` matching, repeated submissions, duration, recovery, and Case switching while requests are in flight.
   - Outcome: the first detailed Coverage Claim, including evidence requirements and limitations.
-  - Recorded: [first design Coverage Claim](../docs/product/cases.md#tx-response-lost-coverage-claim-design), refined by the accepted RPC contract in item 3. Runtime verification is still pending.
+  - Recorded: [Coverage Claim](../docs/product/cases.md#tx-response-lost-coverage-claim), refined by the accepted RPC contract in item 3. Task 7 records simulator runtime verification; Surfpool verification remains pending.
   - Recorded: [transaction identity and default repetition rules](../docs/product/cases.md#tx-response-lost-identity-and-repetition), including preservation of already applied response loss across reactivation within the same Lab. Detailed wire behavior requires implementation verification.
   - Recorded: [default successful simulated outcome and independent processing and confirmation progression](../docs/product/cases.md#tx-response-lost-default-simulated-outcome). The default schedule is null status before processing, then `processed`, `confirmed`, and `finalized` at 2-second intervals with `err: null`. Standard response fields follow the RPC contract.
   - Recorded: [response withholding for up to 20 seconds followed by transport termination without a response](../docs/product/cases.md#tx-response-lost-response-withholding). Transaction identity and lifecycle state survive request termination.

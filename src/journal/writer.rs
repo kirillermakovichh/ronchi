@@ -108,15 +108,19 @@ impl WriterHandle {
             }
         }
     }
+    /// Reserved future RPC evidence uses only the immutable events tree, not protocol projections.
     pub fn try_append_reserved(
         &self,
         event: &Event,
         reservation: TransitionReservation,
     ) -> Result<CommitReceipt, JournalError> {
-        let encoded = encode(std::slice::from_ref(event))?;
-        if encoded[0].len() > 4096 {
+        if !matches!(
+            event.kind.as_str(),
+            "rpc.response_prepared" | "rpc.boundary" | "fault.withholding_started"
+        ) {
             return Err(JournalError::InvalidInput);
         }
+        let encoded = encode(std::slice::from_ref(event))?;
         self.enqueue(encoded, Some(reservation.0))
     }
     pub fn try_append_transition(

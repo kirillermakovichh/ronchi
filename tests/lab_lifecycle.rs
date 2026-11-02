@@ -767,10 +767,226 @@ fn public_case_operations_preserve_lab_identity_and_reject_invalid_replacement()
     assert!(response.starts_with("HTTP/1.1 400"), "{response}");
     let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
     assert_eq!(value["error"]["code"], "invalid_argument");
+    assert_eq!(value["error"]["phase"], "case");
+    assert_eq!(value["error"]["retryable"], false);
+    assert!(value["error"]["recovery"].is_string());
     project.ok(&["down"]);
     assert_eq!(
         project.ok(&["status"])["result"]["active_case"],
         armed["result"]["active_case"]
     );
     error(project.run(&["case", "disarm"]), 5, "state_conflict");
+}
+
+#[test]
+fn checkpoint_b_native_http_loses_response_then_tracks_original_signature_without_restart() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use ed25519_dalek::{Signer, SigningKey};
+    fn rpc(address: SocketAddr, value: Value) -> Value {
+        let body = value.to_string();
+        let response = raw(
+            address,
+            format!(
+                "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+    }
+    let project = Project::new();
+    let ready = project.up();
+    let id = ready["lab_id"].clone();
+    let manifest = project.manifest();
+    let identity = manifest.process.clone();
+    let address = manifest.rpc_address.unwrap();
+    project.ok(&["case", "arm", "tx-response-lost", "--hold-ms", "180"]);
+    let hash = rpc(
+        address,
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash"}),
+    )["result"]["value"]["blockhash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let signer = SigningKey::from_bytes(&[57; 32]);
+    let mut message = vec![1, 0, 0, 1];
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    message.extend(bs58::decode(hash).into_vec().unwrap());
+    message.push(0);
+    let signature = signer.sign(&message).to_bytes();
+    let expected = bs58::encode(signature).into_string();
+    let mut wire = vec![1];
+    wire.extend_from_slice(&signature);
+    wire.extend(message);
+    let body=serde_json::json!({"jsonrpc":"2.0","id":2,"method":"sendTransaction","params":[STANDARD.encode(&wire),{"encoding":"base64","skipPreflight":true}]}).to_string();
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut reply = Vec::new();
+    stream.read_to_end(&mut reply).unwrap();
+    assert!(reply.is_empty());
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let response = rpc(
+            address,
+            serde_json::json!({"jsonrpc":"2.0","id":3,"method":"getSignatureStatuses","params":[[expected]]}),
+        );
+        if response["result"]["value"][0]["confirmationStatus"] == "processed" {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{response}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(project.ok(&["status"])["lab_id"], id);
+    assert_eq!(project.manifest().process, identity);
+    project.ok(&["down", "--force"]);
+    let path = Workspace::new(project.path())
+        .lab(&manifest.lab_id)
+        .unwrap()
+        .join("journal.sqlite");
+    let reader = JournalReader::open(&path).unwrap();
+    assert_eq!(
+        reader.snapshot(false).unwrap().state,
+        JournalState::Interrupted
+    );
+    assert!(reader.response_loss(&expected).unwrap().is_some());
+    assert_eq!(
+        reader.transaction(&expected).unwrap().unwrap().wire_base64,
+        STANDARD.encode(wire)
+    );
+    let facts: Vec<_> = (1..=reader.snapshot(false).unwrap().snapshot_seq)
+        .map(|seq| reader.event(seq).unwrap().unwrap())
+        .collect();
+    for kind in [
+        "transaction.accepted",
+        "fault.response_loss_selected",
+        "fault.withholding_started",
+    ] {
+        assert!(facts.iter().any(|event| event.kind == kind));
+    }
+    assert!(facts.iter().any(|event| event.kind == "rpc.boundary"
+        && event.data["transport"] == "withholding_deadline"
+        && event.data["client_receipt"] == "unknown"));
+}
+
+#[test]
+fn native_normal_and_force_stop_with_live_hold_finalize_or_interrupt_after_owned_evidence() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use ed25519_dalek::{Signer, SigningKey};
+    for force in [false, true] {
+        let project = Project::new();
+        project.up();
+        project.ok(&[
+            "case",
+            "arm",
+            "tx-response-lost",
+            "--hold-ms",
+            if force { "5000" } else { "1000" },
+        ]);
+        let manifest = project.manifest();
+        let address = manifest.rpc_address.unwrap();
+        let body =
+            serde_json::json!({"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash"}).to_string();
+        let response = raw(
+            address,
+            format!(
+                "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        let value: Value =
+            serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        let signer = SigningKey::from_bytes(&[58; 32]);
+        let mut message = vec![1, 0, 0, 1];
+        message.extend_from_slice(&signer.verifying_key().to_bytes());
+        message.extend(
+            bs58::decode(value["result"]["value"]["blockhash"].as_str().unwrap())
+                .into_vec()
+                .unwrap(),
+        );
+        message.push(0);
+        let signature = signer.sign(&message).to_bytes();
+        let expected = bs58::encode(signature).into_string();
+        let mut wire = vec![1];
+        wire.extend_from_slice(&signature);
+        wire.extend(message);
+        let body=serde_json::json!({"jsonrpc":"2.0","id":2,"method":"sendTransaction","params":[STANDARD.encode(wire),{"encoding":"base64","skipPreflight":true}]}).to_string();
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        stream
+            .write_all(
+                format!(
+                    "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let path = Workspace::new(project.path())
+            .lab(&manifest.lab_id)
+            .unwrap()
+            .join("journal.sqlite");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let reader = JournalReader::open(&path).unwrap();
+            if reader.response_loss(&expected).unwrap().is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            !project.ok(&["status"])["result"]["held_effects"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        project.ok(if force {
+            &["down", "--force"]
+        } else {
+            &["down"]
+        });
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
+        assert!(response.is_empty());
+        let reader = JournalReader::open(&path).unwrap();
+        assert_eq!(
+            reader.snapshot(false).unwrap().state,
+            if force {
+                JournalState::Interrupted
+            } else {
+                JournalState::Finalized
+            }
+        );
+        assert!(reader.transaction(&expected).unwrap().is_some());
+        assert!(reader.response_loss(&expected).unwrap().is_some());
+        if !force {
+            assert_eq!(
+                reader.transaction(&expected).unwrap().unwrap().stage,
+                ronchi::journal::TransactionPhase::Finalized
+            );
+        }
+        assert!(
+            (1..=reader.snapshot(false).unwrap().snapshot_seq)
+                .filter_map(|seq| reader.event(seq).unwrap())
+                .any(|event| event.kind == "rpc.boundary"
+                    && event.data["transport"]
+                        == if force {
+                            "cancelled"
+                        } else {
+                            "withholding_deadline"
+                        })
+        );
+    }
 }

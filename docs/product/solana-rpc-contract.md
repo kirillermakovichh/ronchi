@@ -55,7 +55,7 @@ This permits constant-time lifetime lookup without retaining unlimited clock his
 The HTTP request budget is 64 KiB and the batch maximum is 64 elements.
 Responses are capped at 256 KiB; requests have a 30-second ordinary deadline.
 One HTTP exchange uses one connection in this initial resource profile.
-Notifications execute without JSON-RPC responses; an all-notification exchange returns empty HTTP `204`.
+Notifications execute without JSON-RPC responses; an all-notification exchange returns empty HTTP `204` and never consumes response-loss selection.
 Mixed batches retain per-element IDs, errors, internal identities, and Journal records.
 Oversized or empty batches are rejected before dispatching elements.
 Malformed JSON uses `-32700`; invalid envelopes use `-32600`; invalid method parameters use `-32602`.
@@ -99,7 +99,7 @@ Wire layout and bounds use official Solana SDK revision `3904641b3dbc94221bf7dc8
 Durable nonce histories use the explicit local state and advancement rules below.
 Missing nonce state returns `state_unavailable`; it does not use recent-hash expiry.
 State-availability limits do not narrow the accepted format scope below.
-Response-loss policy remains task 7.
+Simulator response-loss policy is implemented under the [Case Coverage Claim](cases.md#tx-response-lost-coverage-claim).
 
 ### Local lookup state and JSON projection
 

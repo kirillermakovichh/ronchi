@@ -71,12 +71,33 @@ fn invalid() -> RpcError {
         data: None,
     }
 }
+/// In-process scheduling seam for deterministic HTTP histories. No remote control path.
+#[doc(hidden)]
+pub struct RegistrationPause(Arc<PauseState>);
+struct PauseState {
+    entered: CancellationToken,
+    released: CancellationToken,
+}
+impl RegistrationPause {
+    pub async fn registered(&self) {
+        self.0.entered.cancelled().await;
+    }
+    pub fn resume(&self) {
+        self.0.released.cancel();
+    }
+}
+impl Drop for RegistrationPause {
+    fn drop(&mut self) {
+        self.resume();
+    }
+}
 #[derive(Clone)]
 pub struct Rpc(Arc<State>);
 struct State {
     pub clock: Clock,
     writer: WriterHandle,
     ready: AtomicBool,
+    pause: Mutex<Option<Arc<PauseState>>>,
     holds: Arc<crate::cases::HoldPool>,
     policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     started: Instant,
@@ -120,6 +141,7 @@ impl Rpc {
             clock,
             writer,
             ready: AtomicBool::new(false),
+            pause: Default::default(),
             policy_status,
             holds,
             started,
@@ -139,6 +161,23 @@ impl Rpc {
     }
     pub fn case_status(&self) -> crate::cases::Binding {
         self.0.policy_status.borrow().clone()
+    }
+    #[doc(hidden)]
+    pub fn pause_next_registration(&self) -> RegistrationPause {
+        let state = Arc::new(PauseState {
+            entered: CancellationToken::new(),
+            released: CancellationToken::new(),
+        });
+        if let Some(previous) = self
+            .0
+            .pause
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace(state.clone())
+        {
+            previous.released.cancel();
+        }
+        RegistrationPause(state)
     }
     pub fn set_ready(&self, ready: bool) {
         self.0.ready.store(ready, Ordering::SeqCst);
@@ -233,8 +272,10 @@ impl Rpc {
 }
 impl Exchange {
     pub(crate) async fn finish(&self, transport: &str) {
-        self.hold.abort.cancel();
-        let held = self.hold.deadline().is_some();
+        let held = self.hold.close();
+        if held {
+            self.hold.observed_committed.cancelled().await;
+        }
         let values =
             std::mem::take(&mut *self.boundaries.lock().unwrap_or_else(|e| e.into_inner()));
         let values = values
@@ -244,7 +285,9 @@ impl Exchange {
                 if held {
                     value["shared_withholding"] = json!(true);
                     value["prepared_response"] = value["rpc_response"].clone();
-                    value["rpc_response"] = json!("no_transport_response");
+                    if value["rpc_response"] != "notification_no_response" {
+                        value["rpc_response"] = json!("no_transport_response");
+                    }
                 }
                 value["client_receipt"] = json!("unknown");
                 value
@@ -376,6 +419,17 @@ impl Exchange {
         if let Err(failure) = self.rpc.record("rpc.registered", received).await {
             return failures(&prepared, batch, failure);
         }
+        let pause = self
+            .rpc
+            .0
+            .pause
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(pause) = pause {
+            pause.entered.cancel();
+            pause.released.cancelled().await;
+        }
         let mut decisions = Vec::new();
         let mut boundaries = Vec::new();
         for (reference, item, valid) in prepared {
@@ -482,7 +536,20 @@ impl Exchange {
                 }
             }
         }
-        if let Err(failure) = self.rpc.record("rpc.response_prepared", decisions).await {
+        let recorded = if self.hold.deadline().is_some() {
+            self.hold
+                .record(
+                    &self.rpc.0.writer,
+                    self.rpc.0.started,
+                    "rpc.response_prepared",
+                    decisions,
+                )
+                .await
+        } else {
+            self.rpc.record("rpc.response_prepared", decisions).await
+        };
+        if let Err(failure) = recorded {
+            self.rpc.0.writer.fail_fatal();
             let responses: Vec<_> = responses
                 .into_iter()
                 .map(|value| error(value["id"].clone(), failure.clone()))

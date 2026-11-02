@@ -76,7 +76,7 @@ pub async fn serve(
                             exchange.hold.started.cancelled().await;
                             let deadline=exchange.hold.deadline().expect("started hold has deadline");
                             let mut byte=[0u8;1];
-                            tokio::select!{_ = tokio::time::sleep_until(deadline)=>"withholding_deadline",result=peer.peek(&mut byte)=>match result{Ok(0)=>"peer_closed_while_withheld",Ok(_)=>"unexpected_data_while_withheld",Err(_)=>"transport_failed_while_withheld"}}
+                            tokio::select!{_ = tokio::time::sleep_until(deadline)=>"withholding_deadline",result=peer.peek(&mut byte)=>match result{Ok(0)=>"peer_closed_while_withheld",Ok(_)=>{tokio::time::sleep_until(deadline).await;"withholding_deadline"},Err(_)=>"transport_failed_while_withheld"}}
                         };
                         tokio::select!{outcome=&mut future=>outcome,outcome=held=>outcome}};
                         drop(peer);

@@ -149,7 +149,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 7. Continuing Case and response loss
 
-- [ ] **Accept:** Bind policy in shared registration order, including batches; apply durable once-per-identity response loss with the 20-second hold.
+- [x] **Accept:** Bind policy in shared registration order, including batches; apply durable once-per-identity response loss with the 20-second hold.
 - **Verify:** Actual HTTP silence/termination, duplicates, cancellation, batch effects, disarm/reactivation, and Case replacement while lifecycle lookup continues.
 - **Dependencies:** 5. **Scope:** Medium. **Likely files:** `src/cases.rs`, `src/cases/response_loss.rs`, `src/rpc/batch.rs`, `tests/response_loss.rs`, `tests/case_binding.rs`.
 - **Source:** [Cases and coverage](../docs/product/cases.md).
@@ -168,12 +168,19 @@ Checkpoints record results and do not require another approval interview.
 
 #### 7c. Histories and Checkpoint B
 
-- [ ] Verify retries, races, switching, batches, capacity, failures, cancellation/shutdown, and a reproducible response-loss/status workflow.
+- [x] Verify retries, races, switching, batches, capacity, failures, cancellation/shutdown, and a reproducible response-loss/status workflow.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (73 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Raw HTTP histories prove silence/EOF, concurrent retries, distinct signatures sharing a hash, retained eligibility across reactivation, a no-Case binding paused before later arm, unchanged deadlines across shorter/longer replacements, batch index order and shared boundary effects, notifications/validation/preflight nonselection, capacity rejection/release, real SQLite ledger rollback, and normal/force shutdown. A native held-shutdown process history also verifies clean finalization after normal drain and interrupted evidence after force stop. Legacy/v0/v1 nonce histories advance once despite withheld responses and retries.
+- **Self-review:** Scoped review checked ownership, receipt cancellation, start-versus-peer-close ordering, all required held evidence reservations, strict control errors, immutable policy snapshots, and durable non-evicting identity state. The start receipt remains owned after the HTTP waiter ends. Prepared-result recording failure is fatal. No confirmed issue remains in this slice.
+- **Boundary:** Simulator Case only. Surfpool response loss, Findings, Custom YAML, MCP, and additional families remain assigned to later tasks. Native verification is on the current macOS host; no Linux claim follows.
 
 ### Checkpoint B
 
-- [ ] A real HTTP client submits, loses the response, and queries the original signature without restarting the Lab.
-- [ ] Record format gaps explicitly; the accepted full matrix remains required for a full support claim.
+- [x] A real HTTP client submits, loses the response, and queries the original signature without restarting the Lab.
+- [x] Record format gaps explicitly; the accepted full matrix remains required for a full support claim.
+
+- **Observed:** `cargo test --locked --test lab_lifecycle checkpoint_b_native -- --nocapture` passed. An independently signed legacy fixture lost its HTTP response, then the same native Lab returned `processed` for the original signature. Lab/process identity stayed unchanged. Force stop retained an interrupted Journal with acceptance, selection, observed withholding, actual transport completion, exact bytes, and unknown client receipt.
+- **Formats and conclusions:** The task-6 matrix remains required and verified; response-loss nonce histories also cover legacy/v0/v1. Missing account/slot-hash state remains explicit. No new format exclusion was introduced. RPC-only facts do not establish business intent, execution, or a Client Outcome. The [Coverage Claim](../docs/product/cases.md#tx-response-lost-coverage-claim) records scope and reproduction. Task 8 is next.
 
 ### 8. Bounded Investigation queries
 

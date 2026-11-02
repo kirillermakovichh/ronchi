@@ -158,7 +158,9 @@ Status reads that projection after process exit without scanning event history.
 
 Schema 4 adds a non-evicting response-loss ledger keyed by the accepted first signature.
 Selection events and acceptance commit in one transaction; transport observation follows separately.
-Held exchanges reserve bounded start/boundary writes before acceptance and keep those credits until transport completion.
+Held exchanges reserve one start write plus prepared-result and boundary writes per element before acceptance.
+They keep those credits until transport completion evidence settles.
+The observed start receipt is owned independently of the HTTP response waiter; boundary recording waits for it.
 
 Schema 3 adds indexed nonce versions keyed by account and committed event sequence.
 The startup fixture seeds nonce versions; a processed transition advances its nonce in the same SQLite transaction.
@@ -206,7 +208,9 @@ All outstanding admitted groups have additional disk reservations.
 SQLite logical pages not yet allocated in the database file count as checkpoint-growth liability, even while their content exists in WAL.
 Transaction admission reserves three future lifecycle writes before committing acceptance.
 Each future credit covers 256 dirty WAL frames, 32 new pages, and SHM/allocation rounding.
-Future events are capped at 4 KiB; unused credits are released after terminal progression or owned shutdown.
+Future lifecycle events are capped at 4 KiB.
+Reserved RPC start/prepared/boundary evidence uses only the events tree and retains the normal 64 KiB event bound.
+Unused credits are released after terminal progression or owned transport completion/shutdown.
 These conservative bounds can reject work before the directory reaches its quota.
 
 Admission scans actual files and checks filesystem available space under the same accounting lock used for commits and checkpoints.

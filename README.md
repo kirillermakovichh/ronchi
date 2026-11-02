@@ -5,7 +5,7 @@
 An open-source, local-first reliability lab for blockchain applications.
 Ronchi is designed to show how a real backend handles controlled Solana RPC failures through an explanatory Timeline and evidence-linked Findings.
 
-**Project stage:** native lifecycle prototype. Persistent `up`, `status`, and `down` controls use a bounded durable Journal. Seven local bootstrap RPC methods are implemented. Durable transaction admission, lifecycle lookup, legacy/v0/v1 encodings, explicit lookup/nonce state, parsed projection, and local fee quotes are implemented. Cases and the dashboard remain unimplemented. The API is not stable.
+**Project stage:** native lifecycle prototype. Persistent `up`, `status`, and `down` controls use a bounded durable Journal. Seven local bootstrap RPC methods are implemented. Durable transaction admission, lifecycle lookup, legacy/v0/v1 encodings, explicit lookup/nonce state, parsed projection, and local fee quotes are implemented. Simulator `tx-response-lost` and continuing Case controls are implemented. Other Cases and the dashboard remain unimplemented. The API is not stable.
 
 Build with `cargo build --locked`.
 Use `cargo run --locked -- --help` for available commands.

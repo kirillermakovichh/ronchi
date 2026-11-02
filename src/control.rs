@@ -201,6 +201,30 @@ pub async fn request(
     })
 }
 
+fn case_failure(id: String, error: LabError) -> (StatusCode, Json<serde_json::Value>) {
+    let status = match error.exit {
+        5 => StatusCode::CONFLICT,
+        3 | 6 => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    let details = crate::OperationError {
+        code: error.code.into(),
+        message: error.message,
+        phase: "case".into(),
+        retryable: false,
+        effects: if error.exit == 6 {
+            "unknown"
+        } else {
+            error.effects
+        }
+        .into(),
+        recovery: "Inspect ronchi status and case list before another mutation".into(),
+    };
+    (
+        status,
+        Json(serde_json::json!({"contract_version":1,"lab_id":id,"error":details})),
+    )
+}
 async fn case_apply(
     control: Control,
     id: String,
@@ -209,7 +233,10 @@ async fn case_apply(
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     authorize(&control, &id, &headers)?;
     if control.snapshot().state != crate::lab::Lifecycle::Ready {
-        return Err(StatusCode::CONFLICT);
+        return Ok(case_failure(
+            id,
+            LabError::conflict("Case changes require a ready Lab"),
+        ));
     }
     let rpc = control
         .cases
@@ -226,15 +253,7 @@ async fn case_apply(
             StatusCode::OK,
             Json(serde_json::json!({"contract_version":1,"lab_id":id,"result":binding})),
         ),
-        Err(error) => {
-            let error = crate::cases::lab_error(error);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(
-                    serde_json::json!({"contract_version":1,"lab_id":id,"error":{"code":error.code,"message":error.message,"effects":"none"}}),
-                ),
-            )
-        }
+        Err(error) => case_failure(id, crate::cases::lab_error(error)),
     })
 }
 async fn case_arm(
@@ -246,19 +265,28 @@ async fn case_arm(
     authorize(&control, &id, &headers)?;
     match args {
         Ok(Json(args)) => case_apply(control, id, headers, Some(args)).await,
-        Err(_) => Ok((
-            StatusCode::BAD_REQUEST,
-            Json(
-                serde_json::json!({"contract_version":1,"lab_id":id,"error":{"code":"invalid_argument","message":"Invalid Case JSON or unknown settings","effects":"none"}}),
-            ),
+        Err(_) => Ok(case_failure(
+            id,
+            LabError::invalid("Invalid Case JSON or unknown settings"),
         )),
     }
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DisarmArgs {}
 async fn case_disarm(
     State(control): State<Control>,
     Path(id): Path<String>,
     headers: HeaderMap,
+    body: Bytes,
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    if !body.is_empty() && serde_json::from_slice::<DisarmArgs>(&body).is_err() {
+        return Ok(case_failure(
+            id,
+            LabError::invalid("Disarm accepts no settings"),
+        ));
+    }
     case_apply(control, id, headers, None).await
 }
 async fn case_list(
@@ -289,9 +317,15 @@ pub async fn case_request(
         ))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
-        .body(Full::new(Bytes::from(serde_json::to_vec(&args).map_err(
-            |_| LabError::internal("Cannot encode Case operation"),
-        )?)))
+        .body(Full::new(Bytes::from(
+            serde_json::to_vec(
+                &args
+                    .as_ref()
+                    .map(|args| serde_json::to_value(args).expect("typed arguments serialize"))
+                    .unwrap_or_else(|| serde_json::json!({})),
+            )
+            .map_err(|_| LabError::internal("Cannot encode Case operation"))?,
+        )))
         .map_err(|_| LabError::internal("Cannot construct Case operation"))?;
     let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
         .pool_max_idle_per_host(0)
@@ -320,6 +354,7 @@ pub async fn case_request(
             return Err(match code {
                 "invalid_argument" => LabError::invalid(message),
                 "unsupported_capability" => LabError::unsupported(message),
+                "state_conflict" => LabError::conflict(message),
                 _ => LabError::internal(message),
             });
         }

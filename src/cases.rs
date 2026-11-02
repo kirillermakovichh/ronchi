@@ -124,6 +124,7 @@ pub(crate) struct Hold {
     permit: Mutex<Option<OwnedSemaphorePermit>>,
     pub abort: CancellationToken,
     pub started: CancellationToken,
+    pub observed_committed: CancellationToken,
     credits: Mutex<Vec<crate::journal::TransitionReservation>>,
     deadline: Mutex<Option<tokio::time::Instant>>,
 }
@@ -170,7 +171,7 @@ impl Hold {
             return Ok(());
         }
         let credits = tokio::task::spawn_blocking(move || {
-            (0..count + 1)
+            (0..2 * count + 1)
                 .map(|_| writer.reserve_transition())
                 .collect::<Result<Vec<_>, _>>()
         })
@@ -211,10 +212,50 @@ impl Hold {
         }
         Ok(())
     }
-    pub fn selected(&self, hold_ms: u64) {
-        let mut deadline = self.deadline.lock().unwrap_or_else(|e| e.into_inner());
-        deadline.get_or_insert(tokio::time::Instant::now() + Duration::from_millis(hold_ms));
-        self.started.cancel();
+    pub async fn start(
+        &self,
+        writer: &crate::journal::WriterHandle,
+        started: std::time::Instant,
+        hold_ms: u64,
+        data: serde_json::Value,
+    ) -> Result<(), RpcError> {
+        let credit = {
+            let mut deadline = self.deadline.lock().unwrap_or_else(|e| e.into_inner());
+            if self.abort.is_cancelled() || deadline.is_some() {
+                return Ok(());
+            }
+            let credit = self
+                .credits
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .pop()
+                .ok_or_else(RpcError::internal)?;
+            *deadline = Some(tokio::time::Instant::now() + Duration::from_millis(hold_ms));
+            self.started.cancel();
+            credit
+        };
+        let event = crate::lab::event("fault.withholding_started", started, data);
+        let writer = writer.clone();
+        let result = async {
+            let receipt =
+                tokio::task::spawn_blocking(move || writer.try_append_reserved(&event, credit))
+                    .await
+                    .map_err(|_| RpcError::internal())?
+                    .map_err(|_| RpcError::internal())?;
+            receipt
+                .committed()
+                .await
+                .map_err(|_| RpcError::internal())?;
+            Ok(())
+        }
+        .await;
+        self.observed_committed.cancel();
+        result
+    }
+    pub fn close(&self) -> bool {
+        let deadline = self.deadline.lock().unwrap_or_else(|e| e.into_inner());
+        self.abort.cancel();
+        deadline.is_some()
     }
     pub fn deadline(&self) -> Option<tokio::time::Instant> {
         *self.deadline.lock().unwrap_or_else(|e| e.into_inner())
@@ -251,7 +292,11 @@ pub fn catalog() -> Vec<CatalogEntry> {
     }]
 }
 pub fn lab_error(error: RpcError) -> crate::lab::LabError {
-    if error.code == -32602 {
+    if error.data.as_ref().is_some_and(|data| {
+        data["code"] == "capacity_exceeded" || data["code"] == "case_capacity_exceeded"
+    }) {
+        crate::lab::LabError::conflict(error.message)
+    } else if error.code == -32602 {
         crate::lab::LabError::invalid(error.message)
     } else if error
         .data

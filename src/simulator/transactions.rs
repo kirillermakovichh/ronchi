@@ -445,18 +445,21 @@ impl Owner {
         }
         self.append(facts).await.map_err(|_| RpcError::internal())?;
         self.credits.insert(signature.clone(), credits);
-        if selected && hold.deadline().is_none() && !hold.abort.is_cancelled() {
-            hold.record(&self.writer,self.started,"fault.withholding_started",vec![json!({"request":reference,"signature":signature,"hold_ms":binding.policy.as_ref().expect("selected policy").settings.hold_ms})]).await.map_err(|_|RpcError::internal())?;
-            hold.selected(
-                binding
-                    .policy
-                    .as_ref()
-                    .expect("selected policy")
-                    .settings
-                    .hold_ms,
-            );
+        if selected && hold.deadline().is_none() {
+            let hold_ms = binding
+                .policy
+                .as_ref()
+                .expect("selected policy")
+                .settings
+                .hold_ms;
+            hold.start(
+                &self.writer,
+                self.started,
+                hold_ms,
+                json!({"request":reference,"signature":signature,"hold_ms":hold_ms}),
+            )
+            .await?;
         }
-
         Ok(json!(signature))
     }
     async fn advance_due(
