@@ -1,6 +1,6 @@
 # Journal, evidence, and Findings
 
-Status: initial implementation contract. Task 2a implements the atomic storage primitive; the queue records remaining runtime work.
+Status: initial implementation contract. Task 2 implements bounded durable storage and disk admission; the queue records remaining runtime integration.
 The defaults below are reversible product choices to validate in the first prototype.
 They refine [ADR-0005](../adr/0005-explanation-first-outcomes.md), [ADR-0016](../adr/0016-continuous-lab-journal.md), and [ADR-0019](../adr/0019-resource-efficient-rust-core.md).
 This document owns evidence semantics, persistence, Findings, and retention; the [RPC contract](solana-rpc-contract.md) owns protocol behavior.
@@ -175,7 +175,34 @@ Explicit blocking shutdown closes admission, drains accepted groups, writes a su
 If the writer has failed, it never writes a clean finalization marker.
 Creation and joining belong outside Tokio worker threads.
 The lifecycle owner supplies cancellation deadlines and failure-driven RPC shutdown in task 3.
-Disk admission, full-directory accounting, and drain reserve remain unimplemented until task 2c.
+Disk admission uses the whole selected Lab directory, including nested owned files, SQLite database, WAL, SHM, retained content, attachments, and diagnostics when those files exist.
+It counts the greater of logical length and allocated bytes on Unix.
+No attachment or logging subsystem is implied by this accounting.
+The default total is 1 GiB; `DiskLimits` permits smaller explicit budgets for isolated tests.
+The shutdown reserve cannot be configured below 64 MiB.
+It grows if the conservative terminal-write liability requires more space.
+All outstanding admitted groups have additional disk reservations.
+
+Admission scans actual files and checks filesystem available space under the same accounting lock used for commits and checkpoints.
+A reservation covers potential database growth, WAL frames, SHM growth, and filesystem allocation rounding.
+The append-only version-1 schema bounds new pages by encoded overflow pages, four pages per event, and sixteen metadata pages per group.
+`max_page_count` enforces that bound for each write transaction.
+`cache_spill=OFF` prevents repeated spilled WAL frames during the transaction.
+The reservation conservatively charges a frame for every potential database page, including existing pages.
+This can stop admission earlier than an estimate based on average writes.
+It is a safety bound, not a performance result or a promise of exclusive filesystem capacity.
+Other processes can consume disk capacity after a check; write failures remain fatal.
+
+A scan is bounded to 16,384 entries and depth 32.
+Symlinks and special files are rejected instead of excluding their bytes silently.
+Future writers of owned files must share the admission boundary before their side effects.
+An exhausted budget, insufficient free space, accounting failure, or SQLite write failure permanently rejects new admission.
+The owner receives an error; writer health becomes failed.
+Already admitted work can drain against its reservations while storage remains usable.
+An explicit interruption record can consume the shutdown reserve.
+A failed Journal cannot be finalized as clean.
+No budget recovery removes events or deletes a live WAL.
+An error after SQLite commit can leave committed evidence; the reader and writer watermark retain that fact.
 This primitive does not yet acknowledge RPC acceptance or persist signed protocol content.
 
 ## Finalization, retention, and export

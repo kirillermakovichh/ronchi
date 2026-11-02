@@ -1,5 +1,7 @@
 //! Bounded durable event storage. Callers supply validated, redacted event facts.
 //! This module does not infer application outcomes or restore a running Lab.
+mod budget;
+pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
 mod store;
 mod writer;
 use serde::{Deserialize, Serialize};
@@ -28,6 +30,12 @@ pub enum JournalError {
     Closed,
     #[error("Journal admission capacity exhausted")]
     Saturated,
+    #[error("Lab evidence disk budget exhausted")]
+    DiskBudget,
+    #[error("Filesystem cannot sustain the Lab shutdown reserve")]
+    DiskSpace,
+    #[error("Lab evidence filesystem accounting failed")]
+    Filesystem(#[source] std::io::Error),
     #[error("Journal writer failed; inspect Lab health before retrying")]
     WriterFailed,
     #[error("Journal writer thread could not start")]

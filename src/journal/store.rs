@@ -1,9 +1,13 @@
-use super::{BUSY_TIMEOUT, Event, JournalError, JournalState, Snapshot, encode};
+use super::budget::{Budget, Permit};
+use super::{
+    BUSY_TIMEOUT, DiskLimits, DiskUsage, Event, JournalError, JournalState, Snapshot, encode,
+};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::path::Path;
 
 pub struct JournalStore {
     connection: Connection,
+    pub(super) budget: Budget,
 }
 pub struct JournalReader {
     connection: Connection,
@@ -45,6 +49,13 @@ impl JournalStore {
     /// Creates a new file-backed Journal. Existing schema is never overwritten.
     /// The lifecycle owner must serialize ownership of the supplied Lab path.
     pub fn create(path: &Path, lab_id: &str) -> Result<Self, JournalError> {
+        Self::with_disk_limits(path, lab_id, DiskLimits::default())
+    }
+    pub fn with_disk_limits(
+        path: &Path,
+        lab_id: &str,
+        limits: DiskLimits,
+    ) -> Result<Self, JournalError> {
         if lab_id.is_empty()
             || lab_id.len() > 128
             || !lab_id
@@ -53,6 +64,12 @@ impl JournalStore {
         {
             return Err(JournalError::InvalidInput);
         }
+        let budget = Budget::new(
+            path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+            limits,
+        )?;
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -63,16 +80,26 @@ impl JournalStore {
         }
         let mode: String = connection.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         connection.pragma_update(None, "synchronous", "FULL")?;
+        connection.pragma_update(None, "cache_spill", "OFF")?;
+        connection.pragma_update(None, "max_page_count", 16)?;
         connection.pragma_update(None, "wal_autocheckpoint", 1000)?;
+        let spill: u32 = connection.query_row("PRAGMA cache_spill", [], |r| r.get(0))?;
         let sync: u32 = connection.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
-        if mode != "wal" || sync != 2 {
+        if mode != "wal" || sync != 2 || spill != 0 {
             return Err(JournalError::UnsupportedSchema);
         }
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(SCHEMA)?;
         tx.execute("INSERT INTO journal VALUES(1,?1,0,'open')", [lab_id])?;
         tx.commit()?;
-        Ok(Self { connection })
+        let pages: u32 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: u32 = connection.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        budget.initialize(u64::from(page_size), u64::from(pages))?;
+        Ok(Self { connection, budget })
+    }
+
+    pub fn disk_usage(&self) -> Result<DiskUsage, JournalError> {
+        self.budget.usage()
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, JournalError> {
@@ -87,6 +114,9 @@ impl JournalStore {
     /// Writes a terminal fact and its state in the same transaction.
     /// The lifecycle owner must settle producers before requesting finalization.
     pub fn finish(&mut self, terminal: &Event, state: JournalState) -> Result<u64, JournalError> {
+        if state == JournalState::Finalized && self.budget.failed() {
+            return Err(JournalError::WriterFailed);
+        }
         if state == JournalState::Open {
             return Err(JournalError::InvalidInput);
         }
@@ -94,6 +124,38 @@ impl JournalStore {
     }
 
     pub(super) fn commit(
+        &mut self,
+        encoded: Vec<String>,
+        terminal: Option<JournalState>,
+    ) -> Result<u64, JournalError> {
+        let permits = if terminal.is_some() {
+            Vec::new()
+        } else {
+            vec![self.budget.reserve(&encoded)?]
+        };
+        self.commit_reserved(encoded, terminal, permits)
+    }
+    pub(super) fn commit_reserved(
+        &mut self,
+        encoded: Vec<String>,
+        terminal: Option<JournalState>,
+        permits: Vec<Permit>,
+    ) -> Result<u64, JournalError> {
+        let budget = self.budget.clone();
+        budget.commit(&permits, terminal.is_some(), |max_pages| {
+            self.connection.pragma_update(
+                None,
+                "max_page_count",
+                u32::try_from(max_pages).map_err(|_| JournalError::DiskBudget)?,
+            )?;
+            let seq = self.write_transaction(encoded, terminal)?;
+            let pages: u32 = self
+                .connection
+                .query_row("PRAGMA page_count", [], |r| r.get(0))?;
+            Ok((seq, u64::from(pages)))
+        })
+    }
+    fn write_transaction(
         &mut self,
         encoded: Vec<String>,
         terminal: Option<JournalState>,

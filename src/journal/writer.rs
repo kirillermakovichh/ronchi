@@ -1,5 +1,7 @@
+use super::budget::{Budget, Permit};
 use super::{
-    Event, JournalError, JournalState, JournalStore, MAX_BATCH_BYTES, MAX_BATCH_EVENTS, encode,
+    DiskUsage, Event, JournalError, JournalState, JournalStore, MAX_BATCH_BYTES, MAX_BATCH_EVENTS,
+    encode,
 };
 use std::{
     collections::VecDeque,
@@ -28,6 +30,7 @@ pub struct WriterStatus {
 struct Unit {
     events: Vec<String>,
     bytes: usize,
+    permit: Permit,
     reply: oneshot::Sender<Result<u64, JournalError>>,
 }
 struct State {
@@ -52,6 +55,7 @@ impl Default for QueueLimits {
 }
 struct Shared {
     limits: QueueLimits,
+    budget: Budget,
     state: Mutex<State>,
     changed: Condvar,
     status: watch::Sender<WriterStatus>,
@@ -89,6 +93,9 @@ impl CommitReceipt {
 }
 
 impl WriterHandle {
+    pub fn disk_usage(&self) -> Result<DiskUsage, JournalError> {
+        self.shared.budget.usage()
+    }
     pub fn status(&self) -> WriterStatus {
         *self.shared.status.borrow()
     }
@@ -115,9 +122,17 @@ impl WriterHandle {
             self.shared.fail();
             return Err(JournalError::Saturated);
         }
+        let permit = match self.shared.budget.reserve(&encoded) {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.shared.fail();
+                return Err(error);
+            }
+        };
         state.pending_events += encoded.len();
         state.pending_bytes += bytes;
         state.queue.push_back(Unit {
+            permit,
             events: encoded,
             bytes,
             reply,
@@ -151,6 +166,7 @@ impl JournalWriter {
             snapshot_seq,
         });
         let shared = Arc::new(Shared {
+            budget: store.budget.clone(),
             limits,
             state: Mutex::new(State {
                 queue: VecDeque::new(),
@@ -304,14 +320,16 @@ fn write_loop(mut store: JournalStore, shared: &Shared) -> Result<u64, JournalEr
             }
         }
         drop(state);
+        let mut permits = Vec::with_capacity(units.len());
         let mut encoded = Vec::with_capacity(count);
         let mut replies = Vec::with_capacity(units.len());
         for unit in units {
+            permits.push(unit.permit);
             let len = unit.events.len();
             encoded.extend(unit.events);
             replies.push((len, unit.reply));
         }
-        let result = store.commit(encoded, None);
+        let result = store.commit_reserved(encoded, None, permits);
         let mut state = shared.lock();
         state.pending_events -= count;
         state.pending_bytes -= bytes;
@@ -325,6 +343,11 @@ fn write_loop(mut store: JournalStore, shared: &Shared) -> Result<u64, JournalEr
                 }
             }
             Err(error) => {
+                if let Ok(snapshot) = store.snapshot() {
+                    shared
+                        .status
+                        .send_modify(|s| s.snapshot_seq = snapshot.snapshot_seq);
+                }
                 shared.fail();
                 for (_, reply) in replies {
                     let _ = reply.send(Err(JournalError::WriterFailed));

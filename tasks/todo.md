@@ -37,7 +37,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 2. Durable Journal admission
 
-- [ ] **Accept:** Commit versioned events through bounded SQLite WAL/FULL storage; expose a contiguous watermark and explicit Journal states.
+- [x] **Accept:** Commit versioned events through bounded SQLite WAL/FULL storage; expose a contiguous watermark and explicit Journal states.
 - **Verify:** File-backed reopen after process death, atomic acceptance records, queue saturation, and storage failure without silent evidence loss.
 - **Dependencies:** 1. **Scope:** Medium. **Likely files:** `src/journal.rs`, `src/journal/writer.rs`, `src/journal/schema.rs`, `src/evidence.rs`, `tests/journal.rs`.
 - **Source:** [Evidence and Findings](../docs/product/evidence-and-findings.md).
@@ -59,9 +59,13 @@ Checkpoints record results and do not require another approval interview.
 
 #### 2c. Disk admission and drain reserve
 
-- [ ] **Accept:** Account for the full Lab evidence directory, enforce the 1 GiB budget with at least 64 MiB plus admitted liability reserved for drain, and fail explicitly if disk/checkpoint progress cannot sustain the budget.
+- [x] **Accept:** Account for the full Lab evidence directory, enforce the 1 GiB budget with at least 64 MiB plus admitted liability reserved for drain, and fail explicitly if disk/checkpoint progress cannot sustain the budget.
 - **Verify:** Queue liability, WAL/database growth, attachments/log accounting, low-space/storage failure, and preserved committed evidence in disposable directories.
 - **Dependencies:** 2a, 2b. This subtask completes task 2 before task 3 starts. Atomic required signed-content integration remains part of task 5.
+- **Implemented:** Whole-directory logical/allocated byte accounting, filesystem free-capacity checks, per-group SQLite/WAL/SHM growth reservations, enforced database page bounds, and at least 64 MiB terminal reserve. Budget and write failure permanently stop new admission without evicting history.
+- **Verification:** `cargo test --locked --test journal_budget` passed (6 tests). Tests use real files and small 66 MiB budgets with a 64 MiB reserve. They cover WAL/database growth, exact reserve boundary, interruption writes, existing owned-file accounting, concurrent admission, reopen, and an available-capacity check without filling the host disk.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (20 tests including the process fixture), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- **Task 2 audit:** Versioned atomic groups, FULL/WAL commit acknowledgements, contiguous watermarks, open/finalized/interrupted states, process-death recovery, count/byte queue failure, storage failure, and disk admission are verified. Protocol-specific acceptance semantics and retained signed-content integration remain task 5; Lab failure shutdown remains task 3.
 
 ### 3. Persistent Lab controls
 
