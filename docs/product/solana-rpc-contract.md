@@ -1,0 +1,172 @@
+# Solana RPC contract
+
+Status: accepted product contract. This defines intended coverage, not implemented support or a stable wire API.
+The [product overview](overview.md#execution-modes) owns product scope and mode authority.
+[Cases and coverage](cases.md) owns Fault policies and Coverage Claims.
+Use the [shared protocol references](../../.agents/references/solana-rpc/index.md) and official method contracts for protocol facts.
+
+## Local methods
+
+In simulator mode, these methods use one coherent local Simulated Chain State:
+
+| Method | Intended behavior |
+| --- | --- |
+| `getLatestBlockhash` | Return a local recent blockhash and its last valid block height |
+| `sendTransaction` | Accept a signed transaction under the submission contract below |
+| `getSignatureStatuses` | Return the local lifecycle view for requested signatures |
+| `getBlockHeight` | Return simulated block height at the supported requested commitment |
+| `isBlockhashValid` | Evaluate local recent-blockhash validity |
+| `getSlot` | Return simulated slot at the supported requested commitment |
+| `getTransaction` | Return a retained signed transaction under the lookup contract below |
+| `getHealth` | Report local Lab readiness under the declared simulator interpretation |
+| `getVersion` | Report the verified local compatibility profile; it does not copy upstream software identity |
+| `getGenesisHash` | Return the synthetic local network identity; it does not copy the upstream genesis hash |
+| `getFeeForMessage` | Quote the fee for a message under the declared local fee model |
+
+The native Ronchi version and its partial compatibility boundary remain explicit in Lab information.
+The implementation must verify the reported compatibility profile before making a compatibility claim.
+
+## Transaction formats and encodings
+
+All transaction formats already present on Solana are in scope.
+There is no intentional legacy/v0-only limit.
+The official [versioned transaction reference](https://solana.com/docs/core/transactions/versioned-transactions), checked on 2026-11-02, identifies legacy, v0, and v1 and states that v1 is active on mainnet, devnet, and testnet.
+The implementation must cover those formats and document its verified version matrix.
+An unimplemented existing network format is a gap against this requirement, not an agreed deferral.
+
+Support the RPC encodings defined for each selected method, including applicable `base58`, `base64`, `json`, and `jsonParsed` representations.
+Preserve method-specific version negotiation, including `maxSupportedTransactionVersion` where applicable.
+Full server-side format coverage does not permit ignoring a client's declared version limit.
+Parsing and serialization must preserve transaction identity and content.
+Support v0 Address Lookup Table resolution and version-specific message and fee rules where the selected method requires them.
+
+[Durable nonce](https://solana.com/docs/core/transactions/durable-nonces) handling is also in scope as a transaction-lifetime mechanism, not a separate wire format.
+Apply its own validity and advancement rules instead of recent-blockhash expiry rules.
+Format support does not create missing lookup tables, nonce-account state, application accounts, or funds.
+If a required input state is absent, expose that state-availability limit rather than treating the format itself as deliberately unsupported.
+Real program execution and its account effects remain under the existing Execution Mode boundary.
+
+## Submission and preflight
+
+Simulator-mode `sendTransaction` requires `skipPreflight: true`.
+If the request requires full preflight, including when that requirement follows from an omitted option, return an explicit unsupported-capability error with Surfpool guidance.
+Do not report a failed program simulation when no program simulation occurred.
+This can require RPC-client configuration in addition to changing the endpoint URL; it requires no Ronchi SDK.
+
+Keep transaction identity, RPC acceptance, subsequent processing, and the RPC Boundary Result distinct.
+Follow the supported official submission semantics and the selected Case when evaluating valid inputs, duplicates, expiry, and responses.
+The [first Case](cases.md#tx-response-lost-identity-and-repetition) retains one response-loss Fault per affected identity for the lifetime of a Lab.
+
+Simulator-mode `simulateTransaction` returns an explicit unsupported-capability error with Surfpool guidance.
+It does not produce an invented execution result or forward the request to the Read Upstream.
+In Surfpool mode, submission, preflight, and program simulation use the managed local Execution Backend.
+All application-facing blockchain reads and writes remain under that backend's authority.
+
+## Request parameters and errors
+
+Honor the official meanings, types, defaults, and supported combinations of method parameters.
+Return an explicit error for behavior outside the declared capability contract.
+Do not silently ignore a parameter that requests unsupported behavior.
+Use standard JSON-RPC errors for standard protocol errors and distinguish a Ronchi capability limit from a simulated or backend transaction failure.
+
+Enforce `minContextSlot` against the selected local view where the method supports it.
+Support explicit `maxRetries: 0` in simulator mode.
+Reject explicit positive `maxRetries` until leader-rebroadcast behavior has a declared model.
+Omitting the option does not promise simulation of network rebroadcasts or validator topology.
+These limits do not replace the independently observed application resubmission attempts recorded in the Journal.
+
+## Transaction lookup and history
+
+Transaction lifecycle lookups stay local in simulator mode, including queries for signatures unknown to the Lab.
+They do not automatically fall back to public transaction history.
+Return `null` when the requested local status or transaction is unavailable under the method's query rules.
+Missing data does not establish rejection, non-execution, or application failure.
+
+For `getSignatureStatuses`, query the recent local status cache by default.
+With `searchTransactionHistory: true`, also query retained local history.
+Preserve the input signature order and follow the method's supported limits.
+Retained history means data actually preserved under the Lab persistence policy; it is not an unlimited-storage promise.
+The [evidence contract](evidence-and-findings.md#persistence-bounds-and-failure) defines Journal retention and storage bounds.
+
+For a locally accepted transaction, `getTransaction` returns the retained signed transaction when it is available at the supported requested confirmation level.
+It returns `meta: null` for unavailable execution metadata, as permitted by the official [confirmed transaction response structure](https://solana.com/docs/rpc/json-structures#confirmed-transaction-responses).
+Its content and availability use the same local state as the other lifecycle methods.
+All applicable encodings, including `jsonParsed`, are in scope under the format contract above.
+Retrieving the signed payload does not establish execution logs, charged fees, balance changes, or a completed business operation.
+Workflows requiring those execution results for local submissions need Surfpool.
+
+## Clock and validity profile
+
+The normal interactive Lab uses the [1:1 simulator-time rate](overview.md#simulator-time).
+Keep simulator time, slot, and block height as distinct quantities.
+The initial profile has a configurable 400 ms slot and produces one block per slot without skips.
+This is a declared simulator simplification, not a real-network timing guarantee.
+Generate local blockhashes and derive recent-blockhash validity from local block height and the validity bound.
+Do not compare an unrelated public validity bound to a local counter.
+Ageing a blockhash does not retroactively fail a transaction already processed with it.
+
+The [Case's default 2/4/6-second confirmation schedule](cases.md#tx-response-lost-default-simulated-outcome) remains accepted.
+Commitment labels describe the controlled simulator history; they do not reproduce validator voting or consensus depth.
+Derive response context, transaction slots, and confirmation fields from the declared local history and the official field meanings.
+Durable-nonce lifetimes use their own protocol state.
+
+## Read-through allowlist
+
+With an explicitly configured Read Upstream, the initial supported read allowlist contains:
+
+- `getBalance`;
+- `getAccountInfo`;
+- `getMultipleAccounts`;
+- `getTokenAccountBalance`;
+- `getTokenAccountsByOwner`;
+- `getMinimumBalanceForRentExemption`.
+
+`getRecentPrioritizationFees` may also use that explicitly configured read allowlist under the fee contract below.
+The local methods listed above retain local authority.
+Writes, airdrops, unknown methods, and program simulation never gain forwarding permission through fallback handling.
+
+Without a configured source for an upstream read, return an explicit unavailable-capability error.
+Do not invent a zero balance, absent account, or successful read in place of missing source data.
+Preserve the actual upstream result and its context as evidence, separately from any RPC Boundary Result changed by a Case.
+Identify the source in the Journal and Findings.
+Read-through account data does not acquire account mutations from simulated transactions.
+If a workflow needs those mutations, it requires local execution.
+In Surfpool mode, direct Read-through remains disabled; Surfpool's datasource stays behind its state-authority boundary.
+
+## Fee queries
+
+Provide local `getFeeForMessage` for messages covered by the format contract.
+Use an explicit fee model compatible with the selected protocol profile and its version-specific message rules.
+The result is a quote, not evidence that a fee was charged.
+The simulator does not deduct it from a real account balance.
+See the official [method contract](https://solana.com/docs/rpc/http/getfeeformessage).
+
+Allow `getRecentPrioritizationFees` only through the explicitly configured read allowlist in simulator mode.
+Preserve the upstream provenance of those samples.
+Without a required source or model, return an explicit error instead of inventing fee data.
+
+## JSON-RPC batches
+
+Support bounded JSON-RPC batches with per-element validation, identifiers, Journal Evidence, and forwarding checks.
+Bind the Case and settings when registering the whole batch.
+Place that binding in the shared request-registration and Case-control order.
+Each element retains its own request identity and recorded observations.
+Bound request bytes, element count, and concurrent work under the resource model.
+
+If a response-loss Fault prevents completing the shared HTTP batch response, terminate that response under the selected withholding policy.
+For the default `tx-response-lost`, this means holding without a response for up to 20 seconds of real time, followed by transport termination unless an earlier observed cancellation or disconnect ends it.
+Record the actual boundary effect on every affected element, including elements whose processing completed.
+Do not claim that each affected element was separately selected for a Fault or that a client observed a particular error.
+The later `partial-batch-response` candidate remains a separate Case.
+
+Follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification) rules for request IDs, responses, errors, and notifications.
+The expected absence of a response to a notification is not itself a Fault.
+
+## Verification and remaining work
+
+Before claiming implementation support, verify the full format/encoding matrix, method response schemas, standard errors, parameter combinations, and relevant node/SDK versions against official references.
+Pinning dependencies must not silently narrow the accepted existing-format coverage.
+Verify concurrency and ordering through representative histories, including duplicates, expiry, Case changes, and batch response loss.
+Use fake upstreams or isolated local execution; public writes are not a test oracle.
+User validation must still establish whether this contract is sufficient for independently running backends.
+The [evidence contract](evidence-and-findings.md) defines Journal storage, completeness, redaction, and retention.

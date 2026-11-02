@@ -1,0 +1,9 @@
+# Resource-efficient native Rust core
+
+Ronchi is implemented as one native Rust executable because predictable memory use, low idle CPU, low runtime overhead, and high RPC throughput take priority over implementation speed. The asynchronous foundation is Tokio. The RPC data plane uses Hyper and `hyper-util` directly, with Rustls for HTTPS upstreams; Axum is restricted to the low-volume loopback control API and is not part of the RPC hot path. Data-plane, control-plane, Case, and persistence logic remain separate modules behind small interfaces even when they share one process and runtime.
+
+The transparent path preserves request and response bytes and parses only the JSON-RPC envelope and fields required by the active Case. Unmodified large bodies are streamed; buffering, channels, body sizes, and concurrent work are bounded. Ronchi does not retain the Continuous Lab Journal in memory or busy-poll for state.
+
+The Lab Journal uses project-local SQLite in WAL mode through `rusqlite`, with one dedicated writer and batched writes. CLI parsing uses `clap`; the local MCP interface uses the official Rust SDK, `rmcp`; dashboard assets are compiled ahead of release and embedded in the executable, so running Ronchi requires no Node, JVM, Python, external database, or telemetry collector. Surfpool remains an optional managed child process and is not linked into the core executable or started outside Surfpool mode.
+
+Allocator replacements, SIMD JSON parsers, and larger proxy frameworks are not adopted without profiling evidence. Resource acceptance measurements cover idle RSS and CPU, transparent-proxy latency, throughput, peak memory for large RPC responses, Journal disk bytes and write throughput, dashboard query latency during writes, and binary size. Surfpool mode is measured separately because its SVM runtime dominates that mode's resource profile.

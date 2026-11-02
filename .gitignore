@@ -1,0 +1,17 @@
+# Local Lab state, managed tools, and artifacts
+/ronchi/
+
+# Build output
+/target/
+node_modules/
+/dashboard/dist/
+/coverage/
+/playwright-report/
+/test-results/
+
+# Local environment and operating-system files
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
