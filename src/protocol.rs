@@ -1,5 +1,6 @@
 //! Signed wire decoding is isolated from simulator state and RPC transport.
 pub mod fees;
+pub mod nonce;
 mod parsed;
 pub mod state;
 use crate::rpc::RpcError;
@@ -70,11 +71,6 @@ pub fn decode(encoded: &str, encoding: &str) -> Result<SignedTransaction, RpcErr
         message: "Transaction signature verification failed".into(),
         data: None,
     })?;
-    if tx.uses_durable_nonce() {
-        return Err(RpcError::unsupported(
-            "Durable nonce account state is unavailable in this Lab; use configured local execution",
-        ));
-    }
     let signature = tx
         .signatures
         .first()
@@ -158,7 +154,10 @@ pub fn resolve_signed(
     wire: &str,
     state: &state::ProtocolState,
     slot: u64,
-) -> Result<state::LoadedAddresses, RpcError> {
+) -> Result<(state::LoadedAddresses, Option<nonce::NonceUse>), RpcError> {
     let bytes = STANDARD.decode(wire).map_err(|_| RpcError::internal())?;
-    state.resolve(&decode_wire(&bytes)?.message, slot)
+    let message = decode_wire(&bytes)?.message;
+    let loaded = state.resolve(&message, slot)?;
+    let nonce = nonce::resolve(&message, &loaded)?;
+    Ok((loaded, nonce))
 }

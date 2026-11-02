@@ -96,15 +96,15 @@ The current verified HTTP fixtures cover legacy and v0, base58/base64 submission
 Independent manually assembled v1 wire fixtures also verify signature identity, binary round trips, version negotiation, and JSON lookup.
 V1 JSON uses `recentBlockhash` and `transactionConfig`, matching the [official Agave UI types](https://github.com/anza-xyz/agave/blob/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/transaction-status-client-types/src/lib.rs).
 Wire layout and bounds use official Solana SDK revision `3904641b3dbc94221bf7dc84042bb9acf2b0280a` (modular crates 6.0.0).
-Durable nonce histories remain the next task-6 slice.
-Missing nonce state returns a capability error; it does not use recent-hash expiry.
-These gaps do not narrow the accepted format scope below.
+Durable nonce histories use the explicit local state and advancement rules below.
+Missing nonce state returns `state_unavailable`; it does not use recent-hash expiry.
+State-availability limits do not narrow the accepted format scope below.
 Response-loss policy remains task 7.
 
 ### Local lookup state and JSON projection
 
 `simulator_state` in `ronchi/config.toml` supplies explicit fixture state before Lab startup.
-The bounded state is at most 16 KiB and 16 lookup tables; each table has at most 256 addresses.
+The bounded state is at most 16 KiB, 16 lookup tables, and 32 initialized nonce accounts; each table has at most 256 addresses.
 Each table contains `address`, ordered `addresses`, `last_extended_slot`, and `last_extended_slot_start_index`.
 Omit `deactivation_slot` for an active table.
 New addresses become visible after `last_extended_slot`; older prefix addresses remain visible in that slot.
@@ -143,6 +143,53 @@ Apply its own validity and advancement rules instead of recent-blockhash expiry 
 Format support does not create missing lookup tables, nonce-account state, application accounts, or funds.
 If a required input state is absent, expose that state-availability limit rather than treating the format itself as deliberately unsupported.
 Real program execution and its account effects remain under the existing Execution Mode boundary.
+
+### Verified local format matrix
+
+| Behavior | Legacy | v0 | v1 |
+| --- | --- | --- | --- |
+| Independently signed wire / packet bound | 1,232 bytes | 1,232 bytes | 4,096 bytes |
+| `sendTransaction` base58 / base64 | yes | yes | yes |
+| Exact binary `getTransaction` round trip | yes | yes | yes |
+| JSON / `jsonParsed`, `meta:null` | yes | yes | yes, including `transactionConfig` |
+| Client version negotiation | legacy default | explicit max >= 0 | explicit max >= 1 |
+| Address Lookup Tables | inapplicable | explicit local state | inapplicable; static addresses |
+| Base64 message fee quote | yes | yes | yes, fixed header priority |
+| Recent hash lifetime | local height bound | local height bound | local height bound |
+| Durable nonce lifetime | explicit nonce account | explicit nonce account, including loaded address | explicit nonce account |
+
+`tests/transaction_history.rs` constructs wire fixtures and signatures without the production decoder.
+HTTP histories check invalid input, missing state, version limits, both binary encodings, parsed/fallback projection, lookup order, fee rules, nonce races, and failed persistence.
+A native CLI/daemon test also loads nonce configuration, serves a fee quote, stops, and reopens retained state.
+This matrix is a local simulator compatibility claim for these methods and fixtures.
+It does not establish complete Agave behavior, validator execution, or a stable external API.
+Unavailable account/slot-hash state remains explicit; no public write or automatic funding is used.
+
+### Implemented durable nonce model
+
+Supply `[[simulator_state.nonce_accounts]]` with base58 `address`, `authority`, and `nonce` values.
+Each entry describes an initialized system-owned nonce account at startup slot zero; optional `slot` must be zero.
+Ronchi does not create, authorize, fund, or withdraw nonce accounts through program execution.
+A first System `AdvanceNonceAccount` instruction selects nonce lifetime for legacy/v0/v1.
+The instruction must reference a writable nonce account, the recent-blockhash sysvar, and its signing authority.
+Missing state returns `state_unavailable`; invalid authority/account metadata returns a parameter error before acceptance.
+Acceptance retains signed bytes, nonce context, and the original 2/4/6-second deadlines.
+It reserves future writes and does not consume the nonce merely by admitting work.
+
+At processing, the submitted value must equal the latest committed account nonce.
+The next nonce is SHA-256 of `DURABLE_NONCE` followed by the current local bank blockhash bytes, following the [official SDK nonce state](https://github.com/anza-xyz/solana-sdk/blob/3904641b3dbc94221bf7dc84042bb9acf2b0280a/nonce/src/state.rs).
+If that value already equals the account nonce, this bank cannot advance it again.
+A successful controlled processing transition and nonce advancement commit atomically.
+A competing identity using the consumed value remains unprocessed; it does not acquire a success status or recent-hash expiry.
+Identical signed-byte retries retain the original lifecycle and do not consume a second value.
+Recent-hash ageing does not expire a nonce transaction or undo processed state.
+Other instructions retain the simulator's declared non-execution boundary.
+
+Nonce fee quotes use historical account state at the selected commitment slot.
+An obsolete nonce produces a null quote; absent nonce state produces an explicit error.
+The base rate remains the local model's 5,000 lamports per signature.
+Nonce advancement and historical versions persist in Journal schema 3, including after forced interruption.
+This models lifetime protection; it does not establish account balances, fees charged, or application outcomes.
 
 ## Submission and preflight
 

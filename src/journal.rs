@@ -2,6 +2,7 @@
 //! This module does not infer application outcomes or restore a running Lab.
 mod budget;
 pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
+mod nonces;
 mod store;
 mod transactions;
 pub use transactions::{TransactionPhase, TransactionRecord};

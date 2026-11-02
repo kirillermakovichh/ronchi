@@ -35,6 +35,8 @@ pub struct TransactionRecord {
     pub processed_height: Option<u64>,
     #[serde(default)]
     pub loaded_addresses: crate::protocol::state::LoadedAddresses,
+    #[serde(default)]
+    pub nonce_context: Option<crate::protocol::nonce::NonceUse>,
     pub admission_request: serde_json::Value,
 }
 pub(super) const SCHEMA:&str="

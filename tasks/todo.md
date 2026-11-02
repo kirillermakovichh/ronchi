@@ -116,7 +116,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 6. Full format and lifetime coverage
 
-- [ ] **Accept:** Cover legacy/v0/v1, applicable encodings and `jsonParsed`, version negotiation, lookup tables, fees, and durable nonces; expose missing required state explicitly.
+- [x] **Accept:** Cover legacy/v0/v1, applicable encodings and `jsonParsed`, version negotiation, lookup tables, fees, and durable nonces; expose missing required state explicitly.
 - **Verify:** Independent signed fixtures, pinned official-reference matrix, identity-preserving round trips, client version limits, and recent-hash versus nonce validity.
 - **Dependencies:** 5. **Scope:** Medium; split by format if needed. **Likely files:** `src/protocol/formats.rs`, `src/protocol/lifetimes.rs`, `src/rpc/fees.rs`, `tests/format_matrix.rs`, `tests/fixtures/`.
 - **Source:** [Formats and encodings](../docs/product/solana-rpc-contract.md#transaction-formats-and-encodings).
@@ -141,7 +141,11 @@ Checkpoints record results and do not require another approval interview.
 
 #### 6d. Durable nonce
 
-- [ ] Preserve explicit nonce state and atomic advancement; verify nonce lifetime, retries, competing identities, missing state, and file-backed persistence.
+- [x] Preserve explicit nonce state and atomic advancement; verify nonce lifetime, retries, competing identities, missing state, and file-backed persistence.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (60 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Nonce HTTP histories cover all three versions, ageing beyond recent-hash lifetime, authority validation, historical fee context, same-signature retries, concurrent competing identities, same-bank non-advancement, v0 lookup-loaded nonce accounts, and file-backed reopen. Injected SQLite nonce failure rolls back processing and preserves acknowledged identity. A native process test loads TOML state and serves a nonce fee quote. Exact packet-size and one-byte-over-limit HTTP checks pass for all formats.
+- **Self-review:** Scoped review checked atomic nonce/lifecycle/watermark writes, single-owner ordering, historical queries, bounded fixture/query/event sizes, future transition reservations, and schema-1/2 reader compatibility. No confirmed issue remains in this slice. Schema 3 creates new Journals; live resume/migration remains outside this task.
+- **Task 6 complete:** The [verified local matrix](../docs/product/solana-rpc-contract.md#verified-local-format-matrix) records checked formats and the declared local fee/nonce model. Missing account or slot-hash state remains an explicit error. Instruction parsers retain standard partial decoding for other instructions. No execution, forwarding, public writes, or funding was added. Task 7 is next.
 
 ### 7. Continuing Case and response loss
 

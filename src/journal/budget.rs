@@ -131,11 +131,11 @@ impl Budget {
             let bytes = encoded
                 .iter()
                 .try_fold(0u64, |n, s| add(n, s.len() as u64))?;
-            // Version-1 append-only table: overflow pages, leaf/interior splits, and fixed metadata.
+            // Version-3 event and protocol projections: overflow pages, leaf/interior splits, and fixed metadata.
             let growth = add(
                 add(
                     bytes.div_ceil(account.page_size - 128),
-                    mul(encoded.len() as u64, 6)?,
+                    mul(encoded.len() as u64, 10)?,
                 )?,
                 16,
             )?;
@@ -175,7 +175,7 @@ impl Budget {
             let granularity = fs2::allocation_granularity(&account.root)
                 .map_err(io)?
                 .max(4096);
-            // At <=1 GiB: three B-trees, bounded transition row, no cache spilling.
+            // Bounded event/transaction/nonce projections at the default 1 GiB quota; no cache spilling.
             // Reserve 256 dirty frames plus 32 growth pages, SHM and allocation rounding.
             let liability = add(
                 add(

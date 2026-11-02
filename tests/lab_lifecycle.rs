@@ -663,3 +663,48 @@ fn unknown_recorded_children_block_name_reuse_without_signals_or_history_deletio
         JournalState::Finalized
     );
 }
+
+#[test]
+fn native_startup_retains_explicit_protocol_fixture_and_serves_nonce_fee_quote() {
+    let project = Project::new();
+    let key = |n| bs58::encode([n; 32]).into_string();
+    let account = key(71);
+    let authority = key(72);
+    let nonce = key(73);
+    std::fs::create_dir_all(project.path().join("ronchi")).unwrap();
+    std::fs::write(project.path().join("ronchi/config.toml"),format!("schema_version = 1\n[[simulator_state.nonce_accounts]]\naddress = '{account}'\nauthority = '{authority}'\nnonce = '{nonce}'\n")).unwrap();
+    let ready = project.up();
+    assert_eq!(ready["result"]["state"], "ready");
+    let manifest = project.manifest();
+    let rpc = manifest.rpc_address.unwrap();
+    let mut message = vec![1, 0, 2, 4];
+    message.extend_from_slice(&[72; 32]);
+    message.extend_from_slice(&[71; 32]);
+    message.extend(
+        bs58::decode("SysvarRecentB1ockHashes11111111111111111111")
+            .into_vec()
+            .unwrap(),
+    );
+    message.extend_from_slice(&[0; 32]);
+    message.extend_from_slice(&[73; 32]);
+    message.extend_from_slice(&[1, 3, 3, 1, 2, 0, 4]);
+    message.extend_from_slice(&4u32.to_le_bytes());
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let body=serde_json::json!({"jsonrpc":"2.0","id":11,"method":"getFeeForMessage","params":[STANDARD.encode(message)]}).to_string();
+    let response = raw(
+        rpc,
+        format!(
+            "POST / HTTP/1.1\r\nHost: {rpc}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(value["result"]["value"], 5000);
+    project.ok(&["down"]);
+    let path = Workspace::new(project.path())
+        .lab(&manifest.lab_id)
+        .unwrap()
+        .join("journal.sqlite");
+    let reader = JournalReader::open(&path).unwrap();
+    assert_eq!(reader.nonce(&account, None).unwrap().unwrap().nonce, nonce);
+}

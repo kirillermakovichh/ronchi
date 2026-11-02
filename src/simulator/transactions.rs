@@ -236,7 +236,7 @@ impl Owner {
         if self.read(|reader| reader.has_transactions()).await? {
             return Err(JournalError::Closed);
         }
-        if !self.state.lookup_tables.is_empty() {
+        if !self.state.lookup_tables.is_empty() || !self.state.nonce_accounts.is_empty() {
             let fact = crate::lab::event(
                 "protocol.fixture",
                 self.started,
@@ -295,11 +295,28 @@ impl Owner {
                 .map_err(|_| RpcError::internal())?;
             return Ok(json!(signature));
         }
-        let loaded_addresses = crate::protocol::resolve_signed(
+        let (loaded_addresses, nonce_context) = crate::protocol::resolve_signed(
             &signed.wire_base64,
             &self.state,
             self.clock.view(Commitment::Processed).slot,
         )?;
+        if let Some(context) = &nonce_context {
+            let key = context.address.clone();
+            let account = self
+                .read(move |reader| reader.nonce(&key, None))
+                .await
+                .map_err(|_| RpcError::internal())?
+                .ok_or_else(|| {
+                    crate::protocol::state::unavailable(
+                        "Required nonce account is absent from simulator_state",
+                    )
+                })?;
+            if account.authority != context.authority {
+                return Err(RpcError::params(
+                    "Nonce authority does not match the signed instruction",
+                ));
+            }
+        }
         if self.credits.len() >= MAX_ACTIVE {
             return Err(RpcError {
                 code: -32000,
@@ -320,7 +337,11 @@ impl Owner {
             .ok()
             .filter(|n| *n < i64::MAX as u64 - 6_000_000_000)
             .ok_or_else(|| RpcError::unsupported("Simulator time exceeds the persistence range"))?;
-        let hash_height = self.clock.local_hash_height(&signed.blockhash);
+        let hash_height = if nonce_context.is_some() {
+            None
+        } else {
+            self.clock.local_hash_height(&signed.blockhash)
+        };
         let last_valid_height =
             hash_height.and_then(|h| h.checked_add(self.clock.profile.validity_window_blocks));
         let expiry_at_ns = last_valid_height
@@ -354,6 +375,7 @@ impl Owner {
             processed_slot: None,
             processed_height: None,
             loaded_addresses,
+            nonce_context,
             admission_request: reference.clone(),
         };
         let mut data = serde_json::to_value(&record).map_err(|_| RpcError::internal())?;
@@ -392,22 +414,43 @@ impl Owner {
                 return Ok(Some(due));
             }
             let mut reason = None;
+            let mut nonce_advance = Value::Null;
             match record.stage {
                 Phase::Pending => {
                     let view = self
                         .clock
                         .view_at(Duration::from_nanos(due), Commitment::Processed);
-                    if record
+                    if let Some(context) = &record.nonce_context {
+                        let key = context.address.clone();
+                        let account = self.read(move |reader| reader.nonce(&key, None)).await?;
+                        let next = crate::protocol::nonce::next_value(
+                            &self.clock.blockhash(view.block_height),
+                        )
+                        .map_err(|_| JournalError::InvalidInput)?;
+                        if let Some(account) = account.filter(|account| {
+                            account.nonce == record.blockhash
+                                && account.authority == context.authority
+                                && account.nonce != next
+                        }) {
+                            nonce_advance = json!({"address":account.address,"authority":account.authority,"previous_nonce":account.nonce,"nonce":next,"slot":view.slot});
+                        } else {
+                            reason = Some("durable_nonce_invalid_or_not_advanceable");
+                        }
+                    } else if record
                         .last_valid_height
                         .is_some_and(|height| view.block_height > height)
                     {
-                        record.stage = Phase::Expired;
-                        record.next_due_ns = None;
                         reason = Some("recent_blockhash_expired");
                     } else if !record.hash_height.is_some_and(|h| h <= view.block_height) {
-                        record.stage = Phase::Unprocessed;
-                        record.next_due_ns = None;
                         reason = Some("local_blockhash_unavailable");
+                    }
+                    if let Some(reason) = reason {
+                        record.stage = if reason == "recent_blockhash_expired" {
+                            Phase::Expired
+                        } else {
+                            Phase::Unprocessed
+                        };
+                        record.next_due_ns = None;
                     } else {
                         record.stage = Phase::Processed;
                         record.processed_slot = Some(view.slot);
@@ -425,7 +468,7 @@ impl Owner {
                 }
                 _ => return Err(JournalError::InvalidInput),
             }
-            let data = json!({"signature":record.signature,"stage":record.stage,"processed_slot":record.processed_slot,"processed_height":record.processed_height,"next_due_ns":record.next_due_ns,"scheduled_transition_ns":due,"observed_simulated_ns":self.clock.elapsed().as_nanos().min(i64::MAX as u128) as u64,"reason":reason});
+            let data = json!({"signature":record.signature,"stage":record.stage,"processed_slot":record.processed_slot,"processed_height":record.processed_height,"next_due_ns":record.next_due_ns,"scheduled_transition_ns":due,"observed_simulated_ns":self.clock.elapsed().as_nanos().min(i64::MAX as u128) as u64,"reason":reason,"nonce_advance":nonce_advance});
             let mut fact = crate::lab::event("transaction.transition", self.started, data);
             fact.source = "rpc_simulator".into();
             let reservation = self
@@ -457,10 +500,22 @@ impl Owner {
                     });
                 }
                 let fee = message.quote(&self.state, view.slot)?;
-                let value = self
-                    .clock
-                    .hash_height(&message.blockhash(), view)
-                    .map(|_| fee);
+                let valid = if let Some(context) = message.nonce_use(&self.state, view.slot)? {
+                    let key = context.address;
+                    let nonce = self
+                        .read(move |reader| reader.nonce(&key, Some(view.slot)))
+                        .await
+                        .map_err(|_| RpcError::internal())?
+                        .ok_or_else(|| {
+                            crate::protocol::state::unavailable(
+                                "Required nonce account is absent from simulator_state",
+                            )
+                        })?;
+                    nonce.nonce == message.blockhash()
+                } else {
+                    self.clock.hash_height(&message.blockhash(), view).is_some()
+                };
+                let value = valid.then_some(fee);
                 Ok(json!({"context":{"slot":view.slot},"value":value}))
             }
             Operation::Submit(signed, reference) => self.submit(signed, reference).await,

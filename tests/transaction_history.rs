@@ -822,6 +822,7 @@ async fn explicit_lookup_fixture_resolves_parsed_instructions_and_persists_conte
     let a = key(31);
     let b = key(32);
     let state = ProtocolState {
+        nonce_accounts: vec![],
         lookup_tables: vec![
             LookupTable {
                 address: a.clone(),
@@ -893,6 +894,7 @@ async fn lookup_warmup_bad_index_and_unknown_program_are_explicit() {
     let key = |n| bs58::encode([n; 32]).into_string();
     let table = key(33);
     let state = ProtocolState {
+        nonce_accounts: vec![],
         lookup_tables: vec![LookupTable {
             address: table.clone(),
             addresses: vec![key(51), key(52)],
@@ -1097,4 +1099,455 @@ async fn fee_priority_rounding_duplicate_budget_and_v1_header_rules() {
         "unsupported_capability"
     );
     assert!(server.stop(false).await);
+}
+
+fn signed_nonce(hash: &str, seed: u8, account: &str, version: i16, salt: u8) -> (String, Vec<u8>) {
+    let signer = SigningKey::from_bytes(&[seed; 32]);
+    let keys = [
+        signer.verifying_key().to_bytes().to_vec(),
+        bs58::decode(account).into_vec().unwrap(),
+        bs58::decode("SysvarRecentB1ockHashes11111111111111111111")
+            .into_vec()
+            .unwrap(),
+        vec![0; 32],
+    ];
+    let mut message = if version == 1 {
+        vec![0x81, 1, 0, 2]
+    } else if version == 0 {
+        vec![0x80, 1, 0, 2, 4]
+    } else {
+        vec![1, 0, 2, 4]
+    };
+    if version == 1 {
+        message.extend_from_slice(&0u32.to_le_bytes());
+        message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+        message.extend_from_slice(&[2, 4]);
+    }
+    for key in keys {
+        message.extend(key);
+    }
+    if version != 1 {
+        message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+        message.push(2);
+    }
+    if version == 1 {
+        message.extend_from_slice(&[3, 3, 4, 0, 3, 0, 1, 0]); // both fixed headers precede payloads
+        message.extend_from_slice(&[1, 2, 0]);
+        message.extend_from_slice(&4u32.to_le_bytes());
+        message.push(salt);
+    } else {
+        message.extend_from_slice(&[3, 3, 1, 2, 0, 4]);
+        message.extend_from_slice(&4u32.to_le_bytes());
+        message.extend_from_slice(&[3, 0, 1, salt]);
+    }
+    if version == 0 {
+        message.push(0);
+    }
+    let signature = signer.sign(&message).to_bytes();
+    let wire = if version == 1 {
+        let mut v = message;
+        v.extend_from_slice(&signature);
+        v
+    } else {
+        let mut v = vec![1];
+        v.extend_from_slice(&signature);
+        v.extend(message);
+        v
+    };
+    (bs58::encode(signature).into_string(), wire)
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nonce_requires_explicit_account_state_without_creating_it() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    let nonce = bs58::encode([91; 32]).into_string();
+    let account = bs58::encode([61; 32]).into_string();
+    let (signature, wire) = signed_nonce(&nonce, 28, &account, -1, 0);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["error"]["data"]["code"],
+        "state_unavailable"
+    );
+    assert!(server.record(&signature).await.is_none());
+    assert!(server.stop(false).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nonce_survives_recent_hash_age_and_advances_once_with_processing_for_all_versions() {
+    use ronchi::protocol::{nonce::NonceAccount, state::ProtocolState};
+    for version in [-1, 0, 1] {
+        let account = bs58::encode([62; 32]).into_string();
+        let nonce = bs58::encode([92; 32]).into_string();
+        let authority = bs58::encode(SigningKey::from_bytes(&[29; 32]).verifying_key().to_bytes())
+            .into_string();
+        let state = ProtocolState {
+            lookup_tables: vec![],
+            nonce_accounts: vec![NonceAccount {
+                address: account.clone(),
+                authority,
+                nonce: nonce.clone(),
+                slot: 0,
+            }],
+        };
+        let mut server =
+            Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+        server.time.advance(Duration::from_secs(120)).unwrap();
+        let (signature, wire) = signed_nonce(&nonce, 29, &account, version, 1);
+        let message = if version == 1 {
+            &wire[..wire.len() - 64]
+        } else {
+            &wire[65..]
+        };
+        let encoded = STANDARD.encode(message);
+        let quote = server
+            .call(
+                "getFeeForMessage",
+                json!([encoded,{"commitment":"processed"}]),
+            )
+            .await;
+        assert_eq!(quote["result"]["value"], 5000, "version {version}: {quote}");
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        let row = server.record(&signature).await.unwrap();
+        assert!(row.expiry_at_ns.is_none());
+        assert!(row.last_valid_height.is_none());
+        server.time.advance(Duration::from_secs(2)).unwrap();
+        server.phase(&signature, Phase::Processed).await;
+        assert!(
+            server
+                .call(
+                    "getFeeForMessage",
+                    json!([encoded,{"commitment":"processed"}])
+                )
+                .await["result"]["value"]
+                .is_null()
+        );
+        assert_eq!(
+            server
+                .call(
+                    "getFeeForMessage",
+                    json!([encoded,{"commitment":"finalized"}])
+                )
+                .await["result"]["value"],
+            5000
+        );
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        server.time.advance(Duration::from_secs(4)).unwrap();
+        server.phase(&signature, Phase::Finalized).await;
+        assert_eq!(
+            server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"encoding":"jsonParsed","maxSupportedTransactionVersion":1}])
+                )
+                .await["result"]["transaction"]["message"]["instructions"][0]["parsed"]["type"],
+            "advanceNonce"
+        );
+        let (stale, wire2) = signed_nonce(&nonce, 29, &account, version, 2);
+        assert_eq!(
+            server.call("sendTransaction", send(&wire2)).await["result"],
+            stale
+        );
+        server.time.advance(Duration::from_secs(2)).unwrap();
+        server.phase(&stale, Phase::Unprocessed).await;
+        assert!(
+            server.call("getSignatureStatuses", statuses(&stale)).await["result"]["value"][0]
+                .is_null()
+        );
+        assert!(server.stop(false).await);
+        let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+        let current = reader.nonce(&account, None).unwrap().unwrap();
+        assert_ne!(current.nonce, nonce);
+        assert_eq!(current.slot, 305);
+        assert_eq!(
+            reader.nonce(&account, Some(304)).unwrap().unwrap().nonce,
+            nonce
+        );
+        assert_eq!(
+            reader.transaction(&signature).unwrap().unwrap().wire_base64,
+            STANDARD.encode(&wire)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn competing_nonce_identities_consume_one_value_and_reject_wrong_authority() {
+    use ronchi::protocol::{nonce::NonceAccount, state::ProtocolState};
+    let account = bs58::encode([63; 32]).into_string();
+    let nonce = bs58::encode([93; 32]).into_string();
+    let authority =
+        bs58::encode(SigningKey::from_bytes(&[30; 32]).verifying_key().to_bytes()).into_string();
+    let state = ProtocolState {
+        lookup_tables: vec![],
+        nonce_accounts: vec![NonceAccount {
+            address: account.clone(),
+            authority,
+            nonce: nonce.clone(),
+            slot: 0,
+        }],
+    };
+    let mut server =
+        Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+    let (_, wrong) = signed_nonce(&nonce, 31, &account, -1, 0);
+    assert_eq!(
+        server.call("sendTransaction", send(&wrong)).await["error"]["code"],
+        -32602
+    );
+    let (a, wire_a) = signed_nonce(&nonce, 30, &account, -1, 1);
+    let (b, wire_b) = signed_nonce(&nonce, 30, &account, -1, 2);
+    let (first, second) = tokio::join!(
+        server.call("sendTransaction", send(&wire_a)),
+        server.call("sendTransaction", send(&wire_b))
+    );
+    assert_eq!(first["result"], a);
+    assert_eq!(second["result"], b);
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    // Both due decisions must have completed before this status response.
+    let response = server.call("getSignatureStatuses", json!([[a, b]])).await;
+    let values = response["result"]["value"].as_array().unwrap();
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| value["confirmationStatus"] == "finalized")
+            .count(),
+        1
+    );
+    assert_eq!(values.iter().filter(|value| value.is_null()).count(), 1);
+    assert!(server.stop(false).await);
+    let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+    let current = reader.nonce(&account, None).unwrap().unwrap();
+    assert_ne!(current.nonce, nonce);
+    let mut advances = 0;
+    for seq in 1..=reader.snapshot(false).unwrap().snapshot_seq {
+        let event = reader.event(seq).unwrap().unwrap();
+        if event.kind == "transaction.transition" && event.data["nonce_advance"].is_object() {
+            advances += 1;
+        }
+    }
+    assert_eq!(advances, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_nonce_advancement_rolls_back_processing_and_preserves_acknowledged_identity() {
+    use ronchi::protocol::{nonce::NonceAccount, state::ProtocolState};
+    let account = bs58::encode([64; 32]).into_string();
+    let nonce = bs58::encode([94; 32]).into_string();
+    let authority =
+        bs58::encode(SigningKey::from_bytes(&[32; 32]).verifying_key().to_bytes()).into_string();
+    let state = ProtocolState {
+        lookup_tables: vec![],
+        nonce_accounts: vec![NonceAccount {
+            address: account.clone(),
+            authority,
+            nonce: nonce.clone(),
+            slot: 0,
+        }],
+    };
+    let mut server =
+        Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+    let (signature, wire) = signed_nonce(&nonce, 32, &account, -1, 0);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    let path = server.directory.path().join("journal.sqlite");
+    tokio::task::spawn_blocking(move||{let c=rusqlite::Connection::open(path).unwrap();c.execute_batch("CREATE TRIGGER fail_nonce BEFORE INSERT ON nonce_versions WHEN NEW.slot>0 BEGIN SELECT RAISE(ABORT,'injected nonce failure'); END;").unwrap();}).await.unwrap();
+    server.time.advance(Duration::from_secs(2)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while server.writer.as_ref().unwrap().handle().status().health != WriterHealth::Failed {
+        assert!(Instant::now() < deadline);
+        tokio::task::yield_now().await;
+    }
+    assert!(!server.stop(true).await);
+    let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+    assert_eq!(reader.nonce(&account, None).unwrap().unwrap().nonce, nonce);
+    let row = reader.transaction(&signature).unwrap().unwrap();
+    assert_eq!(row.stage, Phase::Pending);
+    assert!(row.processed_slot.is_none());
+    assert_eq!(row.wire_base64, STANDARD.encode(wire));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nonce_same_bank_cannot_advance_again_and_lookup_loaded_nonce_can_process() {
+    use ronchi::protocol::{
+        nonce::NonceAccount,
+        state::{LookupTable, ProtocolState},
+    };
+    use sha2::{Digest, Sha256};
+    let account = bs58::encode([65; 32]).into_string();
+    let table = bs58::encode([66; 32]).into_string();
+    let signer = SigningKey::from_bytes(&[33; 32]);
+    let authority = bs58::encode(signer.verifying_key().to_bytes()).into_string();
+    let (clock, _) = Clock::controlled(
+        ClockProfile {
+            slot_duration_ms: 60_000,
+            ..Default::default()
+        },
+        b"transaction-test-network",
+    )
+    .unwrap();
+    let hash = bs58::decode(clock.blockhash(0)).into_vec().unwrap();
+    let nonce = bs58::encode(Sha256::digest(
+        [b"DURABLE_NONCE".as_slice(), &hash].concat(),
+    ))
+    .into_string();
+    let state = ProtocolState {
+        lookup_tables: vec![],
+        nonce_accounts: vec![NonceAccount {
+            address: account.clone(),
+            authority: authority.clone(),
+            nonce: nonce.clone(),
+            slot: 0,
+        }],
+    };
+    let mut server = Server::with_state(clock.profile, DiskLimits::default(), state).await;
+    let (signature, wire) = signed_nonce(&nonce, 33, &account, 1, 0);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    server.time.advance(Duration::from_secs(2)).unwrap();
+    server.phase(&signature, Phase::Unprocessed).await;
+    assert!(server.stop(false).await);
+    let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+    assert_eq!(reader.nonce(&account, None).unwrap().unwrap().nonce, nonce);
+    // v0 nonce account can be loaded writable; its authority must remain a static signer.
+    let nonce = bs58::encode([95; 32]).into_string();
+    let state = ProtocolState {
+        lookup_tables: vec![LookupTable {
+            address: table.clone(),
+            addresses: vec![account.clone()],
+            last_extended_slot: 0,
+            last_extended_slot_start_index: 1,
+            deactivation_slot: None,
+        }],
+        nonce_accounts: vec![NonceAccount {
+            address: account.clone(),
+            authority,
+            nonce: nonce.clone(),
+            slot: 0,
+        }],
+    };
+    let mut server =
+        Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+    let mut message = vec![0x80, 1, 0, 2, 3];
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    message.extend(
+        bs58::decode("SysvarRecentB1ockHashes11111111111111111111")
+            .into_vec()
+            .unwrap(),
+    );
+    message.extend_from_slice(&[0; 32]);
+    message.extend(bs58::decode(&nonce).into_vec().unwrap());
+    message.extend_from_slice(&[1, 2, 3, 3, 1, 0, 4]);
+    message.extend_from_slice(&4u32.to_le_bytes());
+    message.push(1);
+    message.extend(bs58::decode(table).into_vec().unwrap());
+    message.extend_from_slice(&[1, 0, 0]);
+    let signature = signer.sign(&message).to_bytes();
+    let identity = bs58::encode(signature).into_string();
+    let mut wire = vec![1];
+    wire.extend_from_slice(&signature);
+    wire.extend(message);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        identity
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server.phase(&identity, Phase::Finalized).await;
+    assert!(server.stop(false).await);
+    let row = server.record(&identity).await.unwrap();
+    assert_eq!(row.nonce_context.unwrap().address, account);
+}
+
+fn packet_fixture(hash: &str, version: i16, extra: usize) -> (String, Vec<u8>) {
+    let signer = SigningKey::from_bytes(&[34; 32]);
+    let (maximum, overhead) = match version {
+        -1 => (1232, 170),
+        0 => (1232, 172),
+        _ => (4096, 174),
+    };
+    let size = maximum - overhead + extra;
+    let mut message = if version == 1 {
+        vec![0x81, 1, 0, 1]
+    } else if version == 0 {
+        vec![0x80, 1, 0, 1, 2]
+    } else {
+        vec![1, 0, 1, 2]
+    };
+    if version == 1 {
+        message.extend_from_slice(&0u32.to_le_bytes());
+        message.extend(bs58::decode(hash).into_vec().unwrap());
+        message.extend_from_slice(&[1, 2]);
+    }
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    message.extend_from_slice(&[81; 32]);
+    if version != 1 {
+        message.extend(bs58::decode(hash).into_vec().unwrap());
+        message.push(1);
+    }
+    message.extend_from_slice(&[1, 0]);
+    if version == 1 {
+        message.extend_from_slice(&(size as u16).to_le_bytes());
+    } else {
+        message.extend_from_slice(&[((size & 127) as u8) | 128, (size >> 7) as u8]);
+    }
+    message.resize(message.len() + size, 7);
+    if version == 0 {
+        message.push(0);
+    }
+    let sig = signer.sign(&message).to_bytes();
+    let wire = if version == 1 {
+        let mut v = message;
+        v.extend_from_slice(&sig);
+        v
+    } else {
+        let mut v = vec![1];
+        v.extend_from_slice(&sig);
+        v.extend(message);
+        v
+    };
+    assert_eq!(wire.len(), maximum + extra);
+    (bs58::encode(sig).into_string(), wire)
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exact_packet_bounds_for_all_formats_preserve_binary_and_reject_one_extra_byte() {
+    for version in [-1, 0, 1] {
+        let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+        let hash = server.hash().await;
+        let (signature, wire) = packet_fixture(&hash, version, 0);
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        assert_eq!(
+            server
+                .call(
+                    "sendTransaction",
+                    json!([bs58::encode(&wire).into_string(),{"skipPreflight":true}])
+                )
+                .await["result"],
+            signature
+        );
+        let (_, oversized) = packet_fixture(&hash, version, 1);
+        assert_eq!(
+            server.call("sendTransaction", send(&oversized)).await["error"]["code"],
+            -32602
+        );
+        server.time.advance(Duration::from_secs(6)).unwrap();
+        server.phase(&signature, Phase::Finalized).await;
+        assert_eq!(
+            server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"encoding":"base64","maxSupportedTransactionVersion":1}])
+                )
+                .await["result"]["transaction"][0],
+            STANDARD.encode(&wire)
+        );
+        assert!(server.stop(false).await);
+    }
 }

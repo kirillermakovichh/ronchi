@@ -35,6 +35,13 @@ impl FeeMessage {
         }
         Ok(Self(message))
     }
+    pub fn nonce_use(
+        &self,
+        state: &ProtocolState,
+        slot: u64,
+    ) -> Result<Option<super::nonce::NonceUse>, RpcError> {
+        super::nonce::resolve(&self.0, &state.resolve(&self.0, slot)?)
+    }
     pub fn blockhash(&self) -> String {
         self.0.recent_blockhash().to_string()
     }

@@ -10,6 +10,8 @@ use solana_message::VersionedMessage;
 pub struct ProtocolState {
     #[serde(default)]
     pub lookup_tables: Vec<LookupTable>,
+    #[serde(default)]
+    pub nonce_accounts: Vec<super::nonce::NonceAccount>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -41,7 +43,8 @@ pub fn unavailable(message: &str) -> RpcError {
 }
 impl ProtocolState {
     pub fn validate(&self) -> Result<(), String> {
-        if self.lookup_tables.len() > 16
+        if self.nonce_accounts.len() > 32
+            || self.lookup_tables.len() > 16
             || serde_json::to_vec(self)
                 .map_err(|_| "Invalid protocol state")?
                 .len()
@@ -58,6 +61,16 @@ impl ProtocolState {
                 || table.addresses.iter().any(|key| !address(key))
             {
                 return Err("Invalid or duplicate simulator lookup table".into());
+            }
+        }
+        for account in &self.nonce_accounts {
+            if !address(&account.address)
+                || !address(&account.authority)
+                || !address(&account.nonce)
+                || account.slot != 0
+                || !seen.insert(&account.address)
+            {
+                return Err("Invalid or duplicate simulator nonce account".into());
             }
         }
         Ok(())

@@ -144,7 +144,7 @@ No active history is evicted to keep the Lab running; protocol lookup and lifeti
 
 ### Implemented storage primitive
 
-`JournalStore` creates a new file-backed version-2 Journal. Readers also accept version-1 Journals.
+`JournalStore` creates a new file-backed version-3 Journal. Readers also accept version-1 and version-2 Journals.
 Its strict tables store one immutable Lab identity, the committed watermark, terminal state, and JSON event envelopes keyed by sequence.
 Sequence assignment, event insertion, watermark update, and terminal state update share one transaction.
 Schema 2 adds an indexed transaction projection maintained by SQLite triggers in the same event transaction.
@@ -153,6 +153,12 @@ Transition events update the projection atomically.
 Acceptance also retains resolved lookup addresses; historical JSON projection does not query mutable upstream state.
 A bounded `protocol.fixture` event records explicit simulator startup state.
 A failed projection write rolls back the submission attempt and acceptance together.
+Schema 3 adds indexed nonce versions keyed by account and committed event sequence.
+The startup fixture seeds nonce versions; a processed transition advances its nonce in the same SQLite transaction.
+The trigger checks the previous committed nonce before inserting the new version.
+A nonce write failure rolls back the processed transition and its watermark.
+Historical nonce queries select the latest committed version at or before the requested slot.
+Readers of schema 1/2 return no nonce state; no offline migration is implied.
 Version-1 readers expose no transaction records; no live migration or simulator resume is implemented.
 The writer reads back WAL mode and `synchronous=FULL` before creating the schema.
 Lock waiting is bounded to 250 ms; automatic WAL checkpoints remain enabled at 1,000 pages.
@@ -198,7 +204,7 @@ These conservative bounds can reject work before the directory reaches its quota
 
 Admission scans actual files and checks filesystem available space under the same accounting lock used for commits and checkpoints.
 A reservation covers potential database growth, WAL frames, SHM growth, and filesystem allocation rounding.
-The version-2 schema bounds new pages by encoded overflow pages, six pages per event, and sixteen metadata pages per group.
+The version-3 schema bounds new pages by encoded overflow pages, ten pages per event, and sixteen metadata pages per group.
 `max_page_count` enforces that bound for each write transaction.
 `cache_spill=OFF` prevents repeated spilled WAL frames during the transaction.
 The reservation conservatively charges a frame for every potential database page, including existing pages.
