@@ -10,7 +10,7 @@ pub(super) struct ContextConfig {
     pub commitment: Option<Commitment>,
     pub min_context_slot: Option<u64>,
 }
-pub(super) fn positional(params: &Value) -> Result<&[Value], RpcError> {
+pub(crate) fn positional(params: &Value) -> Result<&[Value], RpcError> {
     match params {
         Value::Null => Ok(&[]),
         Value::Array(values) => Ok(values),
@@ -19,7 +19,7 @@ pub(super) fn positional(params: &Value) -> Result<&[Value], RpcError> {
         )),
     }
 }
-pub(super) fn config<T: serde::de::DeserializeOwned + Default>(
+pub(crate) fn config<T: serde::de::DeserializeOwned + Default>(
     value: Option<&Value>,
 ) -> Result<T, RpcError> {
     match value {
@@ -62,7 +62,7 @@ pub(super) fn execute(clock: &Clock, method: &str, params: &Value) -> Result<Val
             Ok(match method {
                 "getHealth" => json!("ok"),
                 "getVersion" => {
-                    json!({"solana-core":format!("0.0.0-ronchi.{}",env!("CARGO_PKG_VERSION")),"ronchi":{"version":env!("CARGO_PKG_VERSION"),"profile":"local-bootstrap-v1","compatibility":"partial"}})
+                    json!({"solana-core":format!("0.0.0-ronchi.{}",env!("CARGO_PKG_VERSION")),"ronchi":{"version":env!("CARGO_PKG_VERSION"),"profile":"local-simulator-v1","compatibility":"partial"}})
                 }
                 _ => json!(clock.genesis_hash()),
             })

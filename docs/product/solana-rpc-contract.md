@@ -29,7 +29,8 @@ The implementation must verify the reported compatibility profile before making 
 ### Implemented bootstrap profile
 
 Task 4 implements `getHealth`, `getVersion`, `getGenesisHash`, `getSlot`, `getBlockHeight`, `getLatestBlockhash`, and `isBlockhashValid`.
-The profile is `local-bootstrap-v1`.
+Task 5 adds `sendTransaction`, `getSignatureStatuses`, and `getTransaction`.
+The current partial profile is `local-simulator-v1`.
 `getVersion` reports `0.0.0-ronchi.<native-version>` and an explicit partial-profile extension.
 It does not claim an Agave release or feature set.
 The genesis identity and blockhashes derive from a domain-separated local Lab identity.
@@ -48,7 +49,8 @@ A future minimum returns `-32016` with the actual `contextSlot`.
 Each generated blockhash remains valid through its issue height plus 150 blocks, inclusive.
 A hash not yet present in the selected view is unavailable there.
 Validity uses local block height; it does not use elapsed seconds or an unrelated public bound.
-The implementation derives a bounded recent window without retaining unlimited clock history in memory.
+The hash encodes its issue height in eight little-endian bytes and authenticates local provenance with 24 domain-separated SHA-256 bytes.
+This permits constant-time lifetime lookup without retaining unlimited clock history in memory.
 
 The HTTP request budget is 64 KiB and the batch maximum is 64 elements.
 Responses are capped at 256 KiB; requests have a 30-second ordinary deadline.
@@ -68,6 +70,34 @@ A forced/cancelled or failed transport remains separate from the prepared result
 Method selection and bank/context semantics were cross-checked against [Agave v3.0.10 RPC source](https://github.com/anza-xyz/agave/blob/v3.0.10/rpc/src/rpc.rs).
 The official method-page fetch returned HTTP `429` in this session; the checked-in references and pinned implementation provide the available evidence.
 This bootstrap verification does not establish the full accepted format matrix.
+
+### Implemented lifecycle profile
+
+Acceptance commits exact signed bytes and identity before returning the first signature.
+Concurrent retries retain one lifecycle and its original deadlines.
+One owned actor advances processing, confirmation, and finalization at acceptance plus 2, 4, and 6 simulated seconds without polling.
+It retains at most 128 active lifecycles and admits at most 64 queued operations.
+Normal stop drains accepted progression; force stop preserves committed state without inventing completion.
+An expired local recent hash prevents processing; an unknown hash records unavailable local state instead of claiming expiry.
+Processing at the inclusive validity bound succeeds; later ageing does not undo processing.
+
+Submission requires `skipPreflight:true`.
+Omitted or zero `maxRetries` is supported; positive values require an unimplemented rebroadcast model and return a capability error.
+With skipped preflight, `minContextSlot` uses the processed view; `preflightCommitment` is validated.
+Status lookup preserves signature order and duplicates, with at most 256 signatures.
+Pending, expired, and unprocessed identities return null status.
+The recent cache retains active statuses and 300 finalized slots; `searchTransactionHistory:true` reads retained history.
+Transaction lookup defaults to finalized and also accepts confirmed; processed is rejected.
+Results retain signed content and return `meta:null` and `blockTime:null`.
+Simulator status success describes controlled progression, not program execution.
+
+The selected official modular codec is `solana-transaction 6.0.0` with wincode.
+The current verified HTTP fixtures cover legacy and v0, base58/base64 submission, binary round trips, JSON lookup, and client version negotiation.
+V1 binary decoding uses the selected codec, but its independent fixture matrix remains task 6.
+V1 JSON, `jsonParsed`, lookup-table state, fee coverage, and durable nonce histories remain task 6.
+Missing nonce state returns a capability error; it does not use recent-hash expiry.
+These gaps do not narrow the accepted format scope below.
+Response-loss policy remains task 7.
 
 ## Transaction formats and encodings
 

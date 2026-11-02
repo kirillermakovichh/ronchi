@@ -1,5 +1,5 @@
 //! Bounded JSON-RPC. RPC IDs remain wire values; Journal identities are independent.
-mod methods;
+pub(crate) mod methods;
 use crate::{
     journal::{Event, WriterHandle, WriterHealth},
     simulator::clock::Clock,
@@ -53,7 +53,7 @@ impl RpcError {
             data: Some(json!({"code":"unsupported_capability"})),
         }
     }
-    fn internal() -> Self {
+    pub(crate) fn internal() -> Self {
         Self {
             code: -32603,
             message: "Journal admission or persistence failed".into(),
@@ -79,6 +79,9 @@ struct State {
     ready: AtomicBool,
     registration: AtomicU64,
     started: Instant,
+    transactions: crate::simulator::transactions::Transactions,
+    owner: Mutex<Option<crate::simulator::transactions::Owner>>,
+    initialized: tokio::sync::watch::Sender<Option<bool>>,
 }
 #[derive(Clone)]
 pub(crate) struct Exchange {
@@ -87,7 +90,16 @@ pub(crate) struct Exchange {
 }
 impl Rpc {
     pub fn new(clock: Clock, writer: WriterHandle, started: Instant) -> Self {
+        let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
+            clock.clone(),
+            writer.clone(),
+            started,
+        );
+        let (initialized, _) = tokio::sync::watch::channel(None);
         Self(Arc::new(State {
+            transactions,
+            owner: Mutex::new(Some(owner)),
+            initialized,
             clock,
             writer,
             ready: AtomicBool::new(false),
@@ -101,13 +113,63 @@ impl Rpc {
     pub fn clock(&self) -> &Clock {
         &self.0.clock
     }
+    pub async fn wait_initialized(&self) -> std::io::Result<()> {
+        let mut receiver = self.0.initialized.subscribe();
+        match receiver.wait_for(|value| value.is_some()).await {
+            Ok(value) if *value == Some(true) => Ok(()),
+            _ => Err(std::io::Error::other("Simulator initialization failed")),
+        }
+    }
     pub async fn serve(
         self,
         listener: tokio::net::TcpListener,
         stop: CancellationToken,
         force: CancellationToken,
     ) -> std::io::Result<()> {
-        crate::network::serve(listener, crate::network::Handler::Rpc(self), stop, force).await
+        let mut owner = self
+            .0
+            .owner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .ok_or_else(|| std::io::Error::other("Simulator already has an owner"))?;
+        if let Err(error) = owner.initialize().await {
+            self.0.initialized.send_replace(Some(false));
+            self.0.writer.fail_fatal();
+            return Err(std::io::Error::other(error));
+        }
+        self.0.initialized.send_replace(Some(true));
+        let closing = CancellationToken::new();
+        let actor_closing = closing.clone();
+        let actor_force = force.clone();
+        let writer = self.0.writer.clone();
+        let mut actor = tokio::spawn(async move {
+            let result = owner.run(actor_closing, actor_force).await;
+            if result.is_err() {
+                writer.fail_fatal();
+            }
+            result
+        });
+        let network = crate::network::serve(
+            listener,
+            crate::network::Handler::Rpc(self.clone()),
+            stop.clone(),
+            force.clone(),
+        );
+        tokio::pin!(network);
+        let (result, actor_result) = tokio::select! {
+            result=&mut network=>(result,None),
+            result=&mut actor=>{stop.cancel();force.cancel();(network.await,Some(result))},
+        };
+        closing.cancel();
+        let actor_result = match actor_result {
+            Some(result) => result,
+            None => actor.await,
+        };
+        actor_result
+            .map_err(std::io::Error::other)?
+            .map_err(std::io::Error::other)?;
+        result
     }
     pub(crate) fn exchange(&self) -> Exchange {
         Exchange {
@@ -268,6 +330,19 @@ impl Exchange {
                     message: "Local Lab is not ready".into(),
                     data: None,
                 })
+            } else if crate::simulator::transactions::TRANSACTION_METHODS
+                .contains(&item["method"].as_str().unwrap_or(""))
+            {
+                self.rpc
+                    .0
+                    .transactions
+                    .execute(
+                        &self.rpc.0.clock,
+                        item["method"].as_str().unwrap_or(""),
+                        item.get("params").unwrap_or(&Value::Null),
+                        reference.clone(),
+                    )
+                    .await
             } else {
                 methods::execute(
                     &self.rpc.0.clock,
@@ -308,6 +383,36 @@ impl Exchange {
             }
             decisions.push(fact);
             boundaries.push(boundary);
+        }
+        if serde_json::to_vec(&responses)
+            .expect("JSON values serialize")
+            .len()
+            > MAX_RESPONSE_BYTES
+        {
+            let failure = RpcError {
+                code: -32000,
+                message:
+                    "Response exceeds its byte budget; select a smaller batch or binary encoding"
+                        .into(),
+                data: Some(json!({"code":"result_too_large"})),
+            };
+            for response in &mut responses {
+                *response = error(response["id"].clone(), failure.clone());
+            }
+            for fact in &mut decisions {
+                if let Some(result) = fact
+                    .as_object_mut()
+                    .and_then(|object| object.remove("result"))
+                {
+                    fact["source_result"] = result;
+                }
+                fact["prepared_error_code"] = json!(-32000);
+            }
+            for boundary in &mut boundaries {
+                if boundary["rpc_response"] != "notification_no_response" {
+                    boundary["rpc_response"] = json!("error");
+                }
+            }
         }
         if let Err(failure) = self.rpc.record("rpc.response_prepared", decisions).await {
             let responses: Vec<_> = responses

@@ -106,7 +106,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
     let starting = event(
         "lab.starting",
         started,
-        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"local-bootstrap-v1","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
+        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"local-simulator-v1","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
     );
     if let Err(error) = append(&handle, starting).await {
         let _ = tokio::task::spawn_blocking(move || writer.shutdown(None)).await;
@@ -153,9 +153,8 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
     let rpc_force = CancellationToken::new();
     let control_stop = CancellationToken::new();
     let control_force = CancellationToken::new();
-    let mut rpc_task = tokio::spawn(network::serve(
+    let mut rpc_task = tokio::spawn(rpc_api.clone().serve(
         rpc,
-        Handler::Rpc(rpc_api.clone()),
         rpc_stop.clone(),
         rpc_force.clone(),
     ));
@@ -177,6 +176,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         if fs2::FileExt::try_lock_exclusive(&lease).is_ok() { return Err(LabError::new(130,"cancelled","Startup client disconnected before readiness")); }
+        tokio::time::timeout(STARTUP,rpc_api.wait_initialized()).await.map_err(|_|LabError::internal("Simulator startup deadline exceeded"))??;
         let ready=event("lab.ready",started,serde_json::json!({"startup_seq":1,"capabilities":manifest.capabilities,"rpc_address":control.snapshot().rpc_address,"control_address":control.snapshot().control_address}));
         let seq=append(&handle,ready).await?;
         {

@@ -8,9 +8,11 @@ use std::path::Path;
 pub struct JournalStore {
     connection: Connection,
     pub(super) budget: Budget,
+    pub(super) path: std::path::PathBuf,
 }
 pub struct JournalReader {
-    connection: Connection,
+    pub(super) version: u32,
+    pub(super) connection: Connection,
 }
 const SCHEMA: &str = "
 CREATE TABLE journal (
@@ -68,6 +70,7 @@ impl JournalStore {
             path.parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or(Path::new(".")),
+            path.file_name().ok_or(JournalError::InvalidInput)?,
             limits,
         )?;
         let mut connection = Connection::open(path)?;
@@ -81,21 +84,28 @@ impl JournalStore {
         let mode: String = connection.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.pragma_update(None, "cache_spill", "OFF")?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "max_page_count", 16)?;
         connection.pragma_update(None, "wal_autocheckpoint", 1000)?;
+        let foreign_keys: u32 = connection.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
         let spill: u32 = connection.query_row("PRAGMA cache_spill", [], |r| r.get(0))?;
         let sync: u32 = connection.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
-        if mode != "wal" || sync != 2 || spill != 0 {
+        if mode != "wal" || sync != 2 || spill != 0 || foreign_keys != 1 {
             return Err(JournalError::UnsupportedSchema);
         }
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(SCHEMA)?;
+        tx.execute_batch(super::transactions::SCHEMA)?;
         tx.execute("INSERT INTO journal VALUES(1,?1,0,'open')", [lab_id])?;
         tx.commit()?;
         let pages: u32 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
         let page_size: u32 = connection.query_row("PRAGMA page_size", [], |r| r.get(0))?;
         budget.initialize(u64::from(page_size), u64::from(pages))?;
-        Ok(Self { connection, budget })
+        Ok(Self {
+            connection,
+            budget,
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn disk_usage(&self) -> Result<DiskUsage, JournalError> {
@@ -200,10 +210,13 @@ impl JournalReader {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version != 1 {
+        if !matches!(version, 1 | 2) {
             return Err(JournalError::UnsupportedSchema);
         }
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            version,
+        })
     }
 
     /// `owner_alive` must come from lifecycle authentication, never a PID alone.

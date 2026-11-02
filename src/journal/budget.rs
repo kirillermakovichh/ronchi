@@ -26,6 +26,7 @@ pub struct DiskUsage {
     pub used_bytes: u64,
     pub available_bytes: u64,
     pub reserved_bytes: u64,
+    pub checkpoint_growth_bytes: u64,
     pub shutdown_reserve_bytes: u64,
     pub total_bytes: u64,
 }
@@ -33,11 +34,12 @@ pub struct DiskUsage {
 pub(super) struct Budget(Arc<Mutex<Account>>);
 pub(super) struct Account {
     root: PathBuf,
+    database: PathBuf,
     limits: DiskLimits,
     page_size: u64,
     pages: u64,
     next: u64,
-    pending: BTreeMap<u64, (u64, u64)>, // growth pages, disk liability
+    pending: BTreeMap<u64, (u64, u64, bool)>, // growth pages, disk liability
     failed: bool,
 }
 pub(super) struct Permit {
@@ -60,7 +62,11 @@ fn mul(a: u64, b: u64) -> Result<u64, JournalError> {
 }
 
 impl Budget {
-    pub(super) fn new(root: &Path, limits: DiskLimits) -> Result<Self, JournalError> {
+    pub(super) fn new(
+        root: &Path,
+        database: &std::ffi::OsStr,
+        limits: DiskLimits,
+    ) -> Result<Self, JournalError> {
         if limits.shutdown_reserve_bytes < MIN_SHUTDOWN_RESERVE
             || limits.total_bytes <= limits.shutdown_reserve_bytes
         {
@@ -71,6 +77,7 @@ impl Budget {
             return Err(JournalError::InvalidInput);
         }
         let budget = Self(Arc::new(Mutex::new(Account {
+            database: root.join(database),
             root,
             limits,
             page_size: 4096,
@@ -128,14 +135,15 @@ impl Budget {
             let growth = add(
                 add(
                     bytes.div_ceil(account.page_size - 128),
-                    mul(encoded.len() as u64, 4)?,
+                    mul(encoded.len() as u64, 6)?,
                 )?,
                 16,
             )?;
             let pending_growth = account
                 .pending
                 .values()
-                .try_fold(0, |n, (p, _)| add(n, *p))?;
+                .filter(|(_, _, deferred)| !*deferred)
+                .try_fold(0, |n, (p, _, _)| add(n, *p))?;
             let target = add(add(account.pages, pending_growth)?, growth)?;
             let liability = account.liability(growth, target)?;
             account.next = account
@@ -143,7 +151,7 @@ impl Budget {
                 .checked_add(1)
                 .ok_or(JournalError::DiskBudget)?;
             let id = account.next;
-            account.pending.insert(id, (growth, liability));
+            account.pending.insert(id, (growth, liability, false));
             if let Err(error) = account.check(0, true) {
                 account.pending.remove(&id);
                 return Err(error);
@@ -157,6 +165,59 @@ impl Budget {
             account.failed = true;
         }
         result
+    }
+    pub(super) fn reserve_transition(&self) -> Result<Permit, JournalError> {
+        let mut account = self.lock();
+        if account.failed {
+            return Err(JournalError::WriterFailed);
+        }
+        let result = (|| {
+            let granularity = fs2::allocation_granularity(&account.root)
+                .map_err(io)?
+                .max(4096);
+            // At <=1 GiB: three B-trees, bounded transition row, no cache spilling.
+            // Reserve 256 dirty frames plus 32 growth pages, SHM and allocation rounding.
+            let liability = add(
+                add(
+                    mul(256, account.page_size + 24)?,
+                    mul(32, account.page_size)?,
+                )?,
+                add(65536, mul(granularity, 4)?)?,
+            )?;
+            account.next = account
+                .next
+                .checked_add(1)
+                .ok_or(JournalError::DiskBudget)?;
+            let id = account.next;
+            account.pending.insert(id, (32, liability, true));
+            if let Err(error) = account.check(0, true) {
+                account.pending.remove(&id);
+                return Err(error);
+            }
+            Ok(Permit {
+                budget: self.clone(),
+                id,
+            })
+        })();
+        if result.is_err() {
+            account.failed = true;
+        }
+        result
+    }
+    pub(super) fn activate(&self, permit: &Permit) -> Result<(), JournalError> {
+        if !Arc::ptr_eq(&self.0, &permit.budget.0) {
+            return Err(JournalError::InvalidInput);
+        }
+        let mut account = self.lock();
+        let entry = account
+            .pending
+            .get_mut(&permit.id)
+            .ok_or(JournalError::InvalidInput)?;
+        if !entry.2 {
+            return Err(JournalError::InvalidInput);
+        }
+        entry.2 = false;
+        Ok(())
     }
     /// Serializes filesystem growth with admissions. Permits remain charged through commit/checkpoint.
     pub(super) fn commit<T>(
@@ -229,10 +290,23 @@ impl Account {
         let mut entries = 0;
         let used_bytes = tree_bytes(&self.root, 0, &mut entries)?;
         let stats = fs2::statvfs(&self.root).map_err(io)?;
-        let reserved_bytes = self.pending.values().try_fold(0, |n, (_, b)| add(n, *b))?;
-        let pending_pages = self.pending.values().try_fold(0, |n, (p, _)| add(n, *p))?;
+        let reserved_bytes = self
+            .pending
+            .values()
+            .try_fold(0, |n, (_, b, _)| add(n, *b))?;
+        let pending_pages = self
+            .pending
+            .values()
+            .try_fold(0, |n, (p, _, _)| add(n, *p))?;
         let terminal_liability = self.liability(64, add(add(self.pages, pending_pages)?, 64)?)?;
+        let file_bytes = match std::fs::metadata(&self.database) {
+            Ok(m) => m.len(),
+            Err(e) if self.pages == 0 && e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(io(e)),
+        };
+        let checkpoint_growth_bytes = mul(self.pages, self.page_size)?.saturating_sub(file_bytes);
         Ok(DiskUsage {
+            checkpoint_growth_bytes,
             used_bytes,
             available_bytes: stats.available_space(),
             reserved_bytes,
@@ -247,7 +321,13 @@ impl Account {
         } else {
             0
         };
-        let future = add(add(usage.reserved_bytes, additional)?, reserve)?;
+        let future = add(
+            add(
+                add(usage.reserved_bytes, usage.checkpoint_growth_bytes)?,
+                additional,
+            )?,
+            reserve,
+        )?;
         if add(usage.used_bytes, future)? > usage.total_bytes {
             return Err(JournalError::DiskBudget);
         }

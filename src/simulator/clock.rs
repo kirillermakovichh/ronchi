@@ -130,18 +130,29 @@ impl Clock {
     }
     pub fn blockhash(&self, height: u64) -> String {
         let mut hash = Sha256::new();
-        hash.update(b"ronchi-blockhash-v1");
+        hash.update(b"ronchi-height-hash-v1");
         hash.update(self.seed);
         hash.update(height.to_le_bytes());
-        bs58::encode(hash.finalize()).into_string()
+        let digest = hash.finalize();
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&height.to_le_bytes());
+        bytes[8..].copy_from_slice(&digest[..24]);
+        bs58::encode(bytes).into_string()
     }
-    /// Unknown, future, and expired hashes are distinct from a recognized local lifetime.
+    /// Recognize this Lab's synthetic hash domain without scanning retained history.
+    pub fn local_hash_height(&self, hash: &str) -> Option<u64> {
+        let mut bytes = [0u8; 32];
+        if hash.len() > 44 || bs58::decode(hash).onto(&mut bytes).ok() != Some(32) {
+            return None;
+        }
+        let height = u64::from_le_bytes(bytes[..8].try_into().ok()?);
+        (height >= self.profile.initial_block_height && self.blockhash(height) == hash)
+            .then_some(height)
+    }
     pub fn hash_height(&self, hash: &str, view: View) -> Option<u64> {
-        let first = view
-            .block_height
-            .saturating_sub(self.profile.validity_window_blocks)
-            .max(self.profile.initial_block_height);
-        (first..=view.block_height).find(|height| self.blockhash(*height) == hash)
+        self.local_hash_height(hash).filter(|h| {
+            *h <= view.block_height && view.block_height - *h <= self.profile.validity_window_blocks
+        })
     }
     pub async fn wait_until(&self, elapsed: Duration) {
         match &self.source {

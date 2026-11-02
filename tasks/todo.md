@@ -104,10 +104,15 @@ Checkpoints record results and do not require another approval interview.
 
 ### 5. Submission identity and lifecycle lookup
 
-- [ ] **Accept:** Commit signed identity before acceptance; derive status/transaction lookup from one lifecycle and preserve duplicate history, processing, and expiry distinctions.
+- [x] **Accept:** Commit signed identity before acceptance; derive status/transaction lookup from one lifecycle and preserve duplicate history, processing, and expiry distinctions.
 - **Verify:** Independent 0/2/4/6-second progression, duplicate races, expired unprocessed submissions, retained history, and preflight capability errors.
 - **Dependencies:** 2, 4. **Scope:** Medium. **Likely files:** `src/simulator/transactions.rs`, `src/rpc/submission.rs`, `src/rpc/lookup.rs`, `src/journal/transactions.rs`, `tests/transaction_history.rs`.
 - **Source:** [RPC submission/history](../docs/product/solana-rpc-contract.md).
+
+- **Implemented:** Atomic signed-byte/identity acceptance and indexed lifecycle projection in Journal schema 2, one bounded lifecycle owner, reserved future writes, concurrent duplicate suppression, autonomous 2/4/6-second progression, recent-hash expiry, and coherent status/transaction lookup with `meta:null`.
+- **Verification:** `cargo test --locked --test transaction_history -- --test-threads=1` passed (7 actual HTTP/file-backed histories). Independent signed legacy/v0 fixtures cover durable acceptance/reopen, concurrent repeats, notifications, status/history/version negotiation, inclusive processing validity, expiry/unavailable-state distinction, preflight/parameter errors, pending-work drain, force stop, future disk liability, and atomic rollback on identity-projection failure.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (47 tests including the Journal subprocess fixture), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- **Boundary:** Task 6 retains the full legacy/v0/v1 encoding, parsed projection, lookup-table, fee, and nonce matrix. Missing capabilities return explicit errors. Response-loss remains task 7. Simulator progression does not establish program execution or Client Outcome.
 
 ### 6. Full format and lifetime coverage
 

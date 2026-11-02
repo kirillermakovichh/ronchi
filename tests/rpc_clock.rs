@@ -212,12 +212,7 @@ async fn actual_http_rejects_invalid_protocol_and_method_parameters() {
         server.call("unknownWrite", json!([])).await["error"]["code"],
         -32601
     );
-    for method in [
-        "sendTransaction",
-        "simulateTransaction",
-        "requestAirdrop",
-        "getBalance",
-    ] {
+    for method in ["simulateTransaction", "requestAirdrop", "getBalance"] {
         assert_eq!(
             server.call(method, json!([])).await["error"]["data"]["code"],
             "unsupported_capability"

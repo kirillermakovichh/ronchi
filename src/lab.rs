@@ -354,6 +354,7 @@ pub async fn up(
             .chain(
                 crate::rpc::BOOTSTRAP_METHODS
                     .into_iter()
+                    .chain(crate::simulator::transactions::TRANSACTION_METHODS)
                     .map(|method| format!("rpc.{method}")),
             )
             .collect(),
@@ -362,6 +363,7 @@ pub async fn up(
         versions: std::collections::BTreeMap::from([
             ("ronchi".into(), env!("CARGO_PKG_VERSION").into()),
             ("sqlite".into(), rusqlite::version().into()),
+            ("solana-transaction".into(), "6.0.0".into()),
         ]),
         disk_limits: crate::journal::DiskLimits::default(),
     };

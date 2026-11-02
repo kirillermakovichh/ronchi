@@ -56,6 +56,7 @@ impl Default for QueueLimits {
 struct Shared {
     limits: QueueLimits,
     budget: Budget,
+    path: std::path::PathBuf,
     state: Mutex<State>,
     changed: Condvar,
     status: watch::Sender<WriterStatus>,
@@ -92,7 +93,41 @@ impl CommitReceipt {
     }
 }
 
+/// Disk liability held before transaction acceptance for a future bounded state transition.
+pub struct TransitionReservation(Permit);
 impl WriterHandle {
+    pub fn reserve_transition(&self) -> Result<TransitionReservation, JournalError> {
+        if self.status().health != WriterHealth::Healthy {
+            return Err(JournalError::WriterFailed);
+        }
+        match self.shared.budget.reserve_transition() {
+            Ok(permit) => Ok(TransitionReservation(permit)),
+            Err(error) => {
+                self.shared.fail();
+                Err(error)
+            }
+        }
+    }
+    pub fn try_append_transition(
+        &self,
+        event: &Event,
+        reservation: TransitionReservation,
+    ) -> Result<CommitReceipt, JournalError> {
+        let encoded = encode(std::slice::from_ref(event))?;
+        if encoded[0].len() > 4096 || event.kind != "transaction.transition" {
+            return Err(JournalError::InvalidInput);
+        }
+        self.enqueue(encoded, Some(reservation.0))
+    }
+
+    /// Open a bounded-query reader outside Tokio workers.
+    pub fn reader(&self) -> Result<super::JournalReader, JournalError> {
+        super::JournalReader::open(&self.shared.path)
+    }
+    pub fn fail_fatal(&self) {
+        self.shared.fail();
+    }
+
     /// Publishes bounded lifecycle metadata against the same Lab disk budget.
     pub fn publish_metadata(&self, data: &[u8]) -> Result<(), JournalError> {
         let result = self.shared.budget.publish_metadata(data);
@@ -114,7 +149,13 @@ impl WriterHandle {
     /// Never waits for queue space. Saturation permanently fails admission.
     /// The returned receipt acknowledges SQLite commit, not queue insertion.
     pub fn try_append(&self, events: &[Event]) -> Result<CommitReceipt, JournalError> {
-        let encoded = encode(events)?;
+        self.enqueue(encode(events)?, None)
+    }
+    fn enqueue(
+        &self,
+        encoded: Vec<String>,
+        existing: Option<Permit>,
+    ) -> Result<CommitReceipt, JournalError> {
         let bytes = encoded.iter().map(String::len).sum::<usize>();
         let (reply, receipt) = oneshot::channel();
         let mut state = self.shared.lock();
@@ -130,11 +171,16 @@ impl WriterHandle {
             self.shared.fail();
             return Err(JournalError::Saturated);
         }
-        let permit = match self.shared.budget.reserve(&encoded) {
-            Ok(permit) => permit,
-            Err(error) => {
-                self.shared.fail();
-                return Err(error);
+        let permit = if let Some(permit) = existing {
+            self.shared.budget.activate(&permit)?;
+            permit
+        } else {
+            match self.shared.budget.reserve(&encoded) {
+                Ok(permit) => permit,
+                Err(error) => {
+                    self.shared.fail();
+                    return Err(error);
+                }
             }
         };
         state.pending_events += encoded.len();
@@ -175,6 +221,7 @@ impl JournalWriter {
         });
         let shared = Arc::new(Shared {
             budget: store.budget.clone(),
+            path: store.path.clone(),
             limits,
             state: Mutex::new(State {
                 queue: VecDeque::new(),
