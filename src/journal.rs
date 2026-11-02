@@ -1,9 +1,13 @@
 //! Bounded durable event storage. Callers supply validated, redacted event facts.
 //! This module does not infer application outcomes or restore a running Lab.
 mod store;
+mod writer;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 pub use store::{JournalReader, JournalStore};
+pub use writer::{
+    CommitReceipt, JournalWriter, QueueLimits, WriterHandle, WriterHealth, WriterStatus,
+};
 
 pub const MAX_BATCH_EVENTS: usize = 256;
 pub const MAX_BATCH_BYTES: usize = 1024 * 1024;
@@ -22,6 +26,12 @@ pub enum JournalError {
     UnsupportedSchema,
     #[error("Journal is already closed")]
     Closed,
+    #[error("Journal admission capacity exhausted")]
+    Saturated,
+    #[error("Journal writer failed; inspect Lab health before retrying")]
+    WriterFailed,
+    #[error("Journal writer thread could not start")]
+    Thread(#[from] std::io::Error),
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

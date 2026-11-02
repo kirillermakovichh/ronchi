@@ -161,7 +161,21 @@ These are storage safety limits, not measured throughput results.
 A reader exposes committed events and a watermark without loading full history.
 If the lifecycle owner confirms that no authenticated writer remains, an open Journal is reported as interrupted.
 The reader does not authenticate processes itself.
-The dedicated queue, disk admission reserve, and Lab failure integration remain unimplemented until tasks 2b and 3.
+`JournalWriter` moves the SQLite connection to one dedicated thread.
+Its queue admits at most 4,096 events and 8 MiB, including the in-flight batch.
+An owner may configure smaller queue limits.
+The writer batches whole atomic groups up to 256 events, 1 MiB, or 10 ms from the first dequeued group.
+Receipts acknowledge commits; dropping a receipt cancels only waiting.
+Queue exhaustion permanently closes admission with failed health.
+Previously admitted groups drain when storage remains usable.
+A storage failure resolves outstanding receipts as failures and preserves the prior watermark.
+Watch subscribers observe health and the committed watermark separately from Journal state.
+
+Explicit blocking shutdown closes admission, drains accepted groups, writes a supplied terminal event atomically, and joins the thread.
+If the writer has failed, it never writes a clean finalization marker.
+Creation and joining belong outside Tokio worker threads.
+The lifecycle owner supplies cancellation deadlines and failure-driven RPC shutdown in task 3.
+Disk admission, full-directory accounting, and drain reserve remain unimplemented until task 2c.
 This primitive does not yet acknowledge RPC acceptance or persist signed protocol content.
 
 ## Finalization, retention, and export

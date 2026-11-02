@@ -50,11 +50,18 @@ Checkpoints record results and do not require another approval interview.
 - **Storage:** Bundled SQLite `3.54.1`, rusqlite `0.41.1`; WAL mode and writer `synchronous=FULL` are read back. Individual encoded events are capped at 64 KiB; atomic groups are capped at 256 events and 1 MiB.
 - **Boundary:** This storage primitive accepts caller-validated/redacted facts. RPC event models, retained signed bytes, and transaction acceptance integration remain assigned to their owning slices.
 
-#### 2b. Bounded dedicated writer and storage admission
+#### 2b. Bounded dedicated writer
 
-- [ ] **Accept:** Add the dedicated writer, bounded event/byte queue, bounded batching, explicit failure health, and disk admission/drain reserve. Preserve the committed-watermark contract.
-- **Verify:** Queue saturation, writer failure, byte bounds, and recovery through actual file-backed storage. Include atomic required-content admission when transaction models arrive in task 5.
-- **Dependencies:** 2a. This subtask completes task 2 before task 3 starts.
+- [x] **Accept:** Add one owned writer thread, a count/byte-bounded queue, bounded batching, commit receipts, and observable failure health.
+- **Verification:** `cargo test --locked --test journal` passed (8 tests including the process fixture). Tests cover count/byte saturation, permanent failure health, storage failure, cancelled receipt waiting, and drain before atomic finalization.
+- **Checks:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (14 tests including the process fixture), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- **Boundary:** Blocking creation and joining must run outside Tokio workers. Lab shutdown deadlines and failure-driven RPC admission await task 3. Disk accounting and drain reserve remain in 2c.
+
+#### 2c. Disk admission and drain reserve
+
+- [ ] **Accept:** Account for the full Lab evidence directory, enforce the 1 GiB budget with at least 64 MiB plus admitted liability reserved for drain, and fail explicitly if disk/checkpoint progress cannot sustain the budget.
+- **Verify:** Queue liability, WAL/database growth, attachments/log accounting, low-space/storage failure, and preserved committed evidence in disposable directories.
+- **Dependencies:** 2a, 2b. This subtask completes task 2 before task 3 starts. Atomic required signed-content integration remains part of task 5.
 
 ### 3. Persistent Lab controls
 

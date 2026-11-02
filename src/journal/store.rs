@@ -93,7 +93,7 @@ impl JournalStore {
         self.commit(encode(std::slice::from_ref(terminal))?, Some(state))
     }
 
-    fn commit(
+    pub(super) fn commit(
         &mut self,
         encoded: Vec<String>,
         terminal: Option<JournalState>,

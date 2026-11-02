@@ -150,3 +150,105 @@ fn acknowledged_events_survive_process_death() {
         .unwrap();
     println!("SQLite {version}; source {source}");
 }
+
+#[test]
+fn dedicated_writer_commits_units_and_drains_before_finalization() {
+    use ronchi::journal::{JournalWriter, WriterHealth};
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("journal.sqlite");
+    let writer = JournalWriter::start(JournalStore::create(&path, "L1").unwrap()).unwrap();
+    let handle = writer.handle();
+    let first = handle
+        .try_append(&[event("attempt"), event("acceptance")])
+        .unwrap();
+    let second = handle.try_append(&[event("observed")]).unwrap();
+    assert_eq!(first.blocking_committed().unwrap(), 2);
+    assert_eq!(second.blocking_committed().unwrap(), 3);
+    let abandoned = handle.try_append(&[event("caller_disconnected")]).unwrap();
+    drop(abandoned);
+    assert_eq!(
+        writer
+            .shutdown(Some((&event("lab.finalized"), JournalState::Finalized)))
+            .unwrap(),
+        5
+    );
+    assert_eq!(handle.status().health, WriterHealth::Closed);
+    assert_eq!(handle.status().snapshot_seq, 5);
+    assert!(matches!(
+        handle.try_append(&[event("late")]),
+        Err(JournalError::Closed)
+    ));
+    let reader = JournalReader::open(&path).unwrap();
+    assert_eq!(
+        reader.snapshot(false).unwrap().state,
+        JournalState::Finalized
+    );
+    assert_eq!(
+        reader.event(4).unwrap().unwrap().kind,
+        "caller_disconnected"
+    );
+}
+
+#[test]
+fn writer_capacity_failure_is_permanent_for_count_and_bytes() {
+    use ronchi::journal::{JournalWriter, QueueLimits, WriterHealth};
+    for limits in [
+        QueueLimits {
+            events: 1,
+            bytes: 1024 * 1024,
+        },
+        QueueLimits {
+            events: 4096,
+            bytes: 1,
+        },
+    ] {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("journal.sqlite");
+        let writer =
+            JournalWriter::with_limits(JournalStore::create(&path, "L1").unwrap(), limits).unwrap();
+        let handle = writer.handle();
+        assert!(matches!(
+            handle.try_append(&[event("attempt"), event("acceptance")]),
+            Err(JournalError::Saturated)
+        ));
+        assert_eq!(handle.status().health, WriterHealth::Failed);
+        assert!(matches!(
+            handle.try_append(&[event("retry")]),
+            Err(JournalError::WriterFailed)
+        ));
+        assert!(
+            writer
+                .shutdown(Some((&event("end"), JournalState::Finalized)))
+                .is_err()
+        );
+        let snapshot = JournalReader::open(&path).unwrap().snapshot(false).unwrap();
+        assert_eq!(snapshot.state, JournalState::Interrupted);
+        assert_eq!(snapshot.snapshot_seq, 0);
+    }
+}
+
+#[test]
+fn writer_storage_failure_resolves_receipts_and_fails_health() {
+    use ronchi::journal::{JournalWriter, WriterHealth};
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("journal.sqlite");
+    let store = JournalStore::create(&path, "L1").unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TRIGGER fail BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'injected disk error'); END;").unwrap();
+    let writer = JournalWriter::start(store).unwrap();
+    let handle = writer.handle();
+    let receipt = handle
+        .try_append(&[event("attempt"), event("acceptance")])
+        .unwrap();
+    assert!(receipt.blocking_committed().is_err());
+    assert_eq!(handle.status().health, WriterHealth::Failed);
+    assert!(writer.shutdown(None).is_err());
+    assert_eq!(
+        JournalReader::open(&path)
+            .unwrap()
+            .snapshot(false)
+            .unwrap()
+            .snapshot_seq,
+        0
+    );
+}
