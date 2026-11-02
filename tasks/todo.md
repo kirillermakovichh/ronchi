@@ -1,6 +1,6 @@
 # Initial development queue
 
-Status: planned work only. No runtime task is complete.
+Status: implementation in progress. Completed slices and verification are recorded below.
 The [product plan](plan.md) records decisions and risks; this file owns implementation progress.
 The user delegated routine decisions in the [baseline brief](design-baseline-brief.md).
 The [development stack](../docs/development.md) fixes the toolchain and core/dashboard technology choices.
@@ -26,10 +26,14 @@ Checkpoints record results and do not require another approval interview.
 
 ### 1. Native executable and configuration
 
-- [ ] **Accept:** Build one Rust executable with version/help/schema entry points; resolve project/config precedence and reject invalid settings before side effects.
+- [x] **Accept:** Build one Rust executable with version/help/schema entry points; resolve project/config precedence and reject invalid settings before side effects.
 - **Verify:** Nested-root discovery, explicit paths, unknown keys, conflicting modes, and clean text/JSON errors in temporary projects.
 - **Dependencies:** None. **Scope:** Medium. **Likely files:** `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/config.rs`, `tests/config.rs`.
 - **Sources:** [Lifecycle](../docs/product/lab-lifecycle.md#project-and-configuration-discovery), [interfaces](../docs/product/investigation-interfaces.md#cli-and-mcp-transport-behavior), [stack](../docs/adr/0019-resource-efficient-rust-core.md).
+
+- **Completed slice:** Native package, fallible clap parsing, strict versioned TOML, canonical project discovery, flag/environment/file/default precedence, loopback and authority validation, and generated schemas from typed settings/errors.
+- **Verification:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (6 process/config tests), `cargo clippy --locked --all-targets -- -D warnings`, `cargo run --locked -- --help`, and `cargo run --locked -- --version` passed.
+- **Boundary:** `up` validates without writes and returns exit `4` (`unsupported_capability`). Lab startup, runtime limits, and successful operation schemas remain assigned to later slices.
 
 ### 2. Durable Journal admission
 

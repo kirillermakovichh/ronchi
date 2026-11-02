@@ -1,6 +1,6 @@
 # Development stack
 
-Status: selected starting stack, pending application implementation.
+Status: selected stack. The native CLI package is implemented; the task queue records runtime progress.
 [ADR-0019](adr/0019-resource-efficient-rust-core.md) owns the native runtime decision.
 This document owns the initial build tools and supporting technology choices.
 The [development queue](../tasks/todo.md) owns implementation order.
@@ -61,4 +61,5 @@ It also has Node.js 25.5.0 and npm 11.8.0 available for dashboard work.
 These observations concern this host; they are not a public platform-support matrix or a dependency compatibility result.
 The pinned compiler successfully built and ran a temporary edition-2024 program through the local linker.
 Package initialization creates and verifies the application lockfiles.
-Application code and build manifests do not exist yet; this check does not claim an application build has passed.
+The native package and application lockfile now exist.
+Task 1 in the queue records the application build and process checks.

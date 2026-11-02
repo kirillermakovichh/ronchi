@@ -47,6 +47,44 @@ Execution mode, upstream authority, listener addresses, and persistence policy a
 Applying changed startup configuration requires a new Lab.
 Case changes use `case arm` and `case disarm` without restarting it.
 
+### Implemented configuration surface
+
+The initial CLI validates startup settings without starting a Lab.
+`up` returns `unsupported_capability` with exit `4` after successful validation.
+Validation creates no workspace files or listeners.
+Help, version, and `schema lab.up` do not read project configuration.
+The schema advertises startup as unimplemented and describes its current error response.
+Other operations and successful startup responses arrive with their implementation slices.
+
+`--project <directory>` selects an existing directory.
+`--json` selects the version-1 error envelope, including parser failures.
+These flags work before or after the subcommand.
+Text errors use stderr; JSON errors use stdout.
+
+The optional `ronchi/config.toml` requires `schema_version = 1`.
+Unknown keys and invalid types are errors.
+The following flat keys use flag, environment, file, then default precedence:
+
+| TOML key | Startup flag | Environment | Default |
+| --- | --- | --- | --- |
+| `mode` | `--mode` | `RONCHI_MODE` | `simulator` |
+| `read_upstream` | `--read-upstream` | `RONCHI_READ_UPSTREAM` | absent |
+| `surfpool_datasource` | `--surfpool-datasource` | `RONCHI_SURFPOOL_DATASOURCE` | absent |
+| `rpc_listen` | `--rpc-listen` | `RONCHI_RPC_LISTEN` | `127.0.0.1:8899` |
+| `control_listen` | `--control-listen` | `RONCHI_CONTROL_LISTEN` | `127.0.0.1:8900` |
+| `initial_case` | `--case` | `RONCHI_INITIAL_CASE` | absent |
+
+Modes are `simulator` and `surfpool`.
+Datasource values must be absolute HTTP or HTTPS URLs.
+Simulator rejects a Surfpool datasource; Surfpool rejects a Read Upstream.
+Listeners require loopback socket addresses and distinct nonzero endpoints.
+Port `0` remains valid for future dynamic allocation.
+Case identifiers contain 1–128 ASCII letters, digits, hyphens, or underscores.
+Case availability and mode capability validation remain part of the later Case implementation.
+Runtime-limit keys and native Surfpool configuration paths are not implemented yet.
+Unknown keys remain errors until their owning slice introduces them.
+No environment variable selects the project or an independent workspace location.
+
 ## Discovery, listeners, and local control
 
 Store each Lab under `ronchi/labs/<lab_id>/`.

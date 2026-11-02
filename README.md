@@ -5,7 +5,12 @@
 An open-source, local-first reliability lab for blockchain applications.
 Ronchi is designed to show how a real backend handles controlled Solana RPC failures through an explanatory Timeline and evidence-linked Findings.
 
-**Project stage:** product definition and development guidance. There is no runtime implementation or stable CLI/API in this repository yet. Command examples describe intended behavior.
+**Project stage:** early native CLI implementation. Help, version, schema discovery, and startup configuration validation are available. Lab startup and RPC behavior remain unimplemented. The API is not stable.
+
+Build with `cargo build --locked`.
+Use `cargo run --locked -- --help` for available commands.
+Use `ronchi schema lab.up` for the current request and error response schemas.
+See [startup configuration](docs/product/lab-lifecycle.md#implemented-configuration-surface) for supported settings.
 
 ## Intended use
 
