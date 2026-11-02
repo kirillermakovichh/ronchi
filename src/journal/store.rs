@@ -98,6 +98,7 @@ impl JournalStore {
         tx.execute_batch(super::transactions::SCHEMA)?;
         tx.execute_batch(super::nonces::SCHEMA)?;
         tx.execute_batch(super::response_loss::SCHEMA)?;
+        tx.execute_batch(super::cases::SCHEMA)?;
         tx.execute("INSERT INTO journal VALUES(1,?1,0,'open')", [lab_id])?;
         tx.commit()?;
         let pages: u32 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
@@ -212,7 +213,7 @@ impl JournalReader {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if !matches!(version, 1..=4) {
+        if !matches!(version, 1..=5) {
             return Err(JournalError::UnsupportedSchema);
         }
         Ok(Self {

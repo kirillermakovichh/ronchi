@@ -77,7 +77,7 @@ pub(crate) struct Owner {
     state: crate::protocol::state::ProtocolState,
     binding: crate::cases::Binding,
     policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
-    holds: std::sync::Arc<tokio::sync::Semaphore>,
+    holds: std::sync::Arc<crate::cases::HoldPool>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
 }
 impl Transactions {
@@ -87,6 +87,7 @@ impl Transactions {
         started: Instant,
         state: crate::protocol::state::ProtocolState,
         policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
+        holds: std::sync::Arc<crate::cases::HoldPool>,
     ) -> (Self, Owner) {
         let (sender, receiver) = mpsc::channel(64);
         (
@@ -100,7 +101,7 @@ impl Transactions {
                 state,
                 binding: Default::default(),
                 policy_status,
-                holds: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
+                holds,
                 credits: BTreeMap::new(),
             },
         )
@@ -365,6 +366,8 @@ impl Owner {
                     .expect("selected policy")
                     .settings
                     .max_held,
+                binding.registration_seq,
+                binding.policy.as_ref().expect("selected policy").revision,
             )?;
             hold.reserve_evidence(
                 self.writer.clone(),

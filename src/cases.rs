@@ -77,6 +77,48 @@ impl Binding {
             })
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct HeldEffect {
+    pub registration_seq: u64,
+    pub policy_revision: u64,
+    pub remaining_ms: u64,
+}
+pub(crate) struct HoldPool {
+    slots: Arc<Semaphore>,
+    entries: Mutex<std::collections::BTreeMap<u64, (u64, std::sync::Weak<Hold>)>>,
+}
+impl Default for HoldPool {
+    fn default() -> Self {
+        Self {
+            slots: Arc::new(Semaphore::new(16)),
+            entries: Default::default(),
+        }
+    }
+}
+impl HoldPool {
+    pub fn snapshot(&self) -> Vec<HeldEffect> {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|_, (_, hold)| {
+            hold.upgrade()
+                .is_some_and(|hold| !hold.abort.is_cancelled())
+        });
+        entries
+            .iter()
+            .filter_map(|(seq, (revision, hold))| {
+                hold.upgrade().and_then(|hold| {
+                    hold.deadline().map(|deadline| HeldEffect {
+                        registration_seq: *seq,
+                        policy_revision: *revision,
+                        remaining_ms: deadline
+                            .saturating_duration_since(tokio::time::Instant::now())
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64,
+                    })
+                })
+            })
+            .collect()
+    }
+}
 #[derive(Default)]
 pub(crate) struct Hold {
     permit: Mutex<Option<OwnedSemaphorePermit>>,
@@ -86,7 +128,13 @@ pub(crate) struct Hold {
     deadline: Mutex<Option<tokio::time::Instant>>,
 }
 impl Hold {
-    pub fn reserve(&self, pool: &Arc<Semaphore>, maximum: u16) -> Result<(), RpcError> {
+    pub fn reserve(
+        self: &Arc<Self>,
+        pool: &Arc<HoldPool>,
+        maximum: u16,
+        registration: u64,
+        revision: u64,
+    ) -> Result<(), RpcError> {
         if self.abort.is_cancelled() {
             return Err(RpcError::params(
                 "Transport closed before new fault admission",
@@ -96,10 +144,21 @@ impl Hold {
         if permit.is_some() {
             return Ok(());
         }
-        if 16 - pool.available_permits() >= usize::from(maximum) {
+        if 16 - pool.slots.available_permits() >= usize::from(maximum) {
             return Err(capacity());
         }
-        *permit = Some(pool.clone().try_acquire_owned().map_err(|_| capacity())?);
+        *permit = Some(
+            pool.slots
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| capacity())?,
+        );
+        let mut entries = pool.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|_, (_, hold)| {
+            hold.upgrade()
+                .is_some_and(|hold| !hold.abort.is_cancelled())
+        });
+        entries.insert(registration, (revision, Arc::downgrade(self)));
         Ok(())
     }
     pub async fn reserve_evidence(
@@ -173,5 +232,34 @@ fn capacity() -> RpcError {
         code: -32000,
         message: "Case held-request capacity is exhausted".into(),
         data: Some(serde_json::json!({"code":"case_capacity_exceeded"})),
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CatalogEntry {
+    pub case_id: String,
+    pub modes: Vec<String>,
+    pub default_hold_ms: u64,
+    pub max_held: u16,
+}
+pub fn catalog() -> Vec<CatalogEntry> {
+    vec![CatalogEntry {
+        case_id: "tx-response-lost".into(),
+        modes: vec!["simulator".into()],
+        default_hold_ms: 20_000,
+        max_held: 16,
+    }]
+}
+pub fn lab_error(error: RpcError) -> crate::lab::LabError {
+    if error.code == -32602 {
+        crate::lab::LabError::invalid(error.message)
+    } else if error
+        .data
+        .as_ref()
+        .is_some_and(|data| data["code"] == "unsupported_capability")
+    {
+        crate::lab::LabError::unsupported(error.message)
+    } else {
+        crate::lab::LabError::internal(error.message)
     }
 }

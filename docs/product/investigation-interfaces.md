@@ -36,6 +36,26 @@ An event reference is `{lab_id,event_seq}`; a Finding reference adds its stable 
 Links preserve the source Lab, selected scope, and snapshot so the dashboard and machine views agree.
 An Investigation has query state, not a separate start, capture, or stop lifecycle.
 
+### Implemented Case operations
+
+`case list` works offline and currently lists only simulator `tx-response-lost`.
+`case arm tx-response-lost` arms or replaces a continuing policy without restarting the Lab.
+`case disarm` changes later registrations; existing holds retain their original policy and deadline.
+Arm accepts `--hold-ms` (1..20000, default 20000), `--max-held` (1..16, default 16), and up to 16 repeated exact `--signature` filters.
+Each successful arm/disarm commits a new `registration_seq`; arm uses that sequence as its immutable policy revision.
+Repeated arm creates a new revision; it does not clear the identity ledger.
+Invalid settings or unsupported Case IDs leave the current revision unchanged.
+Mutations require an authenticated ready Lab; retained or stopping Labs return `state_conflict`.
+A transport deadline can leave mutation effects unknown; inspect status before another mutation.
+
+Authenticated control routes are `GET /v1/labs/{id}/cases`, `POST /v1/labs/{id}/case/arm`, and `POST /v1/labs/{id}/case/disarm`.
+Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, and `signatures`.
+Unknown arm keys return a structured `invalid_argument` without changing policy.
+The CLI uses these routes and the same core mutation operation.
+`schema case.list`, `schema case.arm`, and `schema case.disarm` work offline.
+Status exposes `active_case`, `case_registration_seq`, and bounded `held_effects` with original policy revision and remaining real milliseconds.
+No MCP adapter or Findings operation is implied by these controls.
+
 ## First dashboard
 
 The first dashboard has a Lab header, a compact Investigation summary, a Timeline, and an evidence detail panel.

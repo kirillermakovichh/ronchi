@@ -77,6 +77,7 @@ struct State {
     pub clock: Clock,
     writer: WriterHandle,
     ready: AtomicBool,
+    holds: Arc<crate::cases::HoldPool>,
     policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     started: Instant,
     transactions: crate::simulator::transactions::Transactions,
@@ -102,12 +103,14 @@ impl Rpc {
     ) -> Result<Self, String> {
         state.validate()?;
         let (policy_status, _) = tokio::sync::watch::channel(crate::cases::Binding::default());
+        let holds = Arc::new(crate::cases::HoldPool::default());
         let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
             clock.clone(),
             writer.clone(),
             started,
             state,
             policy_status.clone(),
+            holds.clone(),
         );
         let (initialized, _) = tokio::sync::watch::channel(None);
         Ok(Self(Arc::new(State {
@@ -118,6 +121,7 @@ impl Rpc {
             writer,
             ready: AtomicBool::new(false),
             policy_status,
+            holds,
             started,
         })))
     }
@@ -129,6 +133,9 @@ impl Rpc {
     }
     pub async fn disarm_case(&self) -> Result<crate::cases::Binding, RpcError> {
         self.0.transactions.change(None).await
+    }
+    pub fn held_effects(&self) -> Vec<crate::cases::HeldEffect> {
+        self.0.holds.snapshot()
     }
     pub fn case_status(&self) -> crate::cases::Binding {
         self.0.policy_status.borrow().clone()

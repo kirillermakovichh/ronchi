@@ -91,6 +91,12 @@ pub struct Manifest {
     pub journal_state: JournalState,
     pub snapshot_seq: u64,
     pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub active_case: Option<crate::cases::Policy>,
+    #[serde(default)]
+    pub held_effects: Vec<crate::cases::HeldEffect>,
+    #[serde(default)]
+    pub case_registration_seq: u64,
     pub failure: Option<String>,
     pub failure_exit: Option<i32>,
     pub versions: std::collections::BTreeMap<String, String>,
@@ -146,13 +152,18 @@ async fn operation_lock(
     }
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
-    if configuration.mode != Mode::Simulator
-        || configuration.read_upstream.is_some()
-        || configuration.initial_case.is_some()
-    {
+    if configuration.mode != Mode::Simulator || configuration.read_upstream.is_some() {
         return Err(LabError::unsupported(
-            "This build supports simulator lifecycle controls without an upstream or initial Case",
+            "This build supports simulator mode without an upstream",
         ));
+    }
+    if let Some(case_id) = &configuration.initial_case {
+        crate::cases::Arm {
+            case_id: case_id.clone(),
+            ..Default::default()
+        }
+        .validate()
+        .map_err(crate::cases::lab_error)?;
     }
     Ok(())
 }
@@ -201,6 +212,13 @@ pub async fn status(project: PathBuf, name: &str, id: Option<&str>) -> Result<La
                     "A Lab owner holds the lock but cannot be authenticated; inspect its manifest and process identity",
                 ).for_lab(&manifest.lab_id));
             }
+            if let Ok(reader) =
+                JournalReader::open(&ws.lab(&manifest.lab_id)?.join("journal.sqlite"))
+                && let Some(binding) = reader.case_binding()?
+            {
+                manifest.active_case = binding.policy;
+                manifest.case_registration_seq = binding.registration_seq;
+            }
             let snapshot = JournalReader::open(&ws.lab(&manifest.lab_id)?.join("journal.sqlite"))
                 .and_then(|r| r.snapshot(false));
             if matches!(
@@ -222,6 +240,7 @@ pub async fn status(project: PathBuf, name: &str, id: Option<&str>) -> Result<La
                 Err(_) if manifest.state == Lifecycle::Failed => (),
                 Err(_) => return Err(LabError::internal("Retained Journal cannot be read")),
             }
+            manifest.held_effects.clear();
             manifest.rpc_address = None;
             manifest.control_address = None;
             Ok(LabResult {
@@ -348,16 +367,26 @@ pub async fn up(
         control_address: None,
         journal_state: JournalState::Open,
         snapshot_seq: 0,
-        capabilities: ["lab.up", "lab.status", "lab.down"]
-            .into_iter()
-            .map(String::from)
-            .chain(
-                crate::rpc::BOOTSTRAP_METHODS
-                    .into_iter()
-                    .chain(crate::simulator::transactions::TRANSACTION_METHODS)
-                    .map(|method| format!("rpc.{method}")),
-            )
-            .collect(),
+        capabilities: [
+            "lab.up",
+            "lab.status",
+            "lab.down",
+            "case.list",
+            "case.arm",
+            "case.disarm",
+        ]
+        .into_iter()
+        .map(String::from)
+        .chain(
+            crate::rpc::BOOTSTRAP_METHODS
+                .into_iter()
+                .chain(crate::simulator::transactions::TRANSACTION_METHODS)
+                .map(|method| format!("rpc.{method}")),
+        )
+        .collect(),
+        active_case: None,
+        held_effects: vec![],
+        case_registration_seq: 0,
         failure: None,
         failure_exit: None,
         versions: std::collections::BTreeMap::from([
@@ -554,4 +583,25 @@ pub async fn down(
         }
         tokio::select! { _=cancellation.recv()=>{ let mut error=LabError::new(130,"cancelled","Shutdown remains accepted; inspect status for completion"); error.effects="applied"; error.lab_id=Some(live.lab_id); return Err(error); }, _=tokio::time::sleep(Duration::from_millis(25))=>() }
     }
+}
+
+pub async fn case_change(
+    project: PathBuf,
+    name: &str,
+    id: Option<&str>,
+    args: Option<crate::cases::Arm>,
+) -> Result<LabResult, LabError> {
+    if let Some(args) = &args {
+        args.validate().map_err(crate::cases::lab_error)?;
+    }
+    let ws = Workspace::new(&project);
+    let mut result = status(project, name, id).await?;
+    if result.manifest.state != Lifecycle::Ready {
+        return Err(LabError::conflict("Case changes require a ready live Lab")
+            .for_lab(&result.manifest.lab_id));
+    }
+    let binding = crate::control::case_request(&ws, &result.manifest, args).await?;
+    result.manifest.active_case = binding.policy;
+    result.manifest.case_registration_seq = binding.registration_seq;
+    Ok(result)
 }

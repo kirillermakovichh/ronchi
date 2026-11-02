@@ -708,3 +708,69 @@ fn native_startup_retains_explicit_protocol_fixture_and_serves_nonce_fee_quote()
     let reader = JournalReader::open(&path).unwrap();
     assert_eq!(reader.nonce(&account, None).unwrap().unwrap().nonce, nonce);
 }
+
+#[test]
+fn public_case_operations_preserve_lab_identity_and_reject_invalid_replacement() {
+    let project = Project::new();
+    let catalog = project.ok(&["case", "list"]);
+    assert_eq!(catalog["result"][0]["case_id"], "tx-response-lost");
+    let ready = project.ok(&[
+        "up",
+        "--rpc-listen",
+        "127.0.0.1:0",
+        "--control-listen",
+        "127.0.0.1:0",
+        "--case",
+        "tx-response-lost",
+    ]);
+    let id = ready["lab_id"].clone();
+    let process = project.manifest().process;
+    assert_eq!(
+        ready["result"]["active_case"]["case_id"],
+        "tx-response-lost"
+    );
+    let first = ready["result"]["active_case"]["revision"].as_u64().unwrap();
+    let disarmed = project.ok(&["case", "disarm"]);
+    assert!(disarmed["result"]["active_case"].is_null());
+    let armed = project.ok(&["case", "arm", "tx-response-lost", "--hold-ms", "100"]);
+    assert!(armed["result"]["active_case"]["revision"].as_u64().unwrap() > first);
+    error(
+        project.run(&["case", "arm", "unsupported"]),
+        4,
+        "unsupported_capability",
+    );
+    let status = project.ok(&["status"]);
+    assert_eq!(status["lab_id"], id);
+    assert_eq!(
+        status["result"]["active_case"],
+        armed["result"]["active_case"]
+    );
+    assert_eq!(project.manifest().process, process);
+    let manifest = project.manifest();
+    let address = manifest.control_address.unwrap();
+    let token = std::fs::read_to_string(
+        Workspace::new(project.path())
+            .lab(&manifest.lab_id)
+            .unwrap()
+            .join("token"),
+    )
+    .unwrap();
+    let body = r#"{"case_id":"tx-response-lost","unknown":true}"#;
+    let response = raw(
+        address,
+        format!(
+            "POST /v1/labs/{}/case/arm HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            manifest.lab_id,
+            body.len()
+        ),
+    );
+    assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(value["error"]["code"], "invalid_argument");
+    project.ok(&["down"]);
+    assert_eq!(
+        project.ok(&["status"])["result"]["active_case"],
+        armed["result"]["active_case"]
+    );
+    error(project.run(&["case", "disarm"]), 5, "state_conflict");
+}

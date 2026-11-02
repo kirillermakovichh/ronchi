@@ -162,7 +162,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 7b. Public Case operations and startup
 
-- [ ] Expose list/arm/disarm, startup Case, active status, strict errors, and schemas without restarting the Lab.
+- [x] Expose list/arm/disarm, startup Case, active status, strict errors, and schemas without restarting the Lab.
+
+- **Verified:** Formatting, locked check/test (62 tests), and Clippy with `-D warnings` passed. The real CLI/control history checks offline catalog, startup activation, disarm/reactivation, immutable Lab/process identity, invalid replacement, strict JSON errors, retained active revision, and rejection after stop. Scoped review checked authentication, mutation uncertainty, readiness, and bounded held-effect status.
 
 #### 7c. Histories and Checkpoint B
 

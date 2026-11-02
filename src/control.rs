@@ -24,6 +24,7 @@ pub struct Control {
     pub manifest: Arc<RwLock<Manifest>>,
     pub token: String,
     pub stop: mpsc::Sender<bool>,
+    pub cases: Arc<RwLock<Option<crate::rpc::Rpc>>>,
 }
 impl Control {
     pub fn snapshot(&self) -> Manifest {
@@ -32,6 +33,17 @@ impl Control {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
+        if let Some(rpc) = self
+            .cases
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            manifest.held_effects = rpc.held_effects();
+            let binding = rpc.case_status();
+            manifest.active_case = binding.policy;
+            manifest.case_registration_seq = binding.registration_seq;
+        }
         let status = self.writer.status();
         manifest.snapshot_seq = status.snapshot_seq;
         if status.health == crate::journal::WriterHealth::Failed {
@@ -105,7 +117,10 @@ pub fn router(control: Control) -> Router {
     Router::new()
         .route("/v1/labs/{id}/status", get(status))
         .route("/v1/labs/{id}/down", post(down))
-        .layer(axum::extract::DefaultBodyLimit::max(1024))
+        .route("/v1/labs/{id}/case/arm", post(case_arm))
+        .route("/v1/labs/{id}/case/disarm", post(case_disarm))
+        .route("/v1/labs/{id}/cases", get(case_list))
+        .layer(axum::extract::DefaultBodyLimit::max(4096))
         .layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
                 use axum::response::IntoResponse;
@@ -181,6 +196,143 @@ pub async fn request(
         if stop {
             error.effects = "unknown";
             error.lab_id = Some(manifest.lab_id.clone());
+        }
+        error
+    })
+}
+
+async fn case_apply(
+    control: Control,
+    id: String,
+    headers: HeaderMap,
+    args: Option<crate::cases::Arm>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    if control.snapshot().state != crate::lab::Lifecycle::Ready {
+        return Err(StatusCode::CONFLICT);
+    }
+    let rpc = control
+        .cases
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let result = match args {
+        Some(args) => rpc.arm_case(args).await,
+        None => rpc.disarm_case().await,
+    };
+    Ok(match result {
+        Ok(binding) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"contract_version":1,"lab_id":id,"result":binding})),
+        ),
+        Err(error) => {
+            let error = crate::cases::lab_error(error);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(
+                    serde_json::json!({"contract_version":1,"lab_id":id,"error":{"code":error.code,"message":error.message,"effects":"none"}}),
+                ),
+            )
+        }
+    })
+}
+async fn case_arm(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    args: Result<Json<crate::cases::Arm>, axum::extract::rejection::JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    match args {
+        Ok(Json(args)) => case_apply(control, id, headers, Some(args)).await,
+        Err(_) => Ok((
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"contract_version":1,"lab_id":id,"error":{"code":"invalid_argument","message":"Invalid Case JSON or unknown settings","effects":"none"}}),
+            ),
+        )),
+    }
+}
+async fn case_disarm(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    case_apply(control, id, headers, None).await
+}
+async fn case_list(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    authorize(&control, &id, &headers)?;
+    Ok(Json(
+        serde_json::json!({"contract_version":1,"lab_id":id,"result":crate::cases::catalog()}),
+    ))
+}
+pub async fn case_request(
+    ws: &Workspace,
+    manifest: &Manifest,
+    args: Option<crate::cases::Arm>,
+) -> Result<crate::cases::Binding, LabError> {
+    let token = crate::workspace::read_token(&ws.lab(&manifest.lab_id)?.join("token"))?;
+    let address = manifest
+        .control_address
+        .ok_or_else(|| LabError::conflict("No live control endpoint"))?;
+    let request = hyper::Request::builder()
+        .method("POST")
+        .uri(format!(
+            "http://{address}/v1/labs/{}/case/{}",
+            manifest.lab_id,
+            if args.is_some() { "arm" } else { "disarm" }
+        ))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(serde_json::to_vec(&args).map_err(
+            |_| LabError::internal("Cannot encode Case operation"),
+        )?)))
+        .map_err(|_| LabError::internal("Cannot construct Case operation"))?;
+    let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_max_idle_per_host(0)
+        .build_http();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let response = client
+            .request(request)
+            .await
+            .map_err(|_| LabError::unavailable("Case operation transport failed"))?;
+        let status = response.status();
+        let bytes = Limited::new(response.into_body(), 64 * 1024)
+            .collect()
+            .await
+            .map_err(|_| LabError::internal("Invalid Case response"))?
+            .to_bytes();
+        if status == StatusCode::CONFLICT {
+            return Err(LabError::conflict("Case operation requires a ready Lab"));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| LabError::internal("Invalid Case response"))?;
+        if !status.is_success() {
+            let code = value["error"]["code"].as_str().unwrap_or("internal_error");
+            let message = value["error"]["message"]
+                .as_str()
+                .unwrap_or("Case operation failed");
+            return Err(match code {
+                "invalid_argument" => LabError::invalid(message),
+                "unsupported_capability" => LabError::unsupported(message),
+                _ => LabError::internal(message),
+            });
+        }
+        serde_json::from_value(value["result"].clone())
+            .map_err(|_| LabError::internal("Invalid Case binding"))
+    })
+    .await
+    .map_err(|_| LabError::unavailable("Case operation deadline exceeded"))
+    .and_then(|result| result);
+    result.map_err(|mut error| {
+        error.lab_id = Some(manifest.lab_id.clone());
+        if error.exit == 3 || error.exit == 6 {
+            error.effects = "unknown";
         }
         error
     })

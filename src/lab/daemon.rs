@@ -102,6 +102,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         manifest: Arc::new(RwLock::new(manifest.clone())),
         token,
         stop: sender,
+        cases: Default::default(),
     };
     let starting = event(
         "lab.starting",
@@ -155,6 +156,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         manifest.configuration.simulator_state.clone(),
     )
     .map_err(LabError::invalid)?;
+    *control.cases.write().unwrap_or_else(|e| e.into_inner()) = Some(rpc_api.clone());
     let rpc_stop = CancellationToken::new();
     let rpc_force = CancellationToken::new();
     let control_stop = CancellationToken::new();
@@ -183,6 +185,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         }
         if fs2::FileExt::try_lock_exclusive(&lease).is_ok() { return Err(LabError::new(130,"cancelled","Startup client disconnected before readiness")); }
         tokio::time::timeout(STARTUP,rpc_api.wait_initialized()).await.map_err(|_|LabError::internal("Simulator startup deadline exceeded"))??;
+        if let Some(case_id)=&manifest.configuration.initial_case{rpc_api.arm_case(crate::cases::Arm{case_id:case_id.clone(),..Default::default()}).await.map_err(crate::cases::lab_error)?;}
         let ready=event("lab.ready",started,serde_json::json!({"startup_seq":1,"capabilities":manifest.capabilities,"rpc_address":control.snapshot().rpc_address,"control_address":control.snapshot().control_address}));
         let seq=append(&handle,ready).await?;
         {

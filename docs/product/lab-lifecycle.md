@@ -214,6 +214,9 @@ The process tests were executed on macOS; Linux code is present but has not been
 
 Case activation, replacement, and disarming follow the shared request-registration order in [Cases](cases.md#continuing-case-model).
 An acknowledged Case change is durably recorded before control returns.
+The native simulator implements `up --case tx-response-lost`, `case arm`, and `case disarm`.
+Startup arms its configured Case after protocol-state initialization and before readiness.
+An existing Lab retains its startup configuration; use `case arm` to change its live policy.
 Each in-flight request retains its original Case and settings.
 `tx-response-lost` retains its original 20-second withholding deadline after a Case change.
 The change neither sends its withheld response nor resets its accepted transaction lifecycle.

@@ -58,6 +58,11 @@ enum Command {
         #[arg(long, env = "RONCHI_SLOT_DURATION_MS", hide_env_values = true)]
         slot_duration_ms: Option<u64>,
     },
+    /// List and change the continuing Case in a live Lab
+    Case {
+        #[command(subcommand)]
+        operation: CaseCommand,
+    },
     /// Inspect a live or retained Lab
     Status,
     /// Stop the current named Lab and retain evidence
@@ -69,9 +74,41 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm"])]
         operation: String,
     },
+}
+#[derive(Subcommand)]
+enum CaseCommand {
+    /// List available built-in Cases offline
+    List,
+    /// Arm or replace the continuing policy without restarting the Lab
+    Arm {
+        case: String,
+        #[arg(long, default_value_t = 20_000)]
+        hold_ms: u64,
+        #[arg(long, default_value_t = 16)]
+        max_held: u16,
+        #[arg(long = "signature")]
+        signatures: Vec<String>,
+    },
+    /// Disarm for later registrations; held requests retain their deadlines
+    Disarm,
+}
+#[derive(Serialize, JsonSchema)]
+struct CatalogReply {
+    contract_version: u32,
+    request_id: String,
+    result: Vec<cases::CatalogEntry>,
+}
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct CaseRequest {
+    contract_version: u32,
+    request_id: String,
+    operation: String,
+    lab_id: String,
+    arguments: cases::Arm,
 }
 #[derive(Serialize, JsonSchema)]
 pub struct OperationError {
@@ -174,9 +211,16 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             let request = match operation.as_str() {
                 "lab.up" => schemars::schema_for!(UpRequest),
                 "lab.status" => schemars::schema_for!(StatusRequest),
-                _ => schemars::schema_for!(DownRequest),
+                "lab.down" => schemars::schema_for!(DownRequest),
+                "case.arm" => schemars::schema_for!(CaseRequest),
+                _ => schemars::schema_for!(StatusRequest),
             };
-            let value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":schemars::schema_for!(LabEnvelope)});
+            let response = if operation == "case.list" {
+                schemars::schema_for!(CatalogReply)
+            } else {
+                schemars::schema_for!(LabEnvelope)
+            };
+            let value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":response});
             match write_output(true, &value, "", false) {
                 Ok(()) => 0,
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
@@ -218,6 +262,47 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Err(message) => return render_lab_error(cli.json, lab::LabError::invalid(message)),
             };
             render_lab_result(cli.json, run_async(lab::up(configuration, settings, name)))
+        }
+        Command::Case { operation } => {
+            if matches!(operation, CaseCommand::List) {
+                let catalog = CatalogReply {
+                    contract_version: 1,
+                    request_id: format!("cli-{}", std::process::id()),
+                    result: cases::catalog(),
+                };
+                return match write_output(
+                    cli.json,
+                    &catalog,
+                    "tx-response-lost · simulator · default hold 20000 ms",
+                    false,
+                ) {
+                    Ok(()) => 0,
+                    Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
+                    Err(_) => 6,
+                };
+            }
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            let args = match operation {
+                CaseCommand::Arm {
+                    case,
+                    hold_ms,
+                    max_held,
+                    signatures,
+                } => Some(cases::Arm {
+                    case_id: case,
+                    hold_ms,
+                    max_held,
+                    signatures,
+                }),
+                _ => None,
+            };
+            render_lab_result(
+                cli.json,
+                run_async(lab::case_change(root, name, cli.lab_id.as_deref(), args)),
+            )
         }
         Command::Status => {
             let project = match project(cli.project.as_deref()) {
@@ -353,6 +438,15 @@ fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) 
                     .control_address
                     .map(|a| a.to_string())
                     .unwrap_or_else(|| "unavailable".into())
+            );
+            let text = format!(
+                "{text} · case {}",
+                result
+                    .manifest
+                    .active_case
+                    .as_ref()
+                    .map(|policy| policy.settings.case_id.as_str())
+                    .unwrap_or("none")
             );
             let envelope = LabEnvelope::Success {
                 contract_version: 1,

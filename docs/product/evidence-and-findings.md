@@ -144,7 +144,7 @@ No active history is evicted to keep the Lab running; protocol lookup and lifeti
 
 ### Implemented storage primitive
 
-`JournalStore` creates a new file-backed version-4 Journal. Readers also accept versions 1 through 3.
+`JournalStore` creates a new file-backed version-5 Journal. Readers also accept versions 1 through 4.
 Its strict tables store one immutable Lab identity, the committed watermark, terminal state, and JSON event envelopes keyed by sequence.
 Sequence assignment, event insertion, watermark update, and terminal state update share one transaction.
 Schema 2 adds an indexed transaction projection maintained by SQLite triggers in the same event transaction.
@@ -153,6 +153,9 @@ Transition events update the projection atomically.
 Acceptance also retains resolved lookup addresses; historical JSON projection does not query mutable upstream state.
 A bounded `protocol.fixture` event records explicit simulator startup state.
 A failed projection write rolls back the submission attempt and acceptance together.
+Schema 5 adds a singleton current Case projection updated atomically by `case.changed`.
+Status reads that projection after process exit without scanning event history.
+
 Schema 4 adds a non-evicting response-loss ledger keyed by the accepted first signature.
 Selection events and acceptance commit in one transaction; transport observation follows separately.
 Held exchanges reserve bounded start/boundary writes before acceptance and keep those credits until transport completion.
@@ -208,7 +211,7 @@ These conservative bounds can reject work before the directory reaches its quota
 
 Admission scans actual files and checks filesystem available space under the same accounting lock used for commits and checkpoints.
 A reservation covers potential database growth, WAL frames, SHM growth, and filesystem allocation rounding.
-The version-4 schema bounds new pages by encoded overflow pages, twelve pages per event, and sixteen metadata pages per group.
+The version-5 schema bounds new pages by encoded overflow pages, twelve pages per event, and sixteen metadata pages per group.
 `max_page_count` enforces that bound for each write transaction.
 `cache_spill=OFF` prevents repeated spilled WAL frames during the transaction.
 The reservation conservatively charges a frame for every potential database page, including existing pages.
