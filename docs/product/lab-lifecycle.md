@@ -77,6 +77,10 @@ The following flat keys use flag, environment, file, then default precedence:
 | `initial_case` | `--case` | `RONCHI_INITIAL_CASE` | absent |
 | `slot_duration_ms` | `--slot-duration-ms` | `RONCHI_SLOT_DURATION_MS` | `400` |
 
+`simulator_state` is an optional file-only structured fixture.
+Its [protocol state contract](solana-rpc-contract.md#local-lookup-state-and-json-projection) defines keys, limits, and missing-state behavior.
+The Lab retains its immutable startup fixture in configuration and Journal evidence.
+
 `slot_duration_ms` accepts integer values from 1 through 60000.
 Modes are `simulator` and `surfpool`.
 Datasource values must be absolute HTTP or HTTPS URLs.

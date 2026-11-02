@@ -150,6 +150,8 @@ Sequence assignment, event insertion, watermark update, and terminal state updat
 Schema 2 adds an indexed transaction projection maintained by SQLite triggers in the same event transaction.
 Acceptance stores the first signature, exact signed bytes, digest, context, lifetime bounds, and progression deadlines before RPC success.
 Transition events update the projection atomically.
+Acceptance also retains resolved lookup addresses; historical JSON projection does not query mutable upstream state.
+A bounded `protocol.fixture` event records explicit simulator startup state.
 A failed projection write rolls back the submission attempt and acceptance together.
 Version-1 readers expose no transaction records; no live migration or simulator resume is implemented.
 The writer reads back WAL mode and `synchronous=FULL` before creating the schema.

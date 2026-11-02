@@ -198,6 +198,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 );
             }
             let settings = Settings {
+                simulator_state: None,
                 schema_version: None,
                 mode,
                 read_upstream,

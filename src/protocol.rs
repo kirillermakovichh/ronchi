@@ -1,4 +1,6 @@
 //! Signed wire decoding is isolated from simulator state and RPC transport.
+mod parsed;
+pub mod state;
 use crate::rpc::RpcError;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
@@ -104,15 +106,19 @@ pub fn signature(value: &Value) -> Result<String, RpcError> {
     }
     Ok(value.to_string())
 }
-pub fn encode_lookup(wire: &str, encoding: &str) -> Result<Value, RpcError> {
+pub fn encode_lookup(
+    wire: &str,
+    encoding: &str,
+    loaded: &state::LoadedAddresses,
+) -> Result<Value, RpcError> {
     let bytes = STANDARD.decode(wire).map_err(|_| RpcError::internal())?;
     match encoding {
         "base64" => Ok(json!([wire, "base64"])),
         "base58" => Ok(json!([bs58::encode(&bytes).into_string(), "base58"])),
-        "json" => {
+        "json" | "jsonParsed" => {
             let tx = decode_wire(&bytes)?;
             let header = tx.message.header();
-            let mut message = json!({"header":{"numRequiredSignatures":header.num_required_signatures,"numReadonlySignedAccounts":header.num_readonly_signed_accounts,"numReadonlyUnsignedAccounts":header.num_readonly_unsigned_accounts},"accountKeys":tx.message.static_account_keys().iter().map(ToString::to_string).collect::<Vec<_>>(),"recentBlockhash":tx.message.recent_blockhash().to_string(),"instructions":tx.message.instructions().iter().map(|ix|json!({"programIdIndex":ix.program_id_index,"accounts":ix.accounts,"data":bs58::encode(&ix.data).into_string()})).collect::<Vec<_>>()});
+            let mut message = json!({"header":{"numRequiredSignatures":header.num_required_signatures,"numReadonlySignedAccounts":header.num_readonly_signed_accounts,"numReadonlyUnsignedAccounts":header.num_readonly_unsigned_accounts},"accountKeys":tx.message.static_account_keys().iter().map(ToString::to_string).collect::<Vec<_>>(),"recentBlockhash":tx.message.recent_blockhash().to_string(),"instructions":tx.message.instructions().iter().map(|ix|json!({"programIdIndex":ix.program_id_index,"accounts":ix.accounts,"data":bs58::encode(&ix.data).into_string(),"stackHeight":null})).collect::<Vec<_>>()});
             if let VersionedMessage::V1(v1) = &tx.message {
                 message["transactionConfig"] =
                     serde_json::to_value(v1.config).map_err(|_| RpcError::internal())?;
@@ -120,13 +126,13 @@ pub fn encode_lookup(wire: &str, encoding: &str) -> Result<Value, RpcError> {
             if let VersionedMessage::V0(v0) = &tx.message {
                 message["addressTableLookups"]=json!(v0.address_table_lookups.iter().map(|lookup|json!({"accountKey":lookup.account_key.to_string(),"writableIndexes":lookup.writable_indexes,"readonlyIndexes":lookup.readonly_indexes})).collect::<Vec<_>>());
             }
+            if encoding == "jsonParsed" {
+                parsed::project(&tx.message, loaded, &mut message)?;
+            }
             Ok(
                 json!({"signatures":tx.signatures.iter().map(ToString::to_string).collect::<Vec<_>>(),"message":message}),
             )
         }
-        "jsonParsed" => Err(RpcError::unsupported(
-            "Parsed instruction and lookup-state projection is unavailable in this partial profile; select json or base64",
-        )),
         _ => Err(RpcError::params("Unsupported getTransaction encoding")),
     }
 }
@@ -145,4 +151,13 @@ pub fn negotiate_version(version: i16, maximum: Option<u8>) -> Result<Option<Val
     } else {
         maximum.map(|_| json!("legacy"))
     })
+}
+
+pub fn resolve_signed(
+    wire: &str,
+    state: &state::ProtocolState,
+    slot: u64,
+) -> Result<state::LoadedAddresses, RpcError> {
+    let bytes = STANDARD.decode(wire).map_err(|_| RpcError::internal())?;
+    state.resolve(&decode_wire(&bytes)?.message, slot)
 }

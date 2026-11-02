@@ -25,6 +25,7 @@ pub struct Settings {
     pub control_listen: Option<SocketAddr>,
     pub initial_case: Option<String>,
     pub slot_duration_ms: Option<u64>,
+    pub simulator_state: Option<crate::protocol::state::ProtocolState>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -38,6 +39,8 @@ pub struct EffectiveConfig {
     pub initial_case: Option<String>,
     #[serde(default = "default_slot_duration_ms")]
     pub slot_duration_ms: u64,
+    #[serde(default)]
+    pub simulator_state: crate::protocol::state::ProtocolState,
 }
 
 pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, String> {
@@ -80,6 +83,10 @@ pub fn resolve_requested(
         Err(_) => return Err("Configuration cannot be read".into()),
     };
     let requested = Settings {
+        simulator_state: overrides
+            .simulator_state
+            .clone()
+            .or(file.simulator_state.clone()),
         slot_duration_ms: overrides.slot_duration_ms.or(file.slot_duration_ms),
         schema_version: None,
         mode: overrides.mode.or(file.mode),
@@ -95,6 +102,8 @@ pub fn resolve_requested(
         control_listen: overrides.control_listen.or(file.control_listen),
         initial_case: overrides.initial_case.clone().or(file.initial_case.clone()),
     };
+    let simulator_state = requested.simulator_state.clone().unwrap_or_default();
+    simulator_state.validate()?;
     let slot_duration_ms = requested.slot_duration_ms.unwrap_or(400);
     if !(1..=60_000).contains(&slot_duration_ms) {
         return Err("slot_duration_ms must be between 1 and 60000".into());
@@ -149,6 +158,7 @@ pub fn resolve_requested(
             control_listen,
             initial_case,
             slot_duration_ms,
+            simulator_state,
         },
         requested,
     ))

@@ -32,6 +32,13 @@ struct Server {
 }
 impl Server {
     async fn new(profile: ClockProfile, limits: DiskLimits) -> Self {
+        Self::with_state(profile, limits, Default::default()).await
+    }
+    async fn with_state(
+        profile: ClockProfile,
+        limits: DiskLimits,
+        state: ronchi::protocol::state::ProtocolState,
+    ) -> Self {
         let directory = tempfile::TempDir::new().unwrap();
         let writer = JournalWriter::start(
             JournalStore::with_disk_limits(
@@ -43,7 +50,7 @@ impl Server {
         )
         .unwrap();
         let (clock, time) = Clock::controlled(profile, b"transaction-test-network").unwrap();
-        let rpc = Rpc::new(clock, writer.handle(), Instant::now());
+        let rpc = Rpc::with_state(clock, writer.handle(), Instant::now(), state).unwrap();
         rpc.set_ready(true);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -538,14 +545,14 @@ async fn preflight_parameter_validation_and_signature_errors_are_explicit_over_h
     );
     server.time.advance(Duration::from_secs(6)).unwrap();
     server.phase(&signature, Phase::Finalized).await;
-    assert_eq!(
+    assert!(
         server
             .call(
                 "getTransaction",
                 json!([signature,{"encoding":"jsonParsed"}])
             )
-            .await["error"]["data"]["code"],
-        "unsupported_capability"
+            .await["result"]["transaction"]["message"]["accountKeys"]
+            .is_array()
     );
     assert!(server.stop(false).await);
 }
@@ -747,6 +754,18 @@ async fn independent_three_format_binary_roundtrips_and_client_version_limits() 
             assert!(reply["result"]["transaction"]["message"]["transactionConfig"].is_object());
             assert_eq!(reply["result"]["transaction"]["signatures"][0], signature);
         }
+        let parsed = server
+            .call(
+                "getTransaction",
+                json!([signature,{"encoding":"jsonParsed","maxSupportedTransactionVersion":1}]),
+            )
+            .await;
+        assert_eq!(parsed["result"]["transaction"]["accountKeys"], Value::Null);
+        assert_eq!(
+            parsed["result"]["transaction"]["message"]["accountKeys"][0]["signer"],
+            true
+        );
+        assert_eq!(parsed["result"]["transaction"]["signatures"][0], signature);
         let mut trailing = wire.clone();
         trailing.push(0);
         assert_eq!(
@@ -759,4 +778,171 @@ async fn independent_three_format_binary_roundtrips_and_client_version_limits() 
             STANDARD.encode(wire)
         );
     }
+}
+
+fn signed_lookup(hash: &str, seed: u8, tables: &[(&str, Vec<u8>, Vec<u8>)]) -> (String, Vec<u8>) {
+    let signer = SigningKey::from_bytes(&[seed; 32]);
+    let mut message = vec![0x80, 1, 0, 1, 2];
+    message.extend_from_slice(&signer.verifying_key().to_bytes());
+    message.extend_from_slice(&[0; 32]); // system program
+    message.extend_from_slice(&bs58::decode(hash).into_vec().unwrap());
+    message.extend_from_slice(&[2, 1, 2, 0, 2, 12]); // transfer to first loaded writable
+    message.extend_from_slice(&2u32.to_le_bytes());
+    message.extend_from_slice(&42u64.to_le_bytes());
+    message.extend_from_slice(&[1, 2, 2, 3, 2, 9, 8]); // unknown system instruction
+    message.push(tables.len() as u8);
+    for (table, w, r) in tables {
+        message.extend_from_slice(&bs58::decode(table).into_vec().unwrap());
+        message.push(w.len() as u8);
+        message.extend_from_slice(w);
+        message.push(r.len() as u8);
+        message.extend_from_slice(r);
+    }
+    let signature = signer.sign(&message).to_bytes();
+    let mut wire = vec![1];
+    wire.extend_from_slice(&signature);
+    wire.extend(message);
+    (bs58::encode(signature).into_string(), wire)
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parsed_lookup_requires_state_and_preserves_writable_then_readonly_order() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    let table = bs58::encode([31; 32]).into_string();
+    let (signature, wire) = signed_lookup(&server.hash().await, 22, &[(&table, vec![1], vec![0])]);
+    let reply = server.call("sendTransaction", send(&wire)).await;
+    assert_eq!(reply["error"]["data"]["code"], "state_unavailable");
+    assert!(server.record(&signature).await.is_none());
+    assert!(server.stop(false).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_lookup_fixture_resolves_parsed_instructions_and_persists_context() {
+    use ronchi::protocol::state::{LookupTable, ProtocolState};
+    let key = |n| bs58::encode([n; 32]).into_string();
+    let a = key(31);
+    let b = key(32);
+    let state = ProtocolState {
+        lookup_tables: vec![
+            LookupTable {
+                address: a.clone(),
+                addresses: vec![key(41), key(42)],
+                last_extended_slot: 0,
+                last_extended_slot_start_index: 2,
+                deactivation_slot: None,
+            },
+            LookupTable {
+                address: b.clone(),
+                addresses: vec![key(43), key(44)],
+                last_extended_slot: 0,
+                last_extended_slot_start_index: 2,
+                deactivation_slot: None,
+            },
+        ],
+    };
+    let mut server =
+        Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+    let (signature, wire) = signed_lookup(
+        &server.hash().await,
+        23,
+        &[(&a, vec![1], vec![0]), (&b, vec![0], vec![1])],
+    );
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server.phase(&signature, Phase::Finalized).await;
+    let tx = server
+        .call(
+            "getTransaction",
+            json!([signature,{"encoding":"jsonParsed","maxSupportedTransactionVersion":0}]),
+        )
+        .await;
+    let message = &tx["result"]["transaction"]["message"];
+    let keys = message["accountKeys"].as_array().unwrap();
+    assert_eq!(keys[2]["pubkey"], key(42));
+    assert_eq!(keys[3]["pubkey"], key(43));
+    assert_eq!(keys[4]["pubkey"], key(41));
+    assert_eq!(keys[5]["pubkey"], key(44));
+    assert_eq!(keys[2]["source"], "lookupTable");
+    assert_eq!(keys[2]["writable"], true);
+    assert_eq!(keys[4]["writable"], false);
+    assert_eq!(
+        message["instructions"][0]["parsed"]["info"]["destination"],
+        key(42)
+    );
+    assert_eq!(message["instructions"][0]["parsed"]["info"]["lamports"], 42);
+    assert_eq!(
+        message["instructions"][1]["accounts"],
+        json!([key(42), key(43)])
+    );
+    assert_eq!(
+        message["instructions"][1]["data"],
+        bs58::encode([9, 8]).into_string()
+    );
+    assert!(tx["result"]["meta"].is_null());
+    assert!(server.stop(false).await);
+    let row = server.record(&signature).await.unwrap();
+    assert_eq!(row.loaded_addresses.writable, vec![key(42), key(43)]);
+    assert_eq!(row.loaded_addresses.readonly, vec![key(41), key(44)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lookup_warmup_bad_index_and_unknown_program_are_explicit() {
+    use ronchi::protocol::state::{LookupTable, ProtocolState};
+    let key = |n| bs58::encode([n; 32]).into_string();
+    let table = key(33);
+    let state = ProtocolState {
+        lookup_tables: vec![LookupTable {
+            address: table.clone(),
+            addresses: vec![key(51), key(52)],
+            last_extended_slot: 0,
+            last_extended_slot_start_index: 1,
+            deactivation_slot: None,
+        }],
+    };
+    let mut server =
+        Server::with_state(ClockProfile::default(), DiskLimits::default(), state).await;
+    let hash = server.hash().await;
+    let (signature, wire) = signed_lookup(&hash, 24, &[(&table, vec![1], vec![0])]);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["error"]["data"]["code"],
+        "state_unavailable"
+    );
+    server.time.advance(Duration::from_millis(400)).unwrap();
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    let (_, invalid) = signed_lookup(&hash, 25, &[(&table, vec![2], vec![0])]);
+    assert_eq!(
+        server.call("sendTransaction", send(&invalid)).await["error"]["data"]["code"],
+        "state_unavailable"
+    );
+    // Replace the system program with an unknown program and independently sign again.
+    let signer = SigningKey::from_bytes(&[24; 32]);
+    let mut message = wire[65..].to_vec();
+    message[37..69].copy_from_slice(&[81; 32]);
+    let sig = signer.sign(&message).to_bytes();
+    let mut unknown = vec![1];
+    unknown.extend_from_slice(&sig);
+    unknown.extend(message);
+    let identity = bs58::encode(sig).into_string();
+    assert_eq!(
+        server.call("sendTransaction", send(&unknown)).await["result"],
+        identity
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server.phase(&identity, Phase::Finalized).await;
+    let response = server
+        .call(
+            "getTransaction",
+            json!([identity,{"encoding":"jsonParsed","maxSupportedTransactionVersion":0}]),
+        )
+        .await;
+    let ix = &response["result"]["transaction"]["message"]["instructions"][0];
+    assert_eq!(ix["programId"], key(81));
+    assert!(ix.get("parsed").is_none());
+    assert_eq!(ix["accounts"][1], key(52));
+    assert!(server.stop(false).await);
 }

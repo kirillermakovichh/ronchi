@@ -90,13 +90,24 @@ pub(crate) struct Exchange {
 }
 impl Rpc {
     pub fn new(clock: Clock, writer: WriterHandle, started: Instant) -> Self {
+        Self::with_state(clock, writer, started, Default::default())
+            .expect("empty protocol state is valid")
+    }
+    pub fn with_state(
+        clock: Clock,
+        writer: WriterHandle,
+        started: Instant,
+        state: crate::protocol::state::ProtocolState,
+    ) -> Result<Self, String> {
+        state.validate()?;
         let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
             clock.clone(),
             writer.clone(),
             started,
+            state,
         );
         let (initialized, _) = tokio::sync::watch::channel(None);
-        Self(Arc::new(State {
+        Ok(Self(Arc::new(State {
             transactions,
             owner: Mutex::new(Some(owner)),
             initialized,
@@ -105,7 +116,7 @@ impl Rpc {
             ready: AtomicBool::new(false),
             registration: AtomicU64::new(0),
             started,
-        }))
+        })))
     }
     pub fn set_ready(&self, ready: bool) {
         self.0.ready.store(ready, Ordering::SeqCst);

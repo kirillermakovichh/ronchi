@@ -27,6 +27,7 @@ base64 = "0.22"
 solana-transaction = { version = "=6.0.0", features = ["wincode", "verify", "serde"] }
 solana-message = { version = "=6.0.0", features = ["wincode", "serde"] }
 wincode = "0.6"
+solana-sdk-ids = "=3.1.0"
 getrandom = "0.4"
 libc = "0.2"
 time = { version = "0.3", features = ["formatting"] }

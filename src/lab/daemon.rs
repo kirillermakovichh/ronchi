@@ -148,7 +148,13 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         manifest.lab_id.as_bytes(),
     )
     .map_err(LabError::invalid)?;
-    let rpc_api = crate::rpc::Rpc::new(clock, handle.clone(), started);
+    let rpc_api = crate::rpc::Rpc::with_state(
+        clock,
+        handle.clone(),
+        started,
+        manifest.configuration.simulator_state.clone(),
+    )
+    .map_err(LabError::invalid)?;
     let rpc_stop = CancellationToken::new();
     let rpc_force = CancellationToken::new();
     let control_stop = CancellationToken::new();

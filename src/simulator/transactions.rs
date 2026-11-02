@@ -64,10 +64,16 @@ pub(crate) struct Owner {
     writer: WriterHandle,
     clock: Clock,
     started: Instant,
+    state: crate::protocol::state::ProtocolState,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
 }
 impl Transactions {
-    pub(crate) fn channel(clock: Clock, writer: WriterHandle, started: Instant) -> (Self, Owner) {
+    pub(crate) fn channel(
+        clock: Clock,
+        writer: WriterHandle,
+        started: Instant,
+        state: crate::protocol::state::ProtocolState,
+    ) -> (Self, Owner) {
         let (sender, receiver) = mpsc::channel(64);
         (
             Self { sender },
@@ -77,6 +83,7 @@ impl Transactions {
                 writer,
                 clock,
                 started,
+                state,
                 credits: BTreeMap::new(),
             },
         )
@@ -203,6 +210,14 @@ impl Owner {
         if self.read(|reader| reader.has_transactions()).await? {
             return Err(JournalError::Closed);
         }
+        if !self.state.lookup_tables.is_empty() {
+            let fact = crate::lab::event(
+                "protocol.fixture",
+                self.started,
+                serde_json::to_value(&self.state)?,
+            );
+            self.append(vec![fact]).await?;
+        }
         Ok(())
     }
     async fn read<T: Send + 'static>(
@@ -254,6 +269,11 @@ impl Owner {
                 .map_err(|_| RpcError::internal())?;
             return Ok(json!(signature));
         }
+        let loaded_addresses = crate::protocol::resolve_signed(
+            &signed.wire_base64,
+            &self.state,
+            self.clock.view(Commitment::Processed).slot,
+        )?;
         if self.credits.len() >= MAX_ACTIVE {
             return Err(RpcError {
                 code: -32000,
@@ -307,6 +327,7 @@ impl Owner {
             stage: Phase::Pending,
             processed_slot: None,
             processed_height: None,
+            loaded_addresses,
             admission_request: reference.clone(),
         };
         let mut data = serde_json::to_value(&record).map_err(|_| RpcError::internal())?;
@@ -433,7 +454,7 @@ impl Owner {
                 let wire = record.wire_base64.clone();
                 let encoding = cfg.encoding.unwrap_or_else(|| "json".into());
                 let transaction = tokio::task::spawn_blocking(move || {
-                    crate::protocol::encode_lookup(&wire, &encoding)
+                    crate::protocol::encode_lookup(&wire, &encoding, &record.loaded_addresses)
                 })
                 .await
                 .map_err(|_| RpcError::internal())??;

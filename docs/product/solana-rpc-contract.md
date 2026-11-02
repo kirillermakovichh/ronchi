@@ -96,10 +96,33 @@ The current verified HTTP fixtures cover legacy and v0, base58/base64 submission
 Independent manually assembled v1 wire fixtures also verify signature identity, binary round trips, version negotiation, and JSON lookup.
 V1 JSON uses `recentBlockhash` and `transactionConfig`, matching the [official Agave UI types](https://github.com/anza-xyz/agave/blob/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/transaction-status-client-types/src/lib.rs).
 Wire layout and bounds use official Solana SDK revision `3904641b3dbc94221bf7dc84042bb9acf2b0280a` (modular crates 6.0.0).
-`jsonParsed`, lookup-table state, fee coverage, and durable nonce histories remain subsequent task-6 slices.
+Fee coverage and durable nonce histories remain subsequent task-6 slices.
 Missing nonce state returns a capability error; it does not use recent-hash expiry.
 These gaps do not narrow the accepted format scope below.
 Response-loss policy remains task 7.
+
+### Local lookup state and JSON projection
+
+`simulator_state` in `ronchi/config.toml` supplies explicit fixture state before Lab startup.
+The bounded state is at most 16 KiB and 16 lookup tables; each table has at most 256 addresses.
+Each table contains `address`, ordered `addresses`, `last_extended_slot`, and `last_extended_slot_start_index`.
+Omit `deactivation_slot` for an active table.
+New addresses become visible after `last_extended_slot`; older prefix addresses remain visible in that slot.
+Deactivated tables require unavailable slot-hash state and return `state_unavailable`.
+Missing tables and unavailable indices return the same explicit state error before acceptance.
+No lookup-table mutation or upstream fallback is implied.
+The startup Journal records supplied state; acceptance retains resolved writable and readonly addresses.
+Parsed history uses that retained context after table lifetime changes.
+
+All three formats support JSON and `jsonParsed` lookup with `meta:null`.
+Raw JSON preserves compiled indices and signed static addresses.
+Parsed JSON orders static keys, all loaded writable keys, then all loaded readonly keys.
+It identifies signers, writable accounts, and transaction/lookup-table source.
+The local profile uses all-active reserved account keys from the pinned Agave list.
+The maintained parsers recognize System transfer/nonce advance and UTF-8 Memo instructions.
+Other instructions use the standard partially decoded representation with program ID, resolved account addresses, base58 data, and null stack height.
+They do not acquire invented decoded fields or execution results.
+The [Agave JSON types and account parser](https://github.com/anza-xyz/agave/tree/d1a5955b5585eccf15cc627ce09464d1fd0c8c2c/transaction-status) define the checked representation.
 
 ## Transaction formats and encodings
 

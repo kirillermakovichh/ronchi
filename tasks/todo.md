@@ -129,7 +129,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 6b. Lookup tables and JSON
 
-- [ ] Resolve explicit local lookup state in protocol order; retain context; serialize JSON/parsed instructions and unknown-instruction fallback without inventing state.
+- [x] Resolve explicit local lookup state in protocol order; retain context; serialize JSON/parsed instructions and unknown-instruction fallback without inventing state.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (51 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. HTTP histories cover two-table ordering, retained context/reopen, parsed transfer, unknown instruction/program fallback, all-format parsed lookup, warmup, missing table, and invalid index. Self-review checked fixture/config bounds, historical authority, startup persistence, and fail-closed state errors.
 
 #### 6c. Fee queries
 

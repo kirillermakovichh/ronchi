@@ -33,6 +33,8 @@ pub struct TransactionRecord {
     pub stage: TransactionPhase,
     pub processed_slot: Option<u64>,
     pub processed_height: Option<u64>,
+    #[serde(default)]
+    pub loaded_addresses: crate::protocol::state::LoadedAddresses,
     pub admission_request: serde_json::Value,
 }
 pub(super) const SCHEMA:&str="
