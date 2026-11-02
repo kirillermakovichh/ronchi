@@ -2,6 +2,7 @@
 
 Status: all eight initial design outcomes are recorded. Runtime implementation and empirical validation remain pending.
 Current position: ready for the first development slice in [tasks/todo.md](todo.md).
+Use the [implementation handoff](implementation-handoff.md) to start a coding session and follow the local commit workflow.
 
 This plan preserves the completed discussion topics and the implementation handoff.
 Items 1–3 record user-approved decisions from the interview.
