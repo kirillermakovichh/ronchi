@@ -83,6 +83,10 @@ impl Arm {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Policy {
     pub revision: u64,
+    #[serde(default)]
+    pub activated_elapsed_ns: u64,
+    #[serde(default)]
+    pub activated_simulated_ns: u64,
     #[serde(flatten)]
     pub settings: Arm,
 }
@@ -90,6 +94,15 @@ pub struct Policy {
 pub struct Binding {
     pub registration_seq: u64,
     pub policy: Option<Policy>,
+}
+/// Activation state follows registered exchanges, independently of later replacements.
+#[derive(Debug, Default)]
+pub(crate) struct Activation {}
+pub(crate) struct Registration {
+    pub binding: Binding,
+    pub activation: Option<Arc<Activation>>,
+    pub elapsed_ns: u64,
+    pub simulated_ns: u64,
 }
 impl Binding {
     pub fn selects(&self, signature: &str, responds: bool) -> bool {

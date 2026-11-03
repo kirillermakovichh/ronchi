@@ -430,17 +430,19 @@ impl Exchange {
             Ok(value) => (false, vec![value], false),
             Err(_) => (false, vec![Value::Null], true),
         };
-        let binding = match self.rpc.0.transactions.register().await {
-            Ok(binding) => binding,
+        let registered = match self.rpc.0.transactions.register().await {
+            Ok(registered) => registered,
             Err(failure) => return http_response(503, Some(error(Value::Null, failure))),
         };
+        let binding = registered.binding;
+        let _activation = registered.activation;
         let registration = binding.registration_seq;
         let batch_size = items.len();
         let mut prepared = Vec::new();
         let mut responses = Vec::new();
         let mut received = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
-            let reference = json!({"registration_seq":registration,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size,"execution_mode":if self.rpc.0.backend.is_some(){"surfpool"}else{"simulator"}});
+            let reference = json!({"registration_seq":registration,"registered_elapsed_ns":registered.elapsed_ns,"registered_simulated_ns":registered.simulated_ns,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size,"execution_mode":if self.rpc.0.backend.is_some(){"surfpool"}else{"simulator"}});
             let valid = item.is_object()
                 && item.get("jsonrpc") == Some(&json!("2.0"))
                 && item.get("method").is_some_and(Value::is_string)

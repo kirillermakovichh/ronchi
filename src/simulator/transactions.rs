@@ -68,7 +68,11 @@ enum Operation {
 }
 struct Job {
     operation: Operation,
-    reply: oneshot::Sender<Result<Value, RpcError>>,
+    reply: oneshot::Sender<Result<Reply, RpcError>>,
+}
+enum Reply {
+    Value(Value),
+    Registered(Box<crate::cases::Registration>),
 }
 #[derive(Clone)]
 pub struct Transactions {
@@ -82,6 +86,7 @@ pub(crate) struct Owner {
     started: Instant,
     state: crate::protocol::state::ProtocolState,
     binding: crate::cases::Binding,
+    activation: Option<std::sync::Arc<crate::cases::Activation>>,
     policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     holds: std::sync::Arc<crate::cases::HoldPool>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
@@ -107,6 +112,7 @@ impl Transactions {
                 started,
                 state,
                 binding: Default::default(),
+                activation: None,
                 policy_status,
                 holds,
                 credits: BTreeMap::new(),
@@ -243,9 +249,11 @@ impl Transactions {
         self.job(Operation::BackendSubmit(client, prepared, reference, hold))
             .await
     }
-    pub(crate) async fn register(&self) -> Result<crate::cases::Binding, RpcError> {
-        serde_json::from_value(self.job(Operation::Register).await?)
-            .map_err(|_| RpcError::internal())
+    pub(crate) async fn register(&self) -> Result<crate::cases::Registration, RpcError> {
+        match self.ask(Operation::Register).await? {
+            Reply::Registered(registration) => Ok(*registration),
+            Reply::Value(_) => Err(RpcError::internal()),
+        }
     }
     pub(crate) async fn change(
         &self,
@@ -258,6 +266,12 @@ impl Transactions {
             .map_err(|_| RpcError::internal())
     }
     async fn job(&self, operation: Operation) -> Result<Value, RpcError> {
+        match self.ask(operation).await? {
+            Reply::Value(value) => Ok(value),
+            Reply::Registered(_) => Err(RpcError::internal()),
+        }
+    }
+    async fn ask(&self, operation: Operation) -> Result<Reply, RpcError> {
         let (reply, result) = oneshot::channel();
         self.sender
             .try_send(Job { operation, reply })
@@ -697,8 +711,8 @@ impl Owner {
             }
         }
     }
-    async fn query(&mut self, operation: Operation, at: Duration) -> Result<Value, RpcError> {
-        match operation {
+    async fn query(&mut self, operation: Operation, at: Duration) -> Result<Reply, RpcError> {
+        let result = match operation {
             Operation::BackendSubmit(client, prepared, reference, hold) => {
                 self.backend_submit(client, prepared, reference, hold).await
             }
@@ -739,7 +753,12 @@ impl Owner {
                     .registration_seq
                     .checked_add(1)
                     .ok_or_else(RpcError::internal)?;
-                serde_json::to_value(&self.binding).map_err(|_| RpcError::internal())
+                return Ok(Reply::Registered(Box::new(crate::cases::Registration {
+                    binding: self.binding.clone(),
+                    activation: self.activation.clone(),
+                    elapsed_ns: self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
+                    simulated_ns: at.as_nanos().min(i64::MAX as u128) as u64,
+                })));
             }
             Operation::Change(args) => {
                 let seq = self
@@ -751,6 +770,13 @@ impl Owner {
                     registration_seq: seq,
                     policy: args.map(|settings| crate::cases::Policy {
                         revision: seq,
+                        activated_elapsed_ns: self
+                            .started
+                            .elapsed()
+                            .as_nanos()
+                            .min(i64::MAX as u128)
+                            as u64,
+                        activated_simulated_ns: at.as_nanos().min(i64::MAX as u128) as u64,
                         settings,
                     }),
                 };
@@ -762,6 +788,10 @@ impl Owner {
                 .await
                 .map_err(|_| RpcError::internal())?;
                 self.binding = binding.clone();
+                self.activation = binding
+                    .policy
+                    .as_ref()
+                    .map(|_| std::sync::Arc::new(crate::cases::Activation::default()));
                 self.policy_status.send_replace(binding.clone());
                 serde_json::to_value(binding).map_err(|_| RpcError::internal())
             }
@@ -788,7 +818,7 @@ impl Owner {
                     Commitment::Confirmed => matches!(r.stage, Phase::Confirmed | Phase::Finalized),
                     _ => r.stage == Phase::Finalized,
                 }) else {
-                    return Ok(Value::Null);
+                    return Ok(Reply::Value(Value::Null));
                 };
                 let version = crate::protocol::negotiate_version(
                     record.version,
@@ -807,7 +837,8 @@ impl Owner {
                 }
                 Ok(result)
             }
-        }
+        };
+        result.map(Reply::Value)
     }
     pub(crate) async fn run(
         mut self,

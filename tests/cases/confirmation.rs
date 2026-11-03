@@ -211,3 +211,60 @@ async fn confirmation_settings_are_bounded_and_nonmatching_submissions_keep_norm
     server.phase(&eligible, Phase::Finalized).await;
     assert!(server.stop(false).await);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn batch_registration_freezes_policy_times_before_replacement_and_dispatch() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    server.rpc.wait_initialized().await.unwrap();
+    let original = server.rpc.arm_case(Default::default()).await.unwrap();
+    let pause = server.rpc.pause_next_registration();
+    let batch = json!([
+        {"jsonrpc":"2.0","id":1,"method":"getSlot"},
+        {"jsonrpc":"2.0","id":2,"method":"getBlockHeight"}
+    ]);
+    let (response, replacement) = tokio::join!(server.http(batch), async {
+        pause.registered().await;
+        server.time.advance(Duration::from_secs(7)).unwrap();
+        let replacement = server
+            .rpc
+            .arm_case(ronchi::cases::Arm {
+                case_id: "finality-delayed".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        pause.resume();
+        replacement
+    });
+    assert_eq!(response.unwrap().0, 200);
+    assert_eq!(
+        replacement.policy.as_ref().unwrap().activated_simulated_ns,
+        7_000_000_000
+    );
+    let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+    let mut registrations = vec![];
+    for seq in 1..=reader.snapshot(true).unwrap().snapshot_seq {
+        let event = reader.event(seq).unwrap().unwrap();
+        if event.kind == "rpc.registered" {
+            registrations.push(event.data);
+        }
+    }
+    assert_eq!(registrations.len(), 2);
+    assert_eq!(registrations[0]["registered_simulated_ns"], 0);
+    assert_eq!(
+        registrations[0]["registered_elapsed_ns"],
+        registrations[1]["registered_elapsed_ns"]
+    );
+    for registration in &registrations {
+        assert_eq!(
+            registration["binding"]["policy"]["revision"],
+            original.policy.as_ref().unwrap().revision
+        );
+        assert_eq!(
+            registration["binding"]["policy"]["activated_simulated_ns"],
+            0
+        );
+    }
+    drop(reader);
+    assert!(server.stop(false).await);
+}
