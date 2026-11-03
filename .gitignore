@@ -1,6 +1,9 @@
 # Local Lab state, managed tools, and artifacts
 /ronchi/
 
+# Isolated agent development checkouts
+/.worktrees/
+
 # Build output
 /target/
 node_modules/

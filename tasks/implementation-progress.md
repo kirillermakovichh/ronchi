@@ -3,6 +3,13 @@
 Task 14 and slices 14a–14f are complete. The final explicit invalid-detail recovery regression passed.
 Task 15 is the next task. It has not been started.
 
+## Next session
+
+The user requested one autonomous coordinated run for tasks 15–24.
+Use [remaining-implementation-run.md](remaining-implementation-run.md) and [parallel-run-state.md](parallel-run-state.md).
+The preparation session did not start implementation workers or change runtime code.
+Keep the task-14 verification and unconfirmed observation below as the recorded baseline.
+
 Existing layout, browser authentication, controls, embedded assets, and retained viewer were preserved.
 The continuation slice is commit `b430db5`.
 It adds bounded Findings pages, exact event/Finding bookmarks, and live/retained `--selection` launch.

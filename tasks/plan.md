@@ -3,6 +3,7 @@
 Status: all eight initial design outcomes are recorded. This file owns design decisions; [todo.md](todo.md) records runtime implementation and scoped verification.
 Current position: follow the next unchecked task in [tasks/todo.md](todo.md).
 Use the [implementation handoff](implementation-handoff.md) to start a coding session and follow the local commit workflow.
+For the authorized autonomous completion of tasks 15–24, use the [remaining implementation run](remaining-implementation-run.md) and its [assignment ledger](parallel-run-state.md).
 
 This plan preserves the completed discussion topics and the implementation handoff.
 Items 1–3 record user-approved decisions from the interview.

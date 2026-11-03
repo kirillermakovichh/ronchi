@@ -44,6 +44,16 @@ Use [docs/README.md](docs/README.md) for task routes and documentation ownership
 Use [docs/product/overview.md](docs/product/overview.md) for current product intent and scope. Read other topics only when the task needs them.
 Treat research as evidence and historical context, not as current product requirements.
 
+## Remaining implementation run
+
+When the user asks to complete the remaining implementation queue autonomously, use [tasks/remaining-implementation-run.md](tasks/remaining-implementation-run.md).
+The user authorized parallel delegation for that run and local integration commits.
+Check the selected agent runtime for actual subagent tools before delegation.
+Keep at most three implementation workers active as this project's initial concurrency policy.
+Use [tasks/parallel-run-state.md](tasks/parallel-run-state.md) for assignments and integration evidence.
+Keep `tasks/todo.md` as the only task-completion checklist.
+Preparation or discussion alone does not start that implementation run.
+
 For Solana RPC semantics, use the shared [protocol references](.agents/references/solana-rpc/index.md). Select only the relevant topic. Protocol facts do not silently expand Ronchi's supported capabilities.
 
 `planning-and-task-breakdown`, `context-engineering`, and the shared [Definition of Done](.agents/references/definition-of-done.md) come from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills/tree/301b02b12bff98e4688e6984af6556802322bbde).

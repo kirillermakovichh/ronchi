@@ -24,6 +24,8 @@ Use the root [README](../README.md) for project stage and [AGENTS.md](../AGENTS.
 | Identify an unresolved or deferred choice | [Open questions](open-questions.md) |
 | Review the completed design baseline and remaining validation | [Product plan](../tasks/plan.md) |
 | Start implementation in dependency order | [Development queue](../tasks/todo.md) |
+| Complete tasks 15–24 with a coordinator and parallel workers | [Remaining implementation run](../tasks/remaining-implementation-run.md) |
+| Start that run from the Zed AI panel | [Zed launch guide](../tasks/zed-run.md) |
 | Set up build tools or select core/dashboard dependencies | [Development stack](development.md) |
 | Understand the native Rust stack and resource model | [ADR-0019](adr/0019-resource-efficient-rust-core.md) |
 | Understand mode authority and upstream write restrictions | [ADR-0011](adr/0011-stateful-solana-rpc-simulator.md), [ADR-0012](adr/0012-read-through-upstream-with-write-firewall.md), [ADR-0013](adr/0013-managed-surfpool-execution-mode.md) |

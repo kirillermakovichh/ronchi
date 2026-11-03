@@ -1,5 +1,9 @@
 # Implementation handoff
 
+Tasks 1–14 are now recorded as complete in the queue.
+For the user's requested autonomous remaining run, follow [remaining-implementation-run.md](remaining-implementation-run.md).
+The task-1 starting checkpoint below is historical; do not restart from it.
+
 ## Assignment
 
 Implement Ronchi from the recorded baseline.
