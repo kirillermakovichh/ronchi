@@ -187,3 +187,107 @@ pub(crate) fn failure(code: &str) -> RpcError {
         data: Some(json!({"code":code,"effects":"unknown"})),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{Json, Router, routing::post};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn backend_internal_rpc_error_preserves_writer_and_later_submission() {
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+        let key = SigningKey::from_bytes(&[97; 32]);
+        let mut message = vec![1, 0, 0, 1];
+        message.extend(key.verifying_key().to_bytes());
+        message.extend([7u8; 32]);
+        message.push(0);
+        let signature = key.sign(&message);
+        let mut wire = vec![1];
+        wire.extend(signature.to_bytes());
+        wire.extend(message);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(wire);
+        let identity = bs58::encode(signature.to_bytes()).into_string();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let response_identity = identity.clone();
+        let router=Router::new().route("/",post(move||{let count=count.clone();let identity=response_identity.clone();async move{
+            Json(if count.fetch_add(1,Ordering::SeqCst)==0{json!({"jsonrpc":"2.0","id":"backend","error":{"code":-32603,"message":"fixture backend operation failed"}})}else{json!({"jsonrpc":"2.0","id":"backend","result":identity})})
+        }}));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::journal::JournalStore::create(
+            &directory.path().join("journal.sqlite"),
+            "L-backend-source-error",
+        )
+        .unwrap();
+        let writer = crate::journal::JournalWriter::start(store).unwrap();
+        let handle = writer.handle();
+        let clock =
+            crate::simulator::clock::Clock::realtime(Default::default(), b"backend-source-error")
+                .unwrap();
+        let (status, _) = tokio::sync::watch::channel(crate::cases::Binding::default());
+        let (transactions, mut owner) = crate::simulator::transactions::Transactions::channel(
+            clock,
+            handle.clone(),
+            Instant::now(),
+            Default::default(),
+            status,
+            Default::default(),
+        );
+        owner.backend_mode();
+        owner.initialize().await.unwrap();
+        let closing = tokio_util::sync::CancellationToken::new();
+        let close = closing.clone();
+        let actor = tokio::spawn(async move { owner.run(close, Default::default()).await });
+        let client = Client::new(address, "surfpool:fixture:source-error".into(), None).unwrap();
+        let reference = json!({"binding":crate::cases::Binding::default(),"request_id":"first","responds":true,"batch_size":1,"execution_mode":"surfpool"});
+        let first = transactions
+            .backend_submit(
+                client.clone(),
+                prepare("sendTransaction", &json!([encoded,{"encoding":"base64"}]))
+                    .await
+                    .unwrap(),
+                reference.clone(),
+                Default::default(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(first.code, -32603);
+        assert_eq!(first.data.unwrap()["code"], "backend_rpc_error");
+        let mut second = reference;
+        second["request_id"] = json!("second");
+        let accepted = transactions
+            .backend_submit(
+                client,
+                prepare("sendTransaction", &json!([encoded,{"encoding":"base64"}]))
+                    .await
+                    .unwrap(),
+                second,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(accepted, identity);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            handle.status().health,
+            crate::journal::WriterHealth::Healthy
+        );
+        closing.cancel();
+        actor.await.unwrap().unwrap();
+        server.abort();
+        let _ = server.await;
+        tokio::task::spawn_blocking(move || writer.shutdown(None))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}

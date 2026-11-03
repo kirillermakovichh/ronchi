@@ -863,7 +863,7 @@ impl Owner {
                         let at=self.clock.elapsed();self.advance_due(at,&force).await?;
                         if force.is_cancelled(){let _=job.reply.send(Err(RpcError::unsupported("Lab stopped before admission")));self.receiver.close();break;}
                         let result=self.query(job.operation,at).await;
-                        let fatal=result.as_ref().is_err_and(|error|error.code==-32603);
+                        let fatal=result.as_ref().is_err_and(|error|error.code==-32603 && error.data.as_ref().and_then(|data|data.get("code")).and_then(Value::as_str)!=Some("backend_rpc_error"));
                         let _=job.reply.send(result);
                         if fatal{self.writer.fail_fatal();return Err(JournalError::WriterFailed);}
                     }else{stopping=true;}
