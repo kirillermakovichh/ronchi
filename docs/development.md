@@ -44,7 +44,7 @@ Start with React state and the browser Fetch API; add a state or component libra
 Follow the accepted [visual direction](product/positioning-and-brand.md#visual-identity) and [interface contract](product/investigation-interfaces.md#first-dashboard).
 Build static assets before embedding them into the Rust executable.
 Node.js and npm are development/build tools; the delivered executable serves the embedded files.
-Core-only development does not need to build dashboard assets before the dashboard slice exists.
+Run the frontend build before Cargo in a fresh checkout. Rebuild it after frontend source changes.
 
 ## Verification tools
 
@@ -64,7 +64,7 @@ Package initialization creates and verifies the application lockfiles.
 The native package and application lockfile now exist.
 Task 1 in the queue records the application build and process checks.
 
-## Dashboard build (task 14, initial slice)
+## Dashboard build and launch
 
 Build the frontend before every native build that must include changed assets:
 
@@ -102,6 +102,30 @@ Bearer control requests retain their existing authorization rules.
 Do not share launch URLs as evidence links.
 The dashboard's copy-link action omits tickets, credentials, and pagination cursors.
 
-This initial slice exposes live summary, bounded Timeline pages, pinned evidence, filters, and explicit payload previews.
-Case/Check UI controls, retained viewer, startup/Demo launch integration, and broader browser acceptance remain in task 14.
+The dashboard exposes live summary, bounded Timeline pages, pinned evidence, filters, and explicit payload previews.
+Case controls use the existing authenticated arm/disarm handlers.
+Check collection starts only on an explicit action.
+Collection status and cancellation use the Lab-owned collection lifecycle.
+Evaluation always sends the selected definition version and displayed snapshot.
+The browser displays the core Verdict; it has no evaluator.
+Unsafe JSON integer facts are displayed with their exact decimal representation as strings.
+The transport stops reading after 256 KiB.
+
+For retained evidence, run `ronchi dashboard --serve --lab-id <immutable-id>`.
+This foreground process binds an OS-selected loopback port and prints one readiness record.
+With `--json`, readiness is a version-1 envelope with `read_only:true` and a ticket launch URL.
+The process then waits until Ctrl-C or stdout pipe closure.
+It cancels readers and drains its owned connections within three seconds before forcing closure.
+It never starts a simulator, writer, source application, or relayer.
+It does not modify the Lab manifest.
+Its routes expose queries and evaluation only.
+It rejects live Labs; use the ordinary finite dashboard launch command for those.
+The viewer remains bound to the resolved immutable Lab even if another Lab reuses its name.
+A stopped header labels the old RPC address as recorded, not live.
+
+`up` includes an optional top-level `dashboard` launch object.
+The Demo includes `dashboard_launch` for a ready Lab and `dashboard_argv` for recovery or retained viewing.
+Ticket-capacity or launch transport failure does not undo a successful Lab startup or Demo.
+Run the exact-ID dashboard command for a fresh link if launch metadata is absent.
+No command opens a browser automatically.
 Closing the browser leaves the persistent Lab running.

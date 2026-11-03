@@ -1,6 +1,6 @@
 # Developer workflows
 
-Status: the simulator Lab, Investigation, public Checks, and bundled Demo paths below are implemented. Deferred execution modes, SDK, CI wrappers, and dashboard/MCP paths remain separately identified.
+Status: the simulator Lab, Investigation, public Checks, and bundled Demo paths below are implemented. Deferred execution modes, SDK, CI wrappers, and MCP paths remain separately identified.
 Initial command behavior comes from [Investigation interfaces](investigation-interfaces.md), [Lab lifecycle](lab-lifecycle.md), and the [Reference Application](reference-application.md).
 Deferred CI wrappers and SDK APIs remain illustrative.
 The [product overview](overview.md) defines scope; this document owns the user journeys.
@@ -15,7 +15,10 @@ The Demo starts the default simulator and bundled [Withdrawal Relayer](reference
 It needs no existing project or cloud call.
 The command returns a bounded summary, Check results, Findings, and evidence references.
 It reports actual RPC/control endpoints and project-aware CLI drill-down commands.
-Dashboard and MCP interfaces remain later tasks.
+A ready Demo returns `dashboard_launch` and exact-ID `dashboard_argv`.
+A stopped Demo returns argv for the read-only retained viewer.
+Open the returned link manually; JSON output never launches a browser.
+MCP remains a later task.
 Known correlation and Checks may support stronger conclusions than a backend connected only by changing its RPC URL.
 A Control comparison is optional.
 The default profile is `resilient`; `--profile unsafe` selects the deliberate identity-replacement example.

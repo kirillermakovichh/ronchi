@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Api,
@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { selection, bookmark } from "./selection";
 import "./style.css";
+import { Controls } from "./Controls";
 const initial = selection(location.search);
 function Facts({ value }: { value: unknown }) {
   return <pre>{JSON.stringify(value, null, 2)}</pre>;
@@ -18,7 +19,8 @@ function App() {
   const labId = decodeURIComponent(location.pathname.split("/")[2] ?? "");
   const api = useMemo(() => new Api(labId), [labId]);
   const [authorized, setAuthorized] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(initial.error ?? "");
+  const [selectionValid, setSelectionValid] = useState(!initial.error);
   const [status, setStatus] = useState<Status>(),
     [scope, setScope] = useState<Scope>(initial.scope),
     [snapshot, setSnapshot] = useState<number | undefined>(initial.snapshot);
@@ -26,6 +28,26 @@ function App() {
     [timeline, setTimeline] = useState<QueryReply>(),
     [detail, setDetail] = useState<QueryReply>(),
     [finding, setFinding] = useState<Record<string, Json>>();
+  const evidenceRequest = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => evidenceRequest.current?.abort(), [api, scope]);
+  async function loadEvidence(
+    selected: Scope,
+    seq: number,
+    extra: Record<string, unknown> = {},
+  ) {
+    evidenceRequest.current?.abort();
+    const controller = new AbortController();
+    evidenceRequest.current = controller;
+    const response = await api.query(
+      "evidence",
+      selected,
+      seq,
+      undefined,
+      extra,
+      controller.signal,
+    );
+    if (!controller.signal.aborted) setDetail(response);
+  }
   const [busy, setBusy] = useState(false),
     [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -42,7 +64,7 @@ function App() {
     };
   }, [api]);
   useEffect(() => {
-    if (!authorized) return;
+    if (!authorized || !selectionValid) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function load() {
@@ -77,6 +99,8 @@ function App() {
         if (controller.signal.aborted) return;
         setSummary(result);
         setTimeline(events);
+        if (current.state !== "ready" && snapshot === undefined)
+          setSnapshot(result.view.snapshot_seq);
         setError("");
       } catch (e) {
         if (!controller.signal.aborted)
@@ -92,14 +116,44 @@ function App() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [api, authorized, scope, snapshot, refresh]);
+  }, [api, authorized, scope, snapshot, refresh, selectionValid]);
+  useEffect(() => {
+    if (!authorized || snapshot === undefined || status?.state !== "ready")
+      return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function update() {
+      if (!document.hidden) {
+        try {
+          const current = await api.call<Status>(
+            "api/status",
+            undefined,
+            controller.signal,
+          );
+          if (!controller.signal.aborted) setStatus(current);
+        } catch (e) {
+          if (!controller.signal.aborted)
+            setError(
+              `Connection lost. Last known Lab status is retained. ${String(e)}`,
+            );
+        }
+      }
+      if (!controller.signal.aborted) timer = setTimeout(update, 2500);
+    }
+    timer = setTimeout(update, 2500);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [api, authorized, snapshot, status?.state]);
   async function act(work: () => Promise<void>) {
     setBusy(true);
     try {
       await work();
       setError("");
     } catch (e) {
-      setError(String(e));
+      if (!(e instanceof DOMException && e.name === "AbortError"))
+        setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -112,9 +166,9 @@ function App() {
     const ref = item.event_ref as
       { lab_id: string; event_seq: number } | undefined;
     const selected: Scope = isFinding
-      ? { finding_id: String(item.finding_id) }
+      ? { ...scope, finding_id: String(item.finding_id) }
       : { event_refs: ref ? [ref] : [] };
-    setDetail(await api.query("evidence", selected, seq));
+    await loadEvidence(selected, seq);
   }
   return (
     <>
@@ -148,7 +202,11 @@ function App() {
             </button>
           </div>
           <dl>
-            <dt>RPC endpoint</dt>
+            <dt>
+              {status?.state === "ready"
+                ? "RPC endpoint"
+                : "Recorded RPC endpoint (not live)"}
+            </dt>
             <dd>{status?.rpc_address ?? "Unavailable"}</dd>
             <dt>Journal / active Case</dt>
             <dd>
@@ -201,12 +259,16 @@ function App() {
               </button>
             </div>
             <p>
-              {String(summary.result.traffic_state ?? "Evidence available")}. No
-              Finding alone does not prove resilience.
+              {String(
+                (summary.result.lab_context as { case_state?: string })
+                  ?.case_state === "armed" &&
+                  summary.result.traffic_state === "no_rpc_traffic"
+                  ? "waiting_for_match"
+                  : (summary.result.traffic_state ?? "Evidence available"),
+              )}
+              . No Finding alone does not prove resilience.
             </p>
-            <div className="counts">
-              <Facts value={summary.result.counts} />
-            </div>
+            <dl className="counts">{Object.entries((summary.result.counts ?? {}) as Record<string,Json>).map(([key,value])=><div key={key}><dt>{key.replaceAll('_',' ')}</dt><dd>{String(value)}</dd></div>)}</dl>
             <p className="boundary">
               Observation Boundary:{" "}
               {summary.view.observation_boundary.join(" · ")}
@@ -232,6 +294,14 @@ function App() {
             </div>
           </section>
         )}
+        {status && (
+          <Controls
+            api={api}
+            status={status}
+            snapshot={summary?.view.snapshot_seq}
+            changed={() => setRefresh((x) => x + 1)}
+          />
+        )}
         <form
           className="filters"
           onSubmit={(event) => {
@@ -240,7 +310,13 @@ function App() {
               p = new URLSearchParams();
             for (const [key, value] of data)
               if (value) p.set(key, String(value));
-            setScope(selection("?" + p).scope);
+            const next = selection("?" + p);
+            if (next.error) {
+              setError(next.error);
+              return;
+            }
+            setSelectionValid(true);
+            setScope(next.scope);
             setDetail(undefined);
             setFinding(undefined);
           }}
@@ -279,7 +355,7 @@ function App() {
             )}
             {timeline?.result.items?.map((item) => (
               <button
-                className={`event ${String(item.kind).startsWith("fault.") ? "fault" : ""}`}
+                className={`event ${String(item.kind).startsWith("fault.") ? "fault" : ""} ${detail?.result.items?.some((s) => JSON.stringify(s.event_ref) === JSON.stringify(item.event_ref)) ? "supporting" : ""}`}
                 key={JSON.stringify(item.event_ref)}
                 onClick={() => void act(() => evidence(item))}
               >
@@ -353,6 +429,22 @@ function App() {
                   {detail.view.journal_state}
                 </p>
                 <Facts value={detail.result} />
+                {detail.result.items?.map(
+                  (item) =>
+                    typeof item.transaction_signature === "string" && (
+                      <button
+                        key={String(item.transaction_signature)}
+                        onClick={() =>
+                          void navigator.clipboard.writeText(
+                            String(item.transaction_signature),
+                          )
+                        }
+                      >
+                        Copy exact signature{" "}
+                        {String(item.transaction_signature).slice(0, 10)}…
+                      </button>
+                    ),
+                )}
                 <button
                   disabled={busy}
                   onClick={() =>
@@ -361,14 +453,10 @@ function App() {
                         (i) =>
                           i.event_ref as { lab_id: string; event_seq: number },
                       );
-                      setDetail(
-                        await api.query(
-                          "evidence",
-                          { event_refs: refs },
-                          detail.view.snapshot_seq,
-                          undefined,
-                          { include_payload: true },
-                        ),
+                      await loadEvidence(
+                        { event_refs: refs },
+                        detail.view.snapshot_seq,
+                        { include_payload: true },
                       );
                     })
                   }
@@ -384,24 +472,20 @@ function App() {
                       key={JSON.stringify(item.event_ref)}
                       onClick={() =>
                         void act(async () => {
-                          setDetail(
-                            await api.query(
-                              "evidence",
-                              {
-                                event_refs: [
-                                  item.event_ref as {
-                                    lab_id: string;
-                                    event_seq: number;
-                                  },
-                                ],
-                              },
-                              detail.view.snapshot_seq,
-                              undefined,
-                              {
-                                include_payload: true,
-                                payload_offset: payload.next_offset,
-                              },
-                            ),
+                          await loadEvidence(
+                            {
+                              event_refs: [
+                                item.event_ref as {
+                                  lab_id: string;
+                                  event_seq: number;
+                                },
+                              ],
+                            },
+                            detail.view.snapshot_seq,
+                            {
+                              include_payload: true,
+                              payload_offset: payload.next_offset,
+                            },
                           );
                         })
                       }

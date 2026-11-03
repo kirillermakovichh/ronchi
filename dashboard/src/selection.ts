@@ -1,7 +1,22 @@
 import type { Scope } from "./api";
-export function selection(search: string): { scope: Scope; snapshot?: number } {
+export function selection(search: string): {
+  scope: Scope;
+  snapshot?: number;
+  error?: string;
+} {
   const params = new URLSearchParams(search),
     scope: Scope = {};
+  for (const key of ["from_seq", "to_seq", "case_activation_id", "snapshot"]) {
+    const value = params.get(key);
+    if (
+      value !== null &&
+      (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
+    )
+      return {
+        scope: {},
+        error: `Invalid ${key}. Use an exact safe integer for browser navigation.`,
+      };
+  }
   for (const key of ["signature", "rpc_method", "kind"] as const) {
     const value = params.get(key);
     if (value) scope[key] = [value];

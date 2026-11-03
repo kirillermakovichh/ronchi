@@ -46,6 +46,8 @@ pub struct Report {
     pub evidence_gaps: Vec<query::Gap>,
     pub commands: Vec<String>,
     pub artifacts: PathBuf,
+    pub dashboard_launch: Option<crate::dashboard::Launch>,
+    pub dashboard_argv: Vec<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct Error {
@@ -641,6 +643,8 @@ impl Owner {
             ]);
         }
         Ok(Report {
+            dashboard_launch: None,
+            dashboard_argv: vec![],
             project: self.project.clone(),
             command_argv: commands.clone(),
             profile,
@@ -804,6 +808,27 @@ pub fn run(project: PathBuf, args: Args, json_output: bool) -> i32 {
                             .unwrap_or_else(|| "stopped".into());
                     }
                 }
+            }
+        }
+        if let Ok(report) = &mut result {
+            report.dashboard_argv = vec![
+                executable(),
+                "--project".into(),
+                report.project.to_string_lossy().into_owned(),
+                "--lab-id".into(),
+                report.lab_id.clone(),
+                "dashboard".into(),
+            ];
+            if report.lab_state == "ready" {
+                report.dashboard_launch = crate::dashboard::launch(
+                    report.project.clone(),
+                    &report.lab_name,
+                    Some(&report.lab_id),
+                )
+                .await
+                .ok();
+            } else {
+                report.dashboard_argv.push("--serve".into());
             }
         }
         watcher.abort();

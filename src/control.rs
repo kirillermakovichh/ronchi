@@ -125,9 +125,18 @@ pub fn router(control: Control) -> Router {
     let browser = Router::new()
         .route("/ui/{id}/api/status", get(status))
         .route("/ui/{id}/api/cases", get(case_list))
-        .route("/ui/{id}/api/case/arm", post(case_arm))
-        .route("/ui/{id}/api/case/disarm", post(case_disarm))
-        .route("/ui/{id}/api/checks/observe", post(check_observe))
+        .route(
+            "/ui/{id}/api/case/arm",
+            post(case_arm).layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/ui/{id}/api/case/disarm",
+            post(case_disarm).layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/ui/{id}/api/checks/observe",
+            post(check_observe).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .route(
             "/ui/{id}/api/check-collections/{collection}",
             get(check_status),

@@ -1,3 +1,4 @@
+import { parseEvidence } from "./json";
 export type Json =
   null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface Scope {
@@ -41,7 +42,10 @@ export interface Status {
   journal_state: string;
   rpc_address: string | null;
   active_case: Json;
-  configuration: { mode: string };
+  configuration: {
+    mode: string;
+    checks?: { sources: { check_id: string; version: number }[] };
+  };
   snapshot_seq: number;
 }
 export class ApiError extends Error {
@@ -66,15 +70,38 @@ export class Api {
         signal,
       },
     );
-    const text = await response.text();
-    if (text.length > 262144)
-      throw new ApiError(
-        response.status,
-        "Response exceeds the browser limit. Use a smaller selection.",
-      );
+    const reader = response.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 262144) {
+            await reader.cancel();
+            throw new ApiError(
+              response.status,
+              "Response exceeds the browser limit. Use a smaller selection.",
+            );
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     let value: unknown;
     try {
-      value = JSON.parse(text);
+      value = parseEvidence(text);
     } catch {
       throw new ApiError(
         response.status,

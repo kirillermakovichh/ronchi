@@ -1,4 +1,5 @@
-//! Browser transport. Static files come only from the build-time asset map.
+pub mod viewer;
+// Browser transport. Static files come only from the build-time asset map.
 use axum::{
     body::Body,
     http::{Response, StatusCode},
@@ -108,15 +109,11 @@ impl Sessions {
     }
 }
 fn same_origin(
-    control: &crate::control::Control,
+    address: Option<std::net::SocketAddr>,
     headers: &HeaderMap,
     require_origin: bool,
 ) -> Result<(), StatusCode> {
-    let address = control
-        .snapshot()
-        .control_address
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?
-        .to_string();
+    let address = address.ok_or(StatusCode::SERVICE_UNAVAILABLE)?.to_string();
     if headers.get("host").and_then(|v| v.to_str().ok()) != Some(&address) {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -144,7 +141,7 @@ fn cookie_name(control: &crate::control::Control) -> String {
 struct Exchange {
     ticket: String,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Launch {
     pub launch_url: String,
     pub expires_in_seconds: u32,
@@ -178,7 +175,7 @@ async fn exchange(
     if id != control.snapshot().lab_id {
         return Err(StatusCode::NOT_FOUND);
     }
-    same_origin(&control, &headers, true)?;
+    same_origin(control.snapshot().control_address, &headers, true)?;
     if args.ticket.len() != 64 {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -201,7 +198,7 @@ pub async fn authenticate(
     next: Next,
 ) -> axum::response::Response {
     let result = same_origin(
-        &control,
+        control.snapshot().control_address,
         request.headers(),
         request.method() != axum::http::Method::GET,
     );
@@ -294,7 +291,7 @@ pub async fn launch(
     let manifest = result.manifest;
     if manifest.state != crate::lab::Lifecycle::Ready {
         return Err(LabError::unavailable(
-            "Live dashboard requires a ready Lab; retained viewer is not implemented yet",
+            "Live dashboard requires a ready Lab; use ronchi dashboard --serve --lab-id <id> for retained evidence",
         ));
     }
     let ws = crate::workspace::Workspace::new(&project);

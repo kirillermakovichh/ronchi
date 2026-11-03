@@ -1,15 +1,22 @@
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 const binary = resolve("../target/debug/ronchi");
 function cli(project: string, ...args: string[]) {
-  return JSON.parse(
-    execFileSync(binary, ["--project", project, "--json", ...args], {
-      encoding: "utf8",
-    }),
-  );
+  try {
+    return JSON.parse(
+      execFileSync(binary, ["--project", project, "--json", ...args], {
+        encoding: "utf8",
+      }),
+    );
+  } catch (error) {
+    const e = error as { stdout?: Buffer; stderr?: Buffer };
+    throw new Error(
+      `CLI ${args.join(" ")} failed: ${String(e.stdout)} ${String(e.stderr)}`,
+    );
+  }
 }
 test("native embedded dashboard authenticates, pins evidence, and leaves Lab running after browser closure", async ({
   browser,
@@ -39,6 +46,68 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       page.getByText("no_rpc_traffic.", { exact: false }),
     ).toBeVisible();
     await expect(page).not.toHaveURL(/ticket/);
+    const endpoint = new URL(launch);
+    const reused = await page.request.post(
+      `${endpoint.origin}/ui/${lab.lab_id}/session`,
+      {
+        headers: { Origin: endpoint.origin },
+        data: {
+          ticket: new URLSearchParams(endpoint.hash.slice(1)).get("ticket"),
+        },
+      },
+    );
+    expect(reused.status()).toBe(401);
+    const session = (await context.cookies()).find((c) =>
+      c.name.startsWith("ronchi_"),
+    )!;
+    expect(session.httpOnly).toBe(true);
+    expect(session.sameSite).toBe("Strict");
+    expect(session.expires - Date.now() / 1000).toBeGreaterThan(1700);
+    const second = cli(
+      project,
+      "--lab",
+      "second",
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    const secondPage = await context.newPage();
+    try {
+      await secondPage.goto(
+        cli(project, "--lab-id", second.lab_id, "dashboard").result.launch_url,
+      );
+      await expect(
+        secondPage.getByRole("heading", { name: "Timeline", exact: true }),
+      ).toBeVisible();
+      expect(
+        (await context.cookies()).filter((c) => c.name.startsWith("ronchi_"))
+          .length,
+      ).toBe(2);
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: "Timeline", exact: true }),
+      ).toBeVisible();
+    } finally {
+      await secondPage.close();
+      cli(project, "--lab-id", second.lab_id, "down", "--force");
+    }
+
+    await page.getByText("Case controls", { exact: false }).click();
+    await page
+      .getByRole("button", { name: "Arm / replace tx-response-lost" })
+      .click();
+    await expect
+      .poll(() => cli(project, "status").result.active_case?.case_id)
+      .toBe("tx-response-lost");
+    await page
+      .getByRole("button", { name: "Disarm Case", exact: true })
+      .click();
+    await expect
+      .poll(() => cli(project, "status").result.active_case)
+      .toBe(null);
+
     await page.screenshot({
       path: info.outputPath("desktop.png"),
       fullPage: true,
@@ -58,7 +127,16 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
+    await page.locator('aside pre').scrollIntoViewIfNeeded();
+    await expect(page.locator('aside pre')).toContainText('items');
+    await page.screenshot({path:info.outputPath('narrow-evidence.png')});
     expect(errors).toEqual([]);
+    await context.addCookies([
+      { ...session, expires: Math.floor(Date.now() / 1000) - 1 },
+    ]);
+    await page.reload();
+    await expect(page.getByRole("alert")).toContainText("401");
+
     await context.close();
     expect(cli(project, "status").result.state).toBe("ready");
     expect(lab.lab_id).toBe(cli(project, "status").result.lab_id);
@@ -68,5 +146,227 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
+  }
+});
+
+test("retained viewer reads the original immutable Journal without restarting a Lab", async ({
+  page,
+}) => {
+  const project = mkdtempSync(join(tmpdir(), "ronchi-viewer-"));
+  let child: ReturnType<typeof spawn> | undefined;
+  try {
+    const lab = cli(
+      project,
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    cli(project, "down");
+    child = spawn(
+      binary,
+      [
+        "--project",
+        project,
+        "--json",
+        "--lab-id",
+        lab.lab_id,
+        "dashboard",
+        "--serve",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const ready = await new Promise<{ result: { launch_url: string } }>(
+      (resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Viewer readiness deadline exceeded")),
+          5000,
+        );
+        let text = "";
+        child!.stdout!.on("data", (chunk) => {
+          text += String(chunk);
+          if (text.includes("\n")) {
+            clearTimeout(timer);
+            try {
+              resolve(JSON.parse(text.split("\n")[0]));
+            } catch (e) {
+              reject(e);
+            }
+          }
+        });
+        child!.once("exit", (code) => {
+          clearTimeout(timer);
+          reject(new Error(`Viewer exited before readiness: ${code}`));
+        });
+      },
+    );
+    await page.goto(ready.result.launch_url);
+    await expect(
+      page.getByRole("heading", { name: "Timeline", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("stopped · healthy", { exact: true }),
+    ).toBeVisible();
+    await page.getByText("Case controls", { exact: false }).click();
+    await expect(
+      page.getByRole("button", { name: "Disarm Case", exact: true }),
+    ).toBeDisabled();
+    await page.getByRole("button", { name: /^#/ }).first().click();
+    await expect(
+      page.getByRole("button", { name: "Load raw payload preview" }),
+    ).toBeVisible();
+    expect(cli(project, "--lab-id", lab.lab_id, "status").result.state).toBe(
+      "stopped",
+    );
+    const replacement = cli(
+      project,
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    try {
+      expect(replacement.lab_id).not.toBe(lab.lab_id);
+      await page.reload();
+      await expect(
+        page.getByRole("button", { name: lab.lab_id, exact: true }),
+      ).toBeVisible();
+    } finally {
+      cli(project, "--lab-id", replacement.lab_id, "down", "--force");
+    }
+    child.kill("SIGINT");
+    await new Promise<void>((resolve) => child!.once("exit", () => resolve()));
+    child = undefined;
+  } finally {
+    if (child) {
+      child.kill("SIGKILL");
+      await new Promise<void>((r) => child!.once("exit", () => r()));
+    }
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("response-loss Findings, public collection and explicit evaluation use real reference evidence", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const project = mkdtempSync(join(tmpdir(), "ronchi-browser-proof-"));
+  let child: ReturnType<typeof spawn> | undefined;
+  let labId: string | undefined;
+  try {
+    const report = cli(
+      project,
+      "demo",
+      "tx-response-lost",
+      "--profile",
+      "unsafe",
+    ).result;
+    labId = report.lab_id;
+    const status = cli(project, "--lab-id", report.lab_id, "status").result;
+    const source = new URL(status.configuration.checks.sources[0].url);
+    child = spawn(
+      binary,
+      [
+        "--project",
+        project,
+        "--lab-id",
+        report.lab_id,
+        "--json",
+        "reference",
+        "relayer",
+        "--name",
+        report.reference_name,
+        "--profile",
+        "unsafe",
+        "--listen",
+        `${source.hostname}:${source.port}`,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Relayer readiness deadline")),
+        5000,
+      );
+      let text = "";
+      child!.stdout!.on("data", (chunk) => {
+        text += String(chunk);
+        if (text.includes("\n")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child!.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Relayer exited ${code}`));
+      });
+    });
+    await page.goto(
+      cli(project, "--lab-id", report.lab_id, "dashboard").result.launch_url,
+    );
+    await expect(page.locator(".findings button").first()).toBeVisible();
+    await page.locator(".findings button").first().click();
+    await expect(
+      page.getByRole("heading", { name: "Observed statement" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Developer guidance" }),
+    ).toBeVisible();
+    await expect(page.getByText(/Pinned view/)).toBeVisible();
+    const pinned = await page
+      .locator(".summary .section-title span")
+      .textContent();
+    await page.getByText("Application Checks", { exact: true }).click();
+    await page
+      .getByLabel("Intent identity", { exact: true })
+      .fill(report.intent_id);
+    await page
+      .getByRole("button", { name: "Collect observations", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Refresh collection status" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Refresh collection status" })
+      .click();
+    // Collection does not silently move an open evidence detail to a new prefix.
+    expect(
+      await page.locator(".summary .section-title span").textContent(),
+    ).toBe(pinned);
+    await page
+      .getByRole("button", { name: /Evaluate pinned snapshot/ })
+      .click();
+    await expect(page.getByLabel("Explicit Check evaluation")).toContainText(
+      '"verdict": "fail"',
+    );
+    await expect(page.getByLabel("Explicit Check evaluation")).toContainText(
+      "prepared",
+    );
+    await page
+      .getByRole("button", { name: "Load raw payload preview" })
+      .click();
+    await expect(page.locator("aside pre").last()).toContainText("payload");
+    child.kill('SIGINT');await new Promise<void>(r=>child!.once('exit',()=>r()));child=undefined;
+    cli(project,'--lab-id',report.lab_id,'down','--force');
+    child=spawn(binary,['--project',project,'--json','--lab-id',report.lab_id,'dashboard','--serve'],{stdio:['ignore','pipe','pipe']});
+    const retained=await new Promise<{result:{launch_url:string}}>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Retained readiness timeout')),5000);let text='';child!.stdout!.on('data',chunk=>{text+=String(chunk);if(text.includes('\n')){clearTimeout(timer);resolve(JSON.parse(text.split('\n')[0]))}});child!.once('exit',code=>{clearTimeout(timer);reject(new Error(`Viewer exited ${code}`))})});
+    const retainedUrl=new URL(retained.result.launch_url);retainedUrl.searchParams.set('snapshot',String(report.snapshot_seq));
+    await page.goto(retainedUrl.toString());
+    await expect(page.getByRole('heading',{name:'Timeline',exact:true})).toBeVisible();
+    await page.getByText('Application Checks',{exact:true}).click();
+    await page.getByLabel('Intent identity',{exact:true}).fill(report.intent_id);
+    await expect(page.getByRole('button',{name:'Collect observations',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:/Evaluate pinned snapshot/}).click();
+    await expect(page.getByLabel('Explicit Check evaluation')).toContainText('"verdict": "fail"');
+
+  } finally {
+    if (child) {
+      child.kill("SIGINT");
+      await new Promise<void>((r) => child!.once("exit", () => r()));
+    }
+    if (labId && cli(project,"--lab-id",labId,"status").result.state === "ready") cli(project, "--lab-id", labId, "down", "--force");
+    rmSync(project, { recursive: true, force: true });
   }
 });

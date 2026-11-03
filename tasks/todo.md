@@ -411,11 +411,14 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 9, 12. **Scope:** Medium; split panels if needed. **Likely files:** `dashboard/`, `src/dashboard.rs`, `tests/dashboard_flow.rs`.
 - **Source:** [First dashboard](../docs/product/investigation-interfaces.md#first-dashboard).
 - [x] 14a. Reproducible React package and embedded asset serving.
-- [ ] 14b. Bounded browser tickets and Lab-scoped sessions.
+- [x] 14b. Bounded browser tickets and Lab-scoped sessions.
 - [ ] 14c. Summary, Timeline, Findings, and evidence detail.
 - [ ] 14d. Pinned selection and public Case/Check controls.
-- [ ] 14e. Retained viewer and startup/Demo launch paths.
+- [x] 14e. Retained viewer and startup/Demo launch paths.
 - [ ] 14f. Native browser acceptance, accessible narrow layout, and visual review.
+- **Controls/viewer slice:** Live Case controls and explicit Check collect/status/cancel/evaluate use existing handlers. The retained foreground viewer uses the shared read-only query core without a writer or simulator. Startup and Demo expose ticket launch metadata or exact-ID viewer argv. Live status polling does not move pinned evidence. HTTP bodies retain existing limits. Browser transport caps responses while reading and preserves unsafe integer fact representations.
+- **Verification:** Four Vitest/Testing Library tests and three real native Playwright flows passed. Browser flows cover Case mutations, two Lab sessions on one host, ticket reuse, client cookie expiry, response-loss Finding evidence, actual relayer collection/evaluation, and retained replay after source/Lab stop. Retained name reuse keeps the original identity. Desktop, narrow, and visible narrow evidence screenshots were inspected. The full Rust suite and release build passed. One pre-viewer `down` failure did not reproduce in ten focused runs; the harness now retains CLI error envelopes. Its cause remains unconfirmed.
+- **Remaining acceptance:** Add bounded continuation for Findings beyond the summary's first five. Preserve selected Finding/event detail in durable links. Finish no-Lab/starting/unsupported/analysis-limit browser states, keyboard/focus assertions, browser polling cancellation/status, payload continuation, hidden-tab/stale-request checks, and retained viewer broken-pipe acceptance. Recheck the isolated `down` failure if it recurs. Keep task 14 open; task 15 follows only after acceptance.
 - **Initial slice verification:** Frontend clean install, strict typecheck, two selection tests, and production build passed. Full Rust suite, fmt, check, and warning-free Clippy passed. Native HTTP verifies single-use tickets, Host/Origin rejection, bearer separation, and cross-Lab session rejection. Playwright opened built embedded assets in an empty temporary project, pinned evidence, and proved browser closure leaves the Lab ready. Desktop and 390px screenshots were inspected. Expiry/capacity have unit coverage; browser expiry and the remaining task-14 workflows are still pending.
 
 ### 15. Local MCP adapter

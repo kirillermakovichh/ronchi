@@ -191,8 +191,16 @@ Stopped or interrupted results omit live endpoints.
 A lost stop response triggers bounded status inspection, without resending the mutation.
 
 Control uses a loopback-only address, an exact Host check, and the per-Lab bearer token.
-Requests with an Origin header are rejected; no browser control session is implemented yet.
-The dashboard ticket/cookie flow remains task 14.
+Bearer routes reject Origin headers.
+Browser routes use a separate single-use ticket exchange and scoped session cookie.
+Tickets live for 60 seconds; sessions live for 30 minutes.
+Each Lab bounds unexpired tickets to 16 and sessions to 32.
+Browser Host and Origin checks use the actual bound address.
+The cookie name includes the Lab ID and port; its path includes the immutable Lab ID.
+`ronchi dashboard` prints a finite live launch link.
+`ronchi dashboard --serve --lab-id <id>` owns a foreground read-only retained viewer.
+The viewer has no writer or simulator and does not change Lab ownership.
+See [build and launch](../development.md#dashboard-build-and-launch) for readiness and shutdown.
 Each listener owns at most 64 connection tasks.
 HTTP headers are bounded to 32 KiB and 64 fields, with a 30-second header deadline.
 Control JSON bodies are bounded to 1 KiB with a 30-second handler deadline.

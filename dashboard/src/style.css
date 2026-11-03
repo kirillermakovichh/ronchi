@@ -305,3 +305,44 @@ footer {
     scroll-behavior: auto;
   }
 }
+.controls {
+  border-bottom: 1px solid var(--line);
+  padding: 20px 0;
+}
+.controls details + details {
+  margin-top: 20px;
+}
+.controls form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.controls label {
+  max-width: 100%;
+}
+.controls input[type="checkbox"] {
+  width: auto;
+}
+.controls button {
+  margin: 4px;
+}
+select {
+  font: inherit;
+  max-width: 100%;
+  padding: 8px;
+  background: #171b1d;
+  color: inherit;
+  border: 1px solid var(--line);
+}
+.event.supporting {
+  background: #242a2b;
+  border-right: 2px solid #e7e9e8;
+}
+.event.supporting:after {
+  content: "support";
+  font-size: 10px;
+  margin-left: auto;
+  color: var(--muted);
+}
+.counts{display:flex;flex-wrap:wrap;gap:12px 32px;margin:12px 0}.counts dt{font-size:11px;margin:0}.counts dd{font:16px ui-monospace,monospace;margin:4px 0}.lab-head{margin-bottom:20px}

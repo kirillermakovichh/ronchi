@@ -108,6 +108,18 @@ No MCP adapter or Findings operation is implied by these controls.
 
 ## First dashboard
 
+The embedded React interface now uses the same query, Case, and Check core as the CLI.
+`ronchi dashboard` launches a live browser session without opening a browser automatically.
+`ronchi dashboard --serve --lab-id <id>` serves retained evidence without starting a Lab.
+See [build and launch](../development.md#dashboard-build-and-launch) for commands and session limits.
+The browser keeps live status separate from its pinned query prefix.
+It uses server filtering, 50-item pages, and explicit payload previews.
+Application collection and evaluation require explicit actions.
+The current Check form selects one intent and a configured definition version.
+HTTP-only collection, its 32 KiB cap, and evaluation budgets remain unchanged.
+Broader acceptance gaps remain tracked under task 14.
+
+
 The first dashboard has a Lab header, a compact Investigation summary, a Timeline, and an evidence detail panel.
 The header shows mode, RPC URL, Lab status, Journal health, Observation Boundary, and active Case.
 Case controls list mode requirements and expose arm, replace, and disarm actions.

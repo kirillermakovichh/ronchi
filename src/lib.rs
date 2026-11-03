@@ -48,7 +48,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Print a single-use browser launch URL for a ready Lab
-    Dashboard,
+    Dashboard {
+        /// Serve a retained Journal read-only in the foreground until Ctrl-C
+        #[arg(long)]
+        serve: bool,
+    },
     /// Run an isolated bundled public-path experiment
     Demo(demo::Args),
     /// Start a persistent Lab and wait for lifecycle readiness
@@ -361,11 +365,22 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             };
             query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
         }
-        Command::Dashboard => {
+        Command::Dashboard { serve } => {
             let root = match project(cli.project.as_deref()) {
                 Ok(root) => root,
                 Err(error) => return render_lab_error(cli.json, error),
             };
+            if serve {
+                return match run_async(dashboard::viewer::serve(
+                    root,
+                    name,
+                    cli.lab_id.as_deref(),
+                    cli.json,
+                )) {
+                    Ok(()) => 0,
+                    Err(error) => render_lab_error(cli.json, error),
+                };
+            }
             match run_async(dashboard::launch(root, name, cli.lab_id.as_deref())) {
                 Err(error) => render_lab_error(cli.json, error),
                 Ok(result) => {
@@ -414,7 +429,12 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Ok(c) => c,
                 Err(message) => return render_lab_error(cli.json, lab::LabError::invalid(message)),
             };
-            render_lab_result(cli.json, run_async(lab::up(configuration, settings, name)))
+            let root = configuration.project.clone();
+            let result = run_async(lab::up(configuration, settings, name));
+            let launch = result.as_ref().ok().and_then(|r| {
+                run_async(dashboard::launch(root, name, Some(&r.manifest.lab_id))).ok()
+            });
+            render_lab_dashboard(cli.json, result, launch)
         }
         Command::Case { operation } => {
             if matches!(operation, CaseCommand::List) {
@@ -504,6 +524,8 @@ enum LabEnvelope {
         request_id: String,
         lab_id: String,
         result: Box<lab::LabResult>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dashboard: Option<dashboard::Launch>,
     },
     Error(ErrorEnvelope),
 }
@@ -571,6 +593,13 @@ fn render_lab_error(json: bool, error: lab::LabError) -> i32 {
     }
 }
 fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) -> i32 {
+    render_lab_dashboard(json, result, None)
+}
+fn render_lab_dashboard(
+    json: bool,
+    result: Result<lab::LabResult, lab::LabError>,
+    dashboard: Option<dashboard::Launch>,
+) -> i32 {
     match result {
         Err(error) => render_lab_error(json, error),
         Ok(result) => {
@@ -601,11 +630,16 @@ fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) 
                     .map(|policy| policy.settings.case_id.as_str())
                     .unwrap_or("none")
             );
+            let text = match &dashboard {
+                Some(launch) => format!("{text} · dashboard {}", launch.launch_url),
+                None => text,
+            };
             let envelope = LabEnvelope::Success {
                 contract_version: 1,
                 request_id: format!("cli-{}", std::process::id()),
                 lab_id: result.manifest.lab_id.clone(),
                 result: Box::new(result),
+                dashboard,
             };
             match write_output(json, &envelope, &text, false) {
                 Ok(()) => 0,

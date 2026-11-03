@@ -6,10 +6,11 @@ describe("semantic selection", () => {
       selection("?snapshot=41&signature=abc&cursor=temporary&ticket=secret"),
     ).toEqual({ snapshot: 41, scope: { signature: ["abc"] } });
   });
-  it("keeps unpinned views live and rejects malformed sequence values", () => {
+  it("rejects malformed sequence values without widening the selection", () => {
     expect(selection("?from_seq=bad&kind=rpc.boundary")).toEqual({
-      snapshot: undefined,
-      scope: { kind: ["rpc.boundary"] },
+      scope: {},
+      error:
+        "Invalid from_seq. Use an exact safe integer for browser navigation.",
     });
   });
 });

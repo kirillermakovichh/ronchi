@@ -204,7 +204,7 @@ The Reference Application is Rust code shipped in the same native executable as 
 The Demo starts it as an owned child process in the executable's relayer mode.
 An ordinary Demo leaves its Lab running after the bounded reference Workload and relayer finish.
 It returns actual RPC/control endpoints, immutable `lab_id`, pinned Check results, summary, Findings, and project-aware CLI evidence commands.
-It does not return a dashboard URL before the dashboard exists.
+The result now includes a ready Lab dashboard ticket link or exact-ID retained viewer argv.
 `--stop-after-demo` explicitly stops only the Demo-owned Lab after collecting Checks; `--json` changes rendering only.
 The Demo selects a fresh available `demo` name and free loopback ports; it never reuses or replaces the user's `default` Lab.
 If `demo` already exists, allocate `demo-2`, then the next free suffix, and return the selected name.
