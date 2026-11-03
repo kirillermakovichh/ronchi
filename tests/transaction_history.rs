@@ -1735,3 +1735,4 @@ mod timeout;
 
 #[path = "cases/custom.rs"]
 mod custom_cases;
+include!("cases/custom_lifecycle.rs");
