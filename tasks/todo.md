@@ -273,8 +273,11 @@ Checkpoints record results and do not require another approval interview.
 
 #### 10b. Submission, reconciliation, and profiles
 
-- [ ] Commit signed identities and attempt-start before HTTP, implement finalized reconciliation and bounded unsafe replacement, and persist client/status observations.
+- [x] Commit signed identities and attempt-start before HTTP, implement finalized reconciliation and bounded unsafe replacement, and persist client/status observations.
 - **Verify:** Real RPC response loss, one resilient identity/two unsafe identities, no false failure from null/missing response, and identity-commit failure.
+
+- **Verified 10b:** All four locked checks passed: formatting, check, test (119 tests), and Clippy with `-D warnings`. Native HTTP histories prove a retained client-side 5-second timeout under response loss, resilient original-identity finality, unsafe's one replacement with the same blockhash and a different signature, null status remaining reconciling, terminal stability across process reopen, and no submission after a real SQLite identity-insert failure.
+- **Self-review:** Signed bytes/validity and attempt-start commit before network submission. One owned worker and connection task prevent concurrent RPC work; timeout/shutdown abort and join transport tasks. Terminal updates include supporting observations in the same transaction. Original signatures stay immutable; generation and attempt admission bound unsafe behavior. No Case-name branch or simulator/Journal access exists. Crash barriers and complete recovery histories remain in 10d.
 
 #### 10c. Application observation endpoint
 

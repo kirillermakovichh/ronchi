@@ -24,6 +24,15 @@ impl Outcome {
         }
     }
 }
+#[derive(Default)]
+struct ConnectionTask(Option<tokio::task::JoinHandle<Result<(), hyper::Error>>>);
+impl Drop for ConnectionTask {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
+        }
+    }
+}
 pub(super) async fn rpc(
     address: SocketAddr,
     method: &str,
@@ -34,7 +43,7 @@ pub(super) async fn rpc(
     if !address.ip().is_loopback() {
         return Outcome::InvalidResponse;
     }
-    let mut connection = None;
+    let mut connection = ConnectionTask::default();
     let result = {
         let work = async {
             let stream = tokio::net::TcpStream::connect(address)
@@ -43,7 +52,7 @@ pub(super) async fn rpc(
             let (mut sender, task) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
                 .await
                 .map_err(|_| ())?;
-            connection = Some(tokio::spawn(task));
+            connection.0 = Some(tokio::spawn(task));
             let body = serde_json::to_vec(
                 &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
             )
@@ -82,7 +91,7 @@ pub(super) async fn rpc(
         };
         tokio::select! {biased;_ =stop.cancelled()=>Outcome::Cancelled,result=tokio::time::timeout(deadline,work)=>match result{Err(_)=>Outcome::Timeout,Ok(Err(()))=>Outcome::TransportError,Ok(Ok(outcome))=>outcome}}
     };
-    if let Some(task) = connection {
+    if let Some(task) = connection.0.take() {
         task.abort();
         let _ = task.await;
     }

@@ -20,6 +20,7 @@ enum Message {
 pub struct Store {
     sender: mpsc::Sender<Message>,
     pub(super) failed: CancellationToken,
+    pub(super) changed: std::sync::Arc<tokio::sync::Notify>,
 }
 pub struct Owner {
     sender: mpsc::Sender<Message>,
@@ -95,6 +96,7 @@ impl Store {
             Self {
                 sender: sender.clone(),
                 failed,
+                changed: std::sync::Arc::new(tokio::sync::Notify::new()),
             },
             Owner {
                 sender,
@@ -140,7 +142,7 @@ impl Store {
             let accepted=now_ms();let deadline=accepted+i64::from(db.binding.horizon_seconds)*1000;
             tx.execute("INSERT INTO intents(intent_id,payload_digest,payload_json,state,revision,accepted_at_ms,deadline_ms) VALUES(?1,?2,?3,'accepted',1,?4,?5)",params![input.intent_id,digest,serde_json::to_string(&input).map_err(|_|Error::Storage)?,accepted,deadline])?;
             tx.commit()?;db.snapshot(&input.intent_id)
-        }).await
+        }).await.inspect(|_|self.changed.notify_one())
     }
     pub async fn snapshot(&self, intent_id: &str) -> Result<Value, Error> {
         let id = intent_id.to_string();
@@ -260,6 +262,8 @@ impl Db {
         value["profile"] = json!(self.binding.profile);
         value["lab_id"] = json!(self.binding.lab_id);
         value["target_commitment"] = json!("finalized");
+        value["execution_mode"] = json!("simulator");
+        value["outcome_interpretation"] = json!("simulated_lifecycle_only");
         for (field, sql) in [
             (
                 "prepared_identities",
@@ -278,10 +282,16 @@ impl Db {
             let rows: Vec<String> = statement
                 .query_map([id], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
-            let rows: Vec<Value> = rows
+            let mut rows: Vec<Value> = rows
                 .iter()
                 .map(|s| serde_json::from_str(s).map_err(|_| Error::Storage))
                 .collect::<Result<_, _>>()?;
+            if field == "submission_attempts" {
+                for row in &mut rows {
+                    row["result"] =
+                        optional((!row["result"].is_null()).then(|| row["result"].clone()));
+                }
+            }
             value[field] = available(json!(rows));
         }
         value["availability"] = json!("available");
@@ -302,3 +312,162 @@ CREATE INDEX observations_intent ON observations(intent_id,observation_id);
 CREATE TRIGGER immutable_original BEFORE UPDATE OF original_signature ON intents WHEN OLD.original_signature IS NOT NULL AND NEW.original_signature IS NOT OLD.original_signature BEGIN SELECT RAISE(ABORT,'original identity is immutable'); END;
 PRAGMA user_version=1;
 "#;
+
+impl Store {
+    pub(super) async fn active(&self) -> Result<Option<super::sender::Active>, Error> {
+        self.call(false, |db| db.active()).await
+    }
+    pub(super) async fn recover(&self) -> Result<Option<super::sender::Active>, Error> {
+        self.call(true,|db|{
+            if let Some(active)=db.active()?{match active.state.as_str(){"prepared"=>db.record(&active.id,"prepared","recovery_prepared",json!({"action":"query_saved_identity_before_send"}))?,"submitting"=>db.record(&active.id,"reconciling","recovery_unknown",json!({"network_result":"unknown","client_outcome":{"availability":"unavailable"}}))?,_=>()}}
+            db.active()
+        }).await
+    }
+    pub(super) async fn record(
+        &self,
+        id: &str,
+        state: &str,
+        kind: &str,
+        data: Value,
+    ) -> Result<(), Error> {
+        let (id, state, kind) = (id.to_string(), state.to_string(), kind.to_string());
+        self.call(true, move |db| db.record(&id, &state, &kind, data))
+            .await
+    }
+    pub(super) async fn prepare(
+        &self,
+        id: &str,
+        identity: super::sender::Identity,
+    ) -> Result<(), Error> {
+        let id = id.to_string();
+        self.call(true,move|db|{
+            let active=db.active()?.ok_or(Error::Conflict)?;
+            if active.id!=id||!((identity.generation==0&&active.state=="accepted")||(identity.generation==1&&active.state=="reconciling"&&active.ambiguous&&db.binding.profile==super::Profile::Unsafe&&active.identity.is_some_and(|i|i.generation==0&&i.signature!=identity.signature))){return Err(Error::Conflict);}
+            let tx=db.connection.transaction()?;
+            tx.execute("INSERT INTO identities VALUES(?1,?2,?3,?4,?5,?6)",params![id,identity.generation,identity.signature,identity.wire,crate::query::digest(identity.wire.as_bytes()),serde_json::to_string(&identity.validity).map_err(|_|Error::Storage)?])?;
+            tx.execute("UPDATE intents SET state='prepared',revision=revision+1,original_signature=coalesce(original_signature,?2),tracked_signature=?2 WHERE intent_id=?1",params![id,identity.signature])?;
+            insert_observation(&tx,&id,"identity_prepared",json!({"generation":identity.generation,"signature":identity.signature}))?;
+            tx.commit()?;Ok(())
+        }).await
+    }
+    pub(super) async fn start_attempt(&self, id: &str, generation: u8) -> Result<i64, Error> {
+        let id = id.to_string();
+        self.call(true, move |db| {
+            let tx = db.connection.transaction()?;
+            let state: String =
+                tx.query_row("SELECT state FROM intents WHERE intent_id=?1", [&id], |r| {
+                    r.get(0)
+                })?;
+            let prior: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM attempts WHERE intent_id=?1 AND generation=?2)",
+                params![id, generation],
+                |r| r.get(0),
+            )?;
+            if state != "prepared" || prior {
+                return Err(Error::Conflict);
+            }
+            tx.execute(
+                "INSERT INTO attempts(intent_id,generation,started_at_ms) VALUES(?1,?2,?3)",
+                params![id, generation, now_ms()],
+            )?;
+            let attempt = tx.last_insert_rowid();
+            tx.execute(
+                "UPDATE intents SET state='submitting',revision=revision+1 WHERE intent_id=?1",
+                [&id],
+            )?;
+            insert_observation(
+                &tx,
+                &id,
+                "attempt_start",
+                json!({"attempt_id":attempt,"generation":generation,"network_result":"unknown"}),
+            )?;
+            tx.commit()?;
+            Ok(attempt)
+        })
+        .await
+    }
+    pub(super) async fn complete_attempt(
+        &self,
+        id: &str,
+        attempt: i64,
+        outcome: &super::client::Outcome,
+    ) -> Result<(), Error> {
+        let id = id.to_string();
+        let outcome = outcome.clone();
+        self.call(true,move|db|{
+            let ambiguous=matches!(outcome,super::client::Outcome::Timeout|super::client::Outcome::TransportError|super::client::Outcome::InvalidResponse);
+            let data=json!({"attempt_id":attempt,"ambiguous":ambiguous,"client_outcome":outcome});
+            let tx=db.connection.transaction()?;
+            if tx.execute("UPDATE attempts SET result_json=?3 WHERE intent_id=?1 AND attempt_id=?2 AND result_json IS NULL",params![id,attempt,serde_json::to_string(&data).map_err(|_|Error::Storage)?])?!=1{return Err(Error::Conflict);}
+            tx.execute("UPDATE intents SET state='reconciling',revision=revision+1 WHERE intent_id=?1 AND state='submitting'",[&id])?;
+            insert_observation(&tx,&id,"client",data)?;tx.commit()?;Ok(())
+        }).await
+    }
+}
+impl Db {
+    fn active(&mut self) -> Result<Option<super::sender::Active>, Error> {
+        let row:Option<(String,String,i64,String,String)>=self.connection.query_row("SELECT intent_id,state,deadline_ms,payload_digest,coalesce(tracked_signature,'') FROM intents WHERE state NOT IN ('succeeded','failed','unresolved') LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+        let Some((id, state, deadline, payload_digest, signature)) = row else {
+            return Ok(None);
+        };
+        let identity=self.connection.query_row("SELECT signature,wire_base64,generation,validity_json FROM identities WHERE intent_id=?1 AND signature=?2",params![id,signature],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,u8>(2)?,r.get::<_,String>(3)?))).optional()?.map(|(signature,wire,generation,validity)|Ok::<_,Error>(super::sender::Identity{signature,wire,generation,validity:serde_json::from_str(&validity).map_err(|_|Error::Storage)?})).transpose()?;
+        let (observations,ambiguous):(u32,bool)=self.connection.query_row("SELECT count(*),coalesce(max(kind='client' AND json_extract(data_json,'$.ambiguous')=1),0) FROM observations WHERE intent_id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        Ok(Some(super::sender::Active {
+            id,
+            state,
+            deadline,
+            payload_digest,
+            identity,
+            ambiguous,
+            observations: observations as usize,
+        }))
+    }
+    fn record(&mut self, id: &str, state: &str, kind: &str, data: Value) -> Result<(), Error> {
+        if ![
+            "accepted",
+            "prepared",
+            "submitting",
+            "reconciling",
+            "succeeded",
+            "failed",
+            "unresolved",
+        ]
+        .contains(&state)
+        {
+            return Err(Error::Invalid);
+        }
+        let tx = self.connection.transaction()?;
+        if tx.execute("UPDATE intents SET state=?2,revision=revision+1 WHERE intent_id=?1 AND state NOT IN ('succeeded','failed','unresolved')",params![id,state])?!=1{return Err(Error::Conflict);}
+        insert_observation(&tx, id, kind, data)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+fn insert_observation(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    kind: &str,
+    data: Value,
+) -> Result<(), Error> {
+    if crate::query::encoded_len(&data, 1024).is_err() {
+        return Err(Error::Storage);
+    }
+    let count: i64 = tx.query_row(
+        "SELECT count(*) FROM observations WHERE intent_id=?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    if count >= 128 {
+        return Err(Error::Storage);
+    }
+    tx.execute(
+        "INSERT INTO observations(intent_id,kind,observed_at_ms,data_json) VALUES(?1,?2,?3,?4)",
+        params![
+            id,
+            kind,
+            now_ms(),
+            serde_json::to_string(&data).map_err(|_| Error::Storage)?
+        ],
+    )?;
+    Ok(())
+}

@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implementation in progress. Durable intake and the foreground process are implemented; submission, observations, and recovery acceptance remain in the task queue.
+Status: task 10 implementation in progress. Durable intake, foreground execution, submission, and profiles are implemented; the observation endpoint and crash acceptance remain in the task queue.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -12,7 +12,7 @@ The Reference Application is bundled with Ronchi but is not the product core. It
 
 The Demo must exercise the Reference Application through the same external RPC, control, evidence, Check, dashboard, CLI, and MCP-facing behavior used by real applications. It must not depend on canned Journal Evidence or a private shortcut unavailable to users.
 
-## Implemented entry point (slice 10a)
+## Implemented reference process
 
 ```bash
 ronchi --project /path/to/project --lab-id L1 reference relayer --profile resilient --name reference --listen 127.0.0.1:0 --json
@@ -44,8 +44,27 @@ It does not inspect the Lab Journal or simulator state.
 The database persists profile, Lab, local genesis identity, RPC endpoint, and horizon configuration.
 `--horizon-seconds` accepts 1..300 (initial default 60); recovery cannot change the stored value.
 Profile changes are rejected before serving requests.
-At this slice boundary, readiness explicitly says `submission:not_implemented`.
+Readiness reports `submission:enabled` when the bounded worker is owned by the foreground process.
 An accepted intent is durable intake only; it is not transaction acceptance or success.
+The worker prepares a legacy signed fixture with a signed intent/generation discriminator.
+It commits exact base64 bytes, signature, local blockhash, context slot, and last valid height before attempt-start.
+It then commits attempt-start before sending `sendTransaction` with explicit `skipPreflight:true` and `maxRetries:0`.
+Each RPC owns its connection task; timeout or shutdown cancels and joins that task.
+No SQL transaction spans an HTTP call.
+Client response, actual 5-second timeout, transport error, and unknown crash outcome remain separate observations.
+A null status and submission acceptance leave the intent reconciling.
+Only a positive finalized status with `err:null` permits `succeeded`.
+A positive status error permits `failed`; missing/expired validity alone does not.
+The worker polls at one-second intervals with `searchTransactionHistory:true`.
+It validates public status and the pinned genesis before RPC work.
+Unsafe prepares generation 1 only after a committed ambiguous Client Outcome for generation 0.
+Its signed discriminator guarantees a different message even at the same blockhash.
+There are at most two generations and one attempt per generation.
+No state transition depends on the active Case name.
+The worker reserves terminal headroom within 128 observations per intent and ends explicitly unresolved at its observation limit.
+State transitions and their supporting observations share one SQLite transaction.
+A storage error stops the worker/process instead of sending after an uncertain commit.
+Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
 The generic Check collector, Verdict evaluator, and Demo remain tasks 11–13.
 
 ## Reference Behavior Profiles

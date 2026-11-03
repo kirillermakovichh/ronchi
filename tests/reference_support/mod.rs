@@ -14,6 +14,9 @@ pub struct Lab {
 }
 impl Lab {
     pub fn new() -> Self {
+        Self::new_with_slot(400)
+    }
+    pub fn new_with_slot(slot: u64) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let up = command(
             directory.path(),
@@ -23,6 +26,8 @@ impl Lab {
                 "127.0.0.1:0",
                 "--control-listen",
                 "127.0.0.1:0",
+                "--slot-duration-ms",
+                &slot.to_string(),
             ],
         );
         let id = up["lab_id"].as_str().unwrap().to_string();
@@ -42,7 +47,30 @@ impl Lab {
     pub fn reference_dir(&self) -> PathBuf {
         self.path().join("ronchi/reference/reference")
     }
+    pub fn barrier(&self, phase: &str) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            if std::fs::read(self.reference_dir().join("barrier.json"))
+                .ok()
+                .and_then(|s| serde_json::from_slice::<Value>(&s).ok())
+                .is_some_and(|v| v["phase"] == phase)
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "barrier {phase} was not observed"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    pub fn release(&self) {
+        std::fs::write(self.reference_dir().join("barrier.release"), []).unwrap();
+    }
     pub fn start(&self, profile: &str, barrier: Option<&str>) -> Relayer {
+        for file in ["barrier.json", "barrier.release"] {
+            let _ = std::fs::remove_file(self.reference_dir().join(file));
+        }
         let mut command = base(self.path());
         command.args([
             "--lab-id",
@@ -64,11 +92,12 @@ impl Lab {
         let (tx, rx) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
             let mut line = String::new();
-            let result = BufReader::new(stdout).read_line(&mut line);
-            let _ = tx.send((result, line));
+            let mut output = BufReader::new(stdout);
+            let result = output.read_line(&mut line);
+            let _ = tx.send((result, line, output));
         });
-        let line = match rx.recv_timeout(Duration::from_secs(8)) {
-            Ok((Ok(_), line)) => line,
+        let (line, output) = match rx.recv_timeout(Duration::from_secs(8)) {
+            Ok((Ok(_), line, output)) => (line, output),
             _ => {
                 child.kill().unwrap();
                 child.wait().unwrap();
@@ -85,6 +114,7 @@ impl Lab {
             address: ready["result"]["listen"].as_str().unwrap().parse().unwrap(),
             child,
             ready,
+            output,
         }
     }
 }
@@ -119,6 +149,7 @@ pub struct Relayer {
     pub address: SocketAddr,
     pub child: Child,
     pub ready: Value,
+    pub output: BufReader<std::process::ChildStdout>,
 }
 impl Relayer {
     pub fn request(&self, method: &str, path: &str, value: Value) -> (u16, Value) {

@@ -103,6 +103,7 @@ fn optional(value: Option<Value>) -> Value {
 
 mod client;
 mod http;
+mod sender;
 #[derive(clap::Args)]
 pub struct Args {
     /// Select a separate persistent reference workspace
@@ -196,7 +197,9 @@ pub async fn run(
         binding.horizon_seconds = args.horizon_seconds.unwrap_or(60);
         binding
     };
-    let (store, owner) = Store::open(directory, binding.clone()).await?;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    let (store, owner) = Store::open(directory.clone(), binding.clone()).await?;
     let listener = match tokio::net::TcpListener::bind(args.listen).await {
         Ok(listener) => listener,
         Err(_) => {
@@ -207,13 +210,21 @@ pub async fn run(
     let address = listener.local_addr()?;
     let stop = tokio_util::sync::CancellationToken::new();
     let force = stop.clone();
+    let mut worker = tokio::spawn(sender::run(
+        store.clone(),
+        owner.key.clone(),
+        binding.clone(),
+        project,
+        directory,
+        stop.clone(),
+    ));
     let mut server = tokio::spawn(crate::network::serve(
         listener,
         crate::network::Handler::Control(http::router(store.clone(), address)),
         stop.clone(),
         force,
     ));
-    let ready = serde_json::json!({"contract_version":1,"operation":"reference.relayer","lab_id":binding.lab_id,"result":{"listen":address,"name":args.name,"profile":binding.profile,"signer":bs58::encode(owner.key.verifying_key().to_bytes()).into_string(),"submission":"not_implemented"}});
+    let ready = serde_json::json!({"contract_version":1,"operation":"reference.relayer","lab_id":binding.lab_id,"result":{"listen":address,"name":args.name,"profile":binding.profile,"signer":bs58::encode(owner.key.verifying_key().to_bytes()).into_string(),"submission":"enabled"}});
     let output = if json_output {
         writeln!(std::io::stdout().lock(), "{ready}")
     } else {
@@ -228,18 +239,30 @@ pub async fn run(
     if output.is_err() {
         stop.cancel();
         let _ = server.await;
+        let _ = worker.await;
         owner.close().await?;
         return Err(Error::Storage);
     }
-    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let completed = tokio::select! {_ = tokio::signal::ctrl_c()=>None,_=terminate.recv()=>None,_=store.failed.cancelled()=>None,result=&mut server=>Some(result)};
+    let mut server_done = None;
+    let mut worker_done = None;
+    tokio::select! {
+        _ =interrupt.recv()=>{},_ =terminate.recv()=>{},_ =store.failed.cancelled()=>{},
+        result=&mut server=>{server_done=Some(result);},
+        result=&mut worker=>{worker_done=Some(result);},
+    }
     stop.cancel();
-    let network = if let Some(result) = completed {
+    let network = if let Some(result) = server_done {
         result
     } else {
         server.await
     };
+    let work = if let Some(result) = worker_done {
+        result
+    } else {
+        worker.await
+    };
     owner.close().await?;
+    work.map_err(|_| Error::Storage)??;
     network
         .map_err(|_| Error::Storage)?
         .map_err(|_| Error::Storage)?;
