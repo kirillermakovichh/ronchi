@@ -352,7 +352,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 12b. Retained snapshot evaluation
 
-- [ ] Resolve pinned retained definitions and complete selected facts; preserve source authority, contradictions, snapshot bounds, and operational limits without writes or HTTP.
+- [x] Resolve pinned retained definitions and complete selected facts; preserve source authority, contradictions, snapshot bounds, and operational limits without writes or HTTP.
+
+- **Verified 12b:** All four locked checks passed (157 tests). Six file-backed histories verify bounded positive proof, an open interval, later violations excluded by the old watermark, stable re-evaluation, declared source contradictions versus normal revisions, aggregate fail with retained gaps, source errors, empty requirements without Verdict, redacted failure facts, exact-signature retained finality, cancellation, deadline, and the 512-observation operational limit. Scoped review preserved same-Lab invocation references, complete selected payloads, credential-free public definitions, bounded consistency state, and decisive supporting references. Reference and public-path acceptance remain in 12c/12d.
 
 #### 12c. Reference requirements
 

@@ -16,6 +16,10 @@ pub struct Requirement {
     pub pass: Predicate,
     pub fail: Predicate,
     pub complete: Predicate,
+    #[serde(default)]
+    pub immutable_paths: Vec<String>,
+    #[serde(default)]
+    pub revision_paths: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -147,6 +151,12 @@ pub fn validate(
             || !ids.insert(&rule.rule_id)
         {
             return Err("Invalid or unsupported requirement identity/version".into());
+        }
+        if rule.immutable_paths.len() + rule.revision_paths.len() > 16 {
+            return Err("At most 16 consistency paths are supported per requirement".into());
+        }
+        for path in rule.immutable_paths.iter().chain(&rule.revision_paths) {
+            path_type(fields, path)?;
         }
         for predicate in [&rule.pass, &rule.fail, &rule.complete] {
             predicate.check(fields, 0, &mut nodes)?;
@@ -365,7 +375,7 @@ fn record_value<'a>(mut schema: &ValueType, mut value: &'a Value, path: &str) ->
     }
     Some(value)
 }
-fn logical<'a>(
+pub(crate) fn logical<'a>(
     fields: &BTreeMap<String, ValueType>,
     facts: &'a BTreeMap<String, Value>,
     path: &str,
@@ -391,5 +401,17 @@ fn compare(schema: Option<&ValueType>, a: &Value, b: &Value) -> Option<Ordering>
         ValueType::Decimal { .. } => Some(super::number::compare(a.as_str()?, b.as_str()?)),
         ValueType::Nullable { value } => compare(Some(value), a, b),
         _ => Some(a.to_string().cmp(&b.to_string())),
+    }
+}
+
+pub(crate) fn same_value(
+    fields: &BTreeMap<String, ValueType>,
+    path: &str,
+    a: &Value,
+    b: &Value,
+) -> bool {
+    match path_type(fields, path) {
+        Ok(schema) if scalar(schema, false) => compare(Some(schema), a, b) == Some(Ordering::Equal),
+        _ => a == b,
     }
 }

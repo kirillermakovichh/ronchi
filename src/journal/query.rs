@@ -213,6 +213,30 @@ impl JournalReader {
         ).map_err(|_| Error::storage())? {
             response.view.observation_boundary.push("application_check".into());
         }
+        if request.operation == Operation::Evaluate {
+            let selection = request
+                .arguments
+                .evaluation
+                .as_ref()
+                .ok_or_else(|| Error::invalid("Missing Check selection"))?;
+            response.result = serde_json::to_value(self.evaluate_check(
+                selection,
+                &request.lab_id,
+                cursor.snapshot,
+                deadline,
+                cancel,
+            )?)
+            .map_err(|_| Error::storage())?;
+            query::encoded_len(&response, limits.response_bytes).map_err(|_| {
+                Error::new(
+                    "analysis_incomplete",
+                    "Evaluation result exceeds response budget",
+                )
+            })?;
+            query::check(cancel, deadline)?;
+            transaction.commit().map_err(|_| Error::storage())?;
+            return Ok(response);
+        }
         let mut effective_request = request.clone();
         let mut analysis = None;
         if matches!(request.operation, Operation::Summary | Operation::Findings)

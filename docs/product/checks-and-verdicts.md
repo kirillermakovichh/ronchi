@@ -1,6 +1,6 @@
 # Checks and Verdicts
 
-Status: generic HTTP Check collection is implemented (task 11). Typed requirement definitions are implemented (task 12a). Retained Verdict evaluation and its public operation remain task 12 work.
+Status: generic HTTP Check collection is implemented (task 11). Typed requirements and the retained evaluation core are implemented (tasks 12a–12b). Reference requirements and the public evaluation operation remain task 12 work.
 These are reversible defaults for the first implementation.
 The [evidence contract](evidence-and-findings.md) owns Journal facts and Findings.
 This document owns external application observations and their bounded outcome evaluation.
@@ -159,6 +159,47 @@ These definitions also fit the existing 16 KiB total Check configuration budget.
 Invalid paths, types, versions, units, and budgets are configuration errors before collection.
 The collector persists the public requirement definitions with its source definition.
 HTTP-only collection and the effective 32 KiB response ceiling remain unchanged.
+
+## Retained evaluation core (task 12b)
+
+The shared query reader supports read-only `check.evaluate` requests with `arguments.evaluation`.
+The selection supplies `check_id`, `definition_version`, optional `definition_digest`, and exact normalized Check scope.
+`arguments.snapshot_seq` is mandatory.
+The core resolves a public source definition from a committed invocation start through that watermark.
+It does not read current runtime configuration or require its Authorization value.
+A missing definition, mismatched digest, or conflicting reuse of one version returns `definition_unavailable`.
+The caller must give a new definition version when its schema or requirements change.
+The public CLI and dedicated control operation remain task 12d at this checkpoint.
+
+Evaluation reads full validated selection payloads and correlates them with their committed invocation starts.
+The selected scope must exactly match the retained normalized invocation scope.
+Scope time bounds retain their source-request meaning; evaluation does not silently widen them or reinterpret them as Journal-time filters.
+A positive failure predicate can decide its requirement before interval completion.
+Pass requires a positive pass predicate, a positive completeness predicate, a known false failure predicate, and no relevant predicate or consistency gap.
+A complete authoritative history can supply a proof despite an earlier collection gap; a source error alone supplies no positive proof.
+Without a positive bounded proof, the result remains inconclusive.
+An empty requirement set has no Verdict.
+The aggregate preserves every requirement's gaps even when another requirement fails.
+
+Requirements may declare up to 16 combined `immutable_paths` and `revision_paths`.
+Immutable paths must agree across observations.
+Revision paths must agree when the same source revision repeats.
+Different source revisions do not impose a global order or make ordinary state transitions contradictory.
+Declared scalar consistency comparisons preserve numeric meaning, including equivalent decimal representations.
+Contradictions retain both supporting event references and make that requirement inconclusive.
+These declarations specify source authority; they do not establish completeness of unselected application state.
+
+The maintained `journal_finality` join requires an authoritative `rpc_simulator` finalized transition for the exact reported signature in the same Lab and pinned snapshot.
+An absent finality event remains unknown.
+The join does not use current simulator state, application claims as simulator transitions, or a comparison of wire digests.
+It establishes coexistence of the selected application fact and simulated finality in the retained prefix; source time alone does not establish their causal order.
+
+The existing four-reader admission, query deadline, cancellation, and response budget also bound evaluation.
+Each evaluation streams at most 512 selected observation/error records and 4 MiB of observation/start evidence.
+Serialized retained consistency values and keys are additionally bounded to 256 KiB.
+Exceeding a budget returns `analysis_incomplete`, with no success-shaped partial Verdict.
+No HTTP, writer admission, or source process is part of this core.
+Legacy Journals without the indexed Check contract return an explicit unsupported capability.
 
 ## No-SDK HTTP observation adapter
 

@@ -369,3 +369,5 @@ pub(crate) mod cli;
 
 mod number;
 pub mod rules;
+
+pub mod evaluate;

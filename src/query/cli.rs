@@ -109,6 +109,7 @@ async fn execute(
             fields: selection.fields,
             include_payload: selection.include_payload,
             payload_offset: selection.payload_offset,
+            evaluation: None,
             snapshot_seq: selection.snapshot_seq,
         },
     };

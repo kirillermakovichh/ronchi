@@ -20,6 +20,8 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub enum Operation {
     #[serde(rename = "investigate.summary")]
     Summary,
+    #[serde(rename = "check.evaluate")]
+    Evaluate,
     #[serde(rename = "investigate.findings")]
     Findings,
     #[serde(rename = "investigate.timeline")]
@@ -30,6 +32,7 @@ pub enum Operation {
 impl Operation {
     pub fn parse(value: &str) -> Result<Self, Error> {
         match value {
+            "check.evaluate" => Ok(Self::Evaluate),
             "summary" | "investigate.summary" => Ok(Self::Summary),
             "findings" | "investigate.findings" => Ok(Self::Findings),
             "timeline" | "investigate.timeline" => Ok(Self::Timeline),
@@ -69,6 +72,7 @@ pub struct Arguments {
     pub fields: Vec<String>,
     pub include_payload: bool,
     pub payload_offset: u32,
+    pub evaluation: Option<crate::checks::evaluate::Selection>,
     pub snapshot_seq: Option<u64>,
 }
 impl Default for Arguments {
@@ -80,6 +84,7 @@ impl Default for Arguments {
             fields: vec![],
             include_payload: false,
             payload_offset: 0,
+            evaluation: None,
             snapshot_seq: None,
         }
     }
@@ -164,7 +169,10 @@ impl Error {
     pub fn exit(&self) -> i32 {
         match self.code.as_ref() {
             "invalid_argument" | "invalid_field" | "invalid_cursor" => 2,
-            "journal_unavailable" | "lab_unavailable" | "finding_unavailable" => 3,
+            "journal_unavailable"
+            | "lab_unavailable"
+            | "finding_unavailable"
+            | "definition_unavailable" => 3,
             "unsupported_capability" => 4,
             "capacity_exceeded" | "state_conflict" | "analysis_incomplete" => 5,
             "deadline_exceeded" => 124,
@@ -362,6 +370,29 @@ impl Request {
         }
         if a.snapshot_seq.is_some_and(|n| n > i64::MAX as u64) {
             return Err(Error::invalid("Invalid snapshot watermark"));
+        }
+        if self.operation == Operation::Evaluate {
+            if a.snapshot_seq.is_none()
+                || a.cursor.is_some()
+                || a.include_payload
+                || a.payload_offset != 0
+                || *s != Scope::default()
+                || !a.fields.is_empty()
+            {
+                return Err(Error::invalid(
+                    "Check evaluation requires explicit snapshot_seq and evaluation scope without Timeline presentation options",
+                ));
+            }
+            a.evaluation
+                .as_mut()
+                .ok_or_else(|| Error::invalid("Missing Check evaluation selection"))?
+                .normalize()?;
+            return Ok(());
+        }
+        if a.evaluation.is_some() {
+            return Err(Error::invalid(
+                "Evaluation selection requires check.evaluate",
+            ));
         }
         let count = s.signature.len()
             + s.rpc_method.len()
