@@ -28,6 +28,8 @@ async fn execute(
     name: &str,
     id: Option<&str>,
     selection: Selection,
+    resolved: &mut Option<String>,
+    collection: &mut Option<String>,
 ) -> Result<Reply, Error> {
     let mut arguments = Arguments {
         collection_id: format!(
@@ -45,10 +47,12 @@ async fn execute(
         horizon_seconds: selection.horizon_seconds,
     };
     arguments.normalize()?;
+    *collection = Some(arguments.collection_id.clone());
     let selected = crate::lab::status(project.clone(), name, id)
         .await
         .map_err(|_| Error::new("lab_unavailable", "none"))?;
     let manifest = selected.manifest;
+    *resolved = Some(manifest.lab_id.clone());
     if manifest.state != crate::lab::Lifecycle::Ready {
         return Err(Error::new("lab_unavailable", "none"));
     }
@@ -143,7 +147,16 @@ pub fn run(
         Ok(r) => r,
         Err(_) => return 6,
     };
-    let result = runtime.block_on(execute(project, name, id, selection));
+    let mut resolved = id.map(String::from);
+    let mut collection = None;
+    let result = runtime.block_on(execute(
+        project,
+        name,
+        id,
+        selection,
+        &mut resolved,
+        &mut collection,
+    ));
     let (exit, value) = match result {
         Ok(reply) => (
             0,
@@ -154,8 +167,8 @@ pub fn run(
             serde_json::to_value(Failure {
                 contract_version: 1,
                 request_id: format!("cli-{}", std::process::id()),
-                lab_id: id.map(String::from),
-                collection_id: None,
+                lab_id: resolved,
+                collection_id: collection,
                 error,
             })
             .expect("typed error serializes"),

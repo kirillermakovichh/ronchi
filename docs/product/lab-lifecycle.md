@@ -249,6 +249,11 @@ After a bounded graceful child-stop interval, terminate only a verified owned ch
 If cleanup cannot complete, report the remaining owned resources and return an error.
 Never report a requested cancellation or sent signal as confirmed termination.
 Cancellation or disconnection of the `down` client does not reverse an accepted shutdown.
+The Lab owns active Check collections and their HTTP cancellation.
+Stop rejects new collections and cancels active invocations before closing the Journal writer.
+Collection settlement uses the existing five-second cleanup budget.
+The writer retains terminal cancellation records when persistence remains available.
+This cancellation does not stop a developer-owned observation source.
 
 If the Journal writer fails, its queue saturates, or storage reaches its bound, set Lab health to `failed` and stop admitting RPC work.
 Perform bounded shutdown and treat the Journal as interrupted.

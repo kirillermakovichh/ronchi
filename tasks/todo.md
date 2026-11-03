@@ -326,7 +326,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 11d. Cancellation and Lab shutdown
 
-- [ ] Own collection tasks and transport cancellation; stop polls on Ctrl-C, broken pipe, cancellation, and Lab stop while retaining terminal evidence.
+- [x] Own collection tasks and transport cancellation; stop polls on Ctrl-C, broken pipe, cancellation, and Lab stop while retaining terminal evidence.
+
+- **Verified 11d:** Native CLI processes prove Ctrl-C, broken pipe, and Lab stop close the in-flight source connection, retain terminal cancellation, and prevent later HTTP attempts over a full minimum poll interval. Cancellation errors retain the resolved Lab and collection identity. The source stays alive. All four locked checks passed on the cumulative working slice. Scoped review checked ownership and writer-before-producer shutdown ordering.
 
 #### 11e. Public histories and evidence integration
 

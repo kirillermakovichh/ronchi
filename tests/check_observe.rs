@@ -111,3 +111,111 @@ fn cli_collects_application_evidence_and_retains_it_after_stop() {
         .unwrap();
     assert!(schema.status.success());
 }
+
+fn configured_project(address: std::net::SocketAddr) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("ronchi")).unwrap();
+    std::fs::write(temp.path().join("ronchi/config.toml"), format!("schema_version = 1\n[[checks.sources]]\ncheck_id = 'state'\nversion = 1\nsource = 'independent'\nschema_version = 1\nurl = 'http://{address}/observe'\n[checks.sources.facts.enabled]\ntype = 'boolean'\n")).unwrap();
+    command(
+        temp.path(),
+        &[
+            "up",
+            "--rpc-listen",
+            "127.0.0.1:0",
+            "--control-listen",
+            "127.0.0.1:0",
+        ],
+    );
+    temp
+}
+fn wait_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("collection process did not exit within its cleanup budget");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+#[test]
+fn process_cancellation_stops_future_http_polls_and_lab_stop_joins_inflight_work() {
+    for cause in ["signal", "pipe", "stop"] {
+        let source = TcpListener::bind("127.0.0.1:0").unwrap();
+        let temp = configured_project(source.local_addr().unwrap());
+        let mut child = base(temp.path())
+            .args([
+                "check",
+                "observe",
+                "state",
+                "--intent-id",
+                "W1",
+                "--poll",
+                "--horizon-seconds",
+                "60",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Receiving the real POST is the barrier. Keep its body response blocked.
+        let (mut stream, _) = source.accept().unwrap();
+        let req = request(&mut stream);
+        assert_eq!(req["check_id"], "state");
+        match cause {
+            "signal" => {
+                assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+            }
+            "pipe" => {
+                drop(child.stdout.take());
+            }
+            "stop" => {
+                command(temp.path(), &["down"]);
+            }
+            _ => unreachable!(),
+        }
+        let status = wait_exit(&mut child);
+        if cause == "signal" {
+            assert_eq!(status.code(), Some(130));
+        }
+        if cause == "pipe" {
+            assert!(status.success());
+        }
+        // Cancellation closes the owned transport, rather than only stopping CLI polling.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut byte = [0];
+        assert_eq!(stream.read(&mut byte).unwrap(), 0);
+        // Observe a full minimum poll interval after terminal cleanup. The source stays alive.
+        source.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_millis(1200);
+        while std::time::Instant::now() < deadline {
+            assert!(
+                matches!(source.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let evidence = command(
+            temp.path(),
+            &[
+                "investigate",
+                "timeline",
+                "--kind",
+                "check.collection_completed",
+            ],
+        );
+        assert!(
+            evidence.to_string().contains("cancelled"),
+            "{cause}: {evidence}"
+        );
+        if cause != "stop" {
+            command(temp.path(), &["down"]);
+        }
+    }
+}
+
