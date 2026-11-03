@@ -138,6 +138,9 @@ pub(crate) fn from_settings(
             return Err("Datasource must be an absolute HTTP or HTTPS URL".into());
         }
     }
+    if let Some(url) = &read_upstream {
+        crate::upstream::Upstream::new(url)?;
+    }
     let rpc_listen = requested
         .rpc_listen
         .unwrap_or(([127, 0, 0, 1], 8899).into());
@@ -176,4 +179,20 @@ pub(crate) fn from_settings(
 
 fn default_slot_duration_ms() -> u64 {
     400
+}
+
+impl EffectiveConfig {
+    /// Configuration for metadata and evidence. Connection secrets stay in daemon memory.
+    pub fn public(&self) -> Self {
+        let mut public = self.clone();
+        public.read_upstream = self
+            .read_upstream
+            .as_deref()
+            .map(crate::upstream::source_identity);
+        public.surfpool_datasource = self
+            .surfpool_datasource
+            .as_deref()
+            .map(crate::upstream::source_identity);
+        public
+    }
 }

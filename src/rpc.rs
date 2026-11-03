@@ -95,6 +95,7 @@ impl Drop for RegistrationPause {
 pub struct Rpc(Arc<State>);
 struct State {
     pub clock: Clock,
+    upstream: Option<crate::upstream::Upstream>,
     writer: WriterHandle,
     ready: AtomicBool,
     pause: Mutex<Option<Arc<PauseState>>>,
@@ -122,7 +123,17 @@ impl Rpc {
         started: Instant,
         state: crate::protocol::state::ProtocolState,
     ) -> Result<Self, String> {
+        Self::with_upstream_state(clock, writer, started, state, None)
+    }
+    pub fn with_upstream_state(
+        clock: Clock,
+        writer: WriterHandle,
+        started: Instant,
+        state: crate::protocol::state::ProtocolState,
+        upstream: Option<&str>,
+    ) -> Result<Self, String> {
         state.validate()?;
+        let upstream = upstream.map(crate::upstream::Upstream::new).transpose()?;
         let (policy_status, _) = tokio::sync::watch::channel(crate::cases::Binding::default());
         let holds = Arc::new(crate::cases::HoldPool::default());
         let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
@@ -136,6 +147,7 @@ impl Rpc {
         let (initialized, _) = tokio::sync::watch::channel(None);
         Ok(Self(Arc::new(State {
             transactions,
+            upstream,
             owner: Mutex::new(Some(owner)),
             initialized,
             clock,
@@ -256,7 +268,13 @@ impl Rpc {
         }
         let facts: Vec<Event> = items
             .into_iter()
-            .map(|data| crate::lab::event(kind, self.0.started, data))
+            .map(|data| {
+                let mut event = crate::lab::event(kind, self.0.started, data);
+                if kind.starts_with("rpc.upstream") {
+                    event.source = "read_upstream".into();
+                }
+                event
+            })
             .collect();
         let writer = self.0.writer.clone();
         let receipt = tokio::task::spawn_blocking(move || writer.try_append(&facts))
@@ -400,6 +418,7 @@ impl Exchange {
             let method = item.get("method").and_then(Value::as_str).unwrap_or("");
             registration_fact["method"] = json!(if BOOTSTRAP_METHODS.contains(&method)
                 || crate::simulator::transactions::TRANSACTION_METHODS.contains(&method)
+                || crate::upstream::READ_METHODS.contains(&method)
             {
                 method
             } else {
@@ -460,6 +479,8 @@ impl Exchange {
         for (reference, item, valid) in prepared {
             let id = item.get("id").cloned().unwrap_or(Value::Null);
             let notification = valid && item.get("id").is_none();
+            let method = item["method"].as_str().unwrap_or("");
+            let mut upstream_source = None;
             let result = if parse_error {
                 Err(RpcError {
                     code: -32700,
@@ -490,6 +511,46 @@ impl Exchange {
                         self.hold.clone(),
                     )
                     .await
+            } else if crate::upstream::READ_METHODS.contains(&method) {
+                match &self.rpc.0.upstream {
+                    None => Err(RpcError::unsupported(
+                        "This read requires an explicitly configured Read Upstream",
+                    )),
+                    Some(upstream) => {
+                        upstream_source = Some(upstream.identity().to_string());
+                        let start = json!({"request":reference,"method":method,"source_identity":upstream.identity(),"authority":"read_upstream","request_classification":"allowlisted_read"});
+                        let read = match self.rpc.record("rpc.upstream_started", vec![start]).await
+                        {
+                            Ok(()) => {
+                                upstream
+                                    .read(method, item.get("params").unwrap_or(&Value::Null))
+                                    .await
+                            }
+                            Err(error) => {
+                                self.rpc.0.writer.fail_fatal();
+                                crate::upstream::Read {
+                                    result: Err(error),
+                                    facts: vec![],
+                                }
+                            }
+                        };
+                        let facts = read
+                            .facts
+                            .into_iter()
+                            .map(|mut fact| {
+                                fact["request"] = reference.clone();
+                                fact
+                            })
+                            .collect();
+                        match self.rpc.record("rpc.upstream", facts).await {
+                            Ok(()) => read.result,
+                            Err(error) => {
+                                self.rpc.0.writer.fail_fatal();
+                                Err(error)
+                            }
+                        }
+                    }
+                }
             } else {
                 methods::execute(
                     &self.rpc.0.clock,
@@ -516,7 +577,12 @@ impl Exchange {
             });
             match result {
                 Ok(result) => {
-                    fact["result"] = result.clone();
+                    if let Some(source) = &upstream_source {
+                        fact["source_identity"] = json!(source);
+                        fact["source_result"] = json!({"availability":"separate_source_exchange","kind":"rpc.upstream"});
+                    } else {
+                        fact["result"] = result.clone();
+                    }
                     if !notification {
                         responses.push(json!({"jsonrpc":"2.0","id":id,"result":result}));
                     }

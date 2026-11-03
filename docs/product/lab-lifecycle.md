@@ -51,7 +51,8 @@ Case changes use `case arm` and `case disarm` without restarting it.
 
 The CLI implements persistent `up`, `status`, and `down` for simulator lifecycle controls.
 Startup validates configuration before creating workspace files or opening listeners.
-Unsupported Surfpool, Read-through, and initial Case settings return exit `4` before allocating resources.
+Unsupported Surfpool and initial Case settings return exit `4` before allocating resources.
+Task 16 adds the explicit [Read-through profile](solana-rpc-contract.md#implemented-read-through-profile), including credential-free source identities in retained metadata.
 Help, version, and schemas for `lab.up`, `lab.status`, and `lab.down` work without project access.
 The readiness response lists implemented lifecycle and RPC capabilities.
 The bound RPC listener implements the [local bootstrap profile](solana-rpc-contract.md#implemented-bootstrap-profile).

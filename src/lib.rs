@@ -17,6 +17,7 @@ pub mod query;
 pub mod reference;
 pub mod rpc;
 pub mod simulator;
+pub mod upstream;
 pub mod workspace;
 use clap::{Parser, Subcommand};
 use config::{Mode, Settings};

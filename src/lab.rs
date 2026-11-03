@@ -167,10 +167,8 @@ async fn operation_lock_cancellable(
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
     configuration.checks.validate().map_err(LabError::invalid)?;
-    if configuration.mode != Mode::Simulator || configuration.read_upstream.is_some() {
-        return Err(LabError::unsupported(
-            "This build supports simulator mode without an upstream",
-        ));
+    if configuration.mode != Mode::Simulator {
+        return Err(LabError::unsupported("This build supports simulator mode"));
     }
     if let Some(case_id) = &configuration.initial_case {
         crate::cases::Arm {
@@ -354,14 +352,13 @@ async fn up_selected(
                     .slot_duration_ms
                     .is_none_or(|v| v == config.slot_duration_ms)
                 && explicit.mode.is_none_or(|v| v == config.mode)
-                && explicit
-                    .read_upstream
-                    .as_ref()
-                    .is_none_or(|v| Some(v) == config.read_upstream.as_ref())
-                && explicit
-                    .surfpool_datasource
-                    .as_ref()
-                    .is_none_or(|v| Some(v) == config.surfpool_datasource.as_ref())
+                && explicit.read_upstream.as_ref().is_none_or(|v| {
+                    Some(&crate::upstream::source_identity(v)) == config.read_upstream.as_ref()
+                })
+                && explicit.surfpool_datasource.as_ref().is_none_or(|v| {
+                    Some(&crate::upstream::source_identity(v))
+                        == config.surfpool_datasource.as_ref()
+                })
                 && explicit.rpc_listen.is_none_or(|v| v == config.rpc_listen)
                 && explicit
                     .control_listen
@@ -424,7 +421,7 @@ async fn up_selected(
         &Launch {
             name: name.into(),
             lab_id: id.clone(),
-            configuration: configuration.clone(),
+            configuration: configuration.public(),
         },
     )?;
     let lease = workspace::open_private(&dir.join("startup.lease"), true)?;
@@ -437,7 +434,7 @@ async fn up_selected(
         owned_children: Vec::new(),
         state: Lifecycle::Starting,
         health: "starting".into(),
-        configuration: configuration.clone(),
+        configuration: configuration.public(),
         rpc_address: None,
         control_address: None,
         journal_state: JournalState::Open,
@@ -456,6 +453,7 @@ async fn up_selected(
             crate::rpc::BOOTSTRAP_METHODS
                 .into_iter()
                 .chain(crate::simulator::transactions::TRANSACTION_METHODS)
+                .chain(crate::upstream::READ_METHODS.into_iter().filter(|_|configuration.read_upstream.is_some()))
                 .map(|method| format!("rpc.{method}")),
         )
         .collect(),
@@ -473,7 +471,10 @@ async fn up_selected(
     };
     workspace::atomic_json(&dir.join("manifest.json"), &initial)?;
     workspace::atomic_json(&ws.root.join("names").join(format!("{name}.json")), &id)?;
-    let mut child = Command::new(std::env::current_exe()?)
+    let mut command = Command::new(std::env::current_exe()?);
+    command.env_remove("RONCHI_RUNTIME_READ_UPSTREAM");
+    if let Some(url) = &configuration.read_upstream { command.env("RONCHI_RUNTIME_READ_UPSTREAM", url); }
+    let mut child = command
         .args(["__daemon", "--lab-id", &id])
         .arg("--project")
         .arg(&configuration.project)

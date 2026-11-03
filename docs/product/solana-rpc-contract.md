@@ -278,6 +278,39 @@ Read-through account data does not acquire account mutations from simulated tran
 If a workflow needs those mutations, it requires local execution.
 In Surfpool mode, direct Read-through remains disabled; Surfpool's datasource stays behind its state-authority boundary.
 
+### Implemented Read-through profile
+
+Task 16 implements the seven allowlisted reads with `up --read-upstream <url>`, `RONCHI_READ_UPSTREAM`, or `read_upstream` in project configuration.
+The outbound HTTP/HTTPS boundary checks each method before sending a request.
+It never follows redirects or forwards the incoming headers.
+URL user information supplies Basic authorization only to the configured source.
+HTTPS uses Rustls and WebPKI trust roots.
+Local bootstrap, fee, submission, status, and transaction methods keep local authority, including unknown transaction identities.
+
+Each source call has a 10-second deadline and a 256 KiB response-body limit within the ordinary RPC deadline.
+A missing source, failed transport, redirect, malformed envelope, or oversized result returns an explicit capability/source error.
+An upstream JSON-RPC error preserves its numeric code.
+Ronchi omits arbitrary upstream error text and error data under the typed-facts redaction policy.
+These failures never trigger a local invented result or a different source.
+
+The manifest and startup evidence contain an opaque SHA-256 source identity.
+The raw endpoint stays in daemon memory and its private launch environment.
+Ronchi does not copy it into launch metadata, diagnostic text, or the Journal.
+Repeating `up` with the same explicit endpoint resolves the same live Lab.
+Changing that endpoint requires a new Lab.
+
+Before forwarding, Ronchi commits a `rpc.upstream_started` source fact.
+The `rpc.upstream` result fact retains source authority, request identity, context, and bounded result content separately from the prepared response and transport boundary.
+Larger source results use ordered base64-JSON chunks, with at most 24 KiB of source bytes in each chunk.
+Endpoint and credential echoes are redacted before Journal admission.
+A redacted string or object key can omit related content explicitly.
+If the redacted result exceeds its byte budget, the evidence records an omission reason and the original result byte count.
+The application still receives the actual source result.
+Interrupted source calls retain the known dispatch fact without inventing a completed source result.
+
+Local fake-upstream histories verify the allowlist, mixed batches, notifications, signed local acceptance, unknown local lookups, credential redaction, redirects, byte limits, TLS handshake rejection, and forced shutdown.
+They do not establish live provider availability or third-party application compatibility.
+
 ## Fee queries
 
 Provide local `getFeeForMessage` for messages covered by the format contract.

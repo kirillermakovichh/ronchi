@@ -66,7 +66,21 @@ pub async fn run(project: PathBuf, id: String) -> Result<(), LabError> {
         ));
     }
     workspace::atomic_json(&dir.join("manifest.json"), &manifest)?;
-    let result = run_owned(&dir, manifest).await;
+    let upstream = match (
+        &manifest.configuration.read_upstream,
+        std::env::var("RONCHI_RUNTIME_READ_UPSTREAM").ok(),
+    ) {
+        (None, None) => None,
+        (Some(identity), Some(url)) if identity == &crate::upstream::source_identity(&url) => {
+            Some(url)
+        }
+        _ => {
+            return Err(LabError::invalid(
+                "Read Upstream runtime identity is unavailable",
+            ));
+        }
+    };
+    let result = run_owned(&dir, manifest, upstream).await;
     if let Err(error) = &result
         && !dir.join("journal.sqlite").exists()
         && let Ok(mut failed) = ws.manifest(&id)
@@ -83,7 +97,11 @@ pub async fn run(project: PathBuf, id: String) -> Result<(), LabError> {
     }
     result
 }
-async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabError> {
+async fn run_owned(
+    dir: &std::path::Path,
+    manifest: Manifest,
+    upstream: Option<String>,
+) -> Result<(), LabError> {
     let started = Instant::now();
     let token = workspace::read_token(&dir.join("token"))?;
 
@@ -154,11 +172,12 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         manifest.lab_id.as_bytes(),
     )
     .map_err(LabError::invalid)?;
-    let rpc_api = crate::rpc::Rpc::with_state(
+    let rpc_api = crate::rpc::Rpc::with_upstream_state(
         clock,
         handle.clone(),
         started,
         manifest.configuration.simulator_state.clone(),
+        upstream.as_deref(),
     )
     .map_err(LabError::invalid)?;
     *control.cases.write().unwrap_or_else(|e| e.into_inner()) = Some(rpc_api.clone());
