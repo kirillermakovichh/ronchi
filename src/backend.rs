@@ -137,23 +137,20 @@ impl Client {
         let code = envelope["error"]["code"]
             .as_i64()
             .ok_or_else(|| failure("backend_envelope"))?;
-        let safe = self
-            .0
-            .redactor
-            .as_ref()
-            .map(|redactor| redactor.redact(&envelope["error"]).0)
-            .unwrap_or_else(|| envelope["error"].clone());
+        let (safe, redacted) = self.redact(&envelope["error"]);
         let message = safe["message"]
             .as_str()
-            .filter(|message| message.len() <= 2048)
             .unwrap_or("Managed Surfpool returned an RPC error")
             .to_string();
+        let mut classification =
+            json!({"code":"backend_rpc_error","authority":self.0.authority,"redacted":redacted});
+        if let Some(data) = safe.get("data") {
+            classification["backend_data"] = data.clone();
+        }
         Err(RpcError {
             code,
             message,
-            data: Some(
-                json!({"code":"backend_rpc_error","authority":self.0.authority,"backend_data":safe.get("data")}),
-            ),
+            data: Some(classification),
         })
     }
     pub(crate) fn source_facts(
@@ -162,7 +159,19 @@ impl Client {
         result: &Result<Value, RpcError>,
         started: Instant,
     ) -> Vec<Value> {
-        let context = json!({"method":method,"authority":"execution_backend","source_identity":self.0.authority,"observed_elapsed_ns":started.elapsed().as_nanos().min(i64::MAX as u128)as u64});
+        let mut context = json!({"method":method,"authority":"execution_backend","source_identity":self.0.authority,"observed_elapsed_ns":started.elapsed().as_nanos().min(i64::MAX as u128)as u64});
+        if let Err(error) = result {
+            context["error_code"] = json!(error.code);
+            context["error_classification"] = json!(
+                error
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.get("code"))
+                    .and_then(Value::as_str)
+                    .filter(|classification| classification.len() <= 128)
+                    .unwrap_or("unclassified")
+            );
+        }
         let raw = match result {
             Ok(result) => json!({"result":result}),
             Err(error) => json!({"error":error}),
@@ -173,12 +182,22 @@ impl Client {
             .as_ref()
             .map(|redactor| redactor.redact(&raw))
             .unwrap_or((raw, false));
+        let redacted = redacted
+            || result
+                .as_ref()
+                .err()
+                .and_then(|error| error.data.as_ref())
+                .and_then(|data| data.get("redacted"))
+                .and_then(Value::as_bool)
+                == Some(true);
         let encoded = safe.to_string();
         let mut facts = Vec::new();
         let chunks = encoded.as_bytes().chunks(16 * 1024).collect::<Vec<_>>();
         use base64::Engine as _;
         for (index, chunk) in chunks.iter().enumerate() {
             let mut fact = context.clone();
+            fact["chunk_schema_version"] = json!(2);
+            fact["payload_status"] = json!(if redacted { "redacted" } else { "available" });
             fact["source_outcome"] = json!(if result.is_ok() { "result" } else { "error" });
             fact["source_result"] = json!({"availability":"retained_chunks","encoding":"base64-json","chunk":index,"chunks":chunks.len(),"bytes":encoded.len(),"redacted":redacted});
             fact["payload"] = json!(base64::engine::general_purpose::STANDARD.encode(chunk));
@@ -304,3 +323,7 @@ mod tests {
 #[cfg(test)]
 #[path = "backend/status_tests.rs"]
 mod status_tests;
+
+#[cfg(test)]
+#[path = "backend/error_tests.rs"]
+mod error_tests;

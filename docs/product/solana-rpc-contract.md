@@ -371,6 +371,16 @@ Managed Surfpool uses one exclusive local state authority.
 The boundary routes its supported methods through that owned backend, including bootstrap methods and local transaction history.
 It does not fall back to simulator state or direct Read-through.
 Backend responses and source errors are retained with the owned authority identity and bounded chunk metadata.
+HTTP clients receive the source's numeric error code, redacted message, and actual `error.data` shape.
+Standard preflight fields such as `err` and `logs` remain directly inside `error.data`.
+Absent source data remains absent; explicit JSON null remains null.
+Safe message strings use the existing overall response-byte cap without a separate message cutoff.
+A missing or non-string source message uses a generic diagnostic.
+The internal `backend_rpc_error` classification stays inside typed source diagnostics and does not wrap client-visible data.
+Source chunks declare `chunk_schema_version:2` and keep their base64 JSON content in opt-in `payload` storage.
+Compact `error_code` and `error_classification` metadata support inspection without loading the error body.
+Explicit payload offsets can retrieve available chunks; chunks marked redacted retain the existing unavailable-payload policy.
+Source internal RPC errors remain distinct from required Journal write failures and do not by themselves fail the writer.
 Configured datasource credentials remain redacted from retained source content.
 Unknown methods and unsupported parameter shapes fail before network dispatch where Ronchi can classify them.
 Surfpool remains responsible for state-dependent preflight, account availability, execution, and native method configuration errors.

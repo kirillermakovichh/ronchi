@@ -62,7 +62,19 @@ impl RpcError {
         }
     }
 }
-fn error(id: Value, error: RpcError) -> Value {
+fn error(id: Value, mut error: RpcError) -> Value {
+    // The actor needs the source tag to distinguish backend rejection from core failure.
+    // JSON-RPC clients receive the source's actual data shape at this final boundary.
+    if error
+        .data
+        .as_ref()
+        .is_some_and(|data| data["code"] == "backend_rpc_error")
+    {
+        error.data = error
+            .data
+            .take()
+            .and_then(|mut data| data.as_object_mut()?.remove("backend_data"));
+    }
     json!({"jsonrpc":"2.0","id":id,"error":error})
 }
 fn invalid() -> RpcError {
