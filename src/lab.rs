@@ -152,6 +152,7 @@ async fn operation_lock(
     }
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
+    configuration.checks.validate().map_err(LabError::invalid)?;
     if configuration.mode != Mode::Simulator || configuration.read_upstream.is_some() {
         return Err(LabError::unsupported(
             "This build supports simulator mode without an upstream",
@@ -276,9 +277,10 @@ pub async fn up(
                 );
             }
             let config = &live.configuration;
-            let compatible = explicit
-                .slot_duration_ms
-                .is_none_or(|v| v == config.slot_duration_ms)
+            let compatible = explicit.checks.as_ref().is_none_or(|v| v == &config.checks)
+                && explicit
+                    .slot_duration_ms
+                    .is_none_or(|v| v == config.slot_duration_ms)
                 && explicit.mode.is_none_or(|v| v == config.mode)
                 && explicit
                     .read_upstream

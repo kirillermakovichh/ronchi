@@ -220,7 +220,7 @@ fn render(response: &Response) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-async fn stdout_closed() {
+pub(crate) async fn stdout_closed() {
     loop {
         let mut descriptor = libc::pollfd {
             fd: 1,

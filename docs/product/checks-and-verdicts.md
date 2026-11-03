@@ -85,7 +85,22 @@ Known runtime Authorization values echoed in source facts are redacted before pe
 Only metadata and evidence references enter collection status; full selected facts remain in the observation payload.
 An internal supervisor bounds active collections to 16 and retained status cache entries to 128.
 Older completed metadata resolves through the existing indexed Journal projection.
-Public commands and daemon shutdown integration remain later task-11 slices at this checkpoint.
+The public CLI is `ronchi check observe <check-id> --intent-id W1`.
+Scope accepts repeated `--intent-id` and `--signature` plus `--since` and `--until`.
+An ordinary call collects once.
+`--poll --horizon-seconds 60` explicitly requests bounded polling.
+The CLI waits for completion without the investigation query deadline.
+Source failures complete with gaps and exit 0; this reports collection completion, not application success.
+Ctrl-C or a closed output pipe cancels owned collection work.
+Cancellation reports exit 130 with retained effects; a broken output pipe exits 0.
+An uncertain control outcome uses `effects:unknown` and requires inspection before another mutation.
+Control exposes authenticated `POST /v1/labs/{id}/checks/observe`, `GET /v1/labs/{id}/check-collections/{collection}`, and `POST /v1/labs/{id}/check-collections/{collection}/cancel`.
+The start request uses the offline `ronchi schema check.observe` model.
+Start returns bounded running metadata; status returns terminal metadata and evidence references.
+A collection ID deduplicates identical admission; changed arguments conflict.
+One Check and normalized scope cannot have overlapping collections.
+Lab stop stops admission and cancels active collection work before writer shutdown.
+Stopped and retained Journals reject new collection; CLI never falls back to historical mutation.
 
 ## No-SDK HTTP observation adapter
 

@@ -105,12 +105,14 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         token,
         stop: sender,
         cases: Default::default(),
+        checks: Default::default(),
     };
-    let starting = event(
+    let mut starting = event(
         "lab.starting",
         started,
         serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"local-simulator-v1","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
     );
+    starting.data["configuration"]["checks"] = serde_json::json!({"concurrency":manifest.configuration.checks.concurrency,"sources":manifest.configuration.checks.sources.iter().map(|s|s.public_definition()).collect::<Vec<_>>()});
     if let Err(error) = append(&handle, starting).await {
         let _ = tokio::task::spawn_blocking(move || writer.shutdown(None)).await;
         record_failure(&control, &handle, &error).await;
@@ -175,6 +177,7 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         control_force.clone(),
     ));
     // All fallible startup work after spawning listeners is contained in this block.
+    let mut checks_owner = None;
     let startup=async {
         let lease=workspace::open_private(&dir.join("startup.lease"),false)?;
         let gate=workspace::open_private(&dir.join("readiness.gate"),true)?;
@@ -188,6 +191,9 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         if fs2::FileExt::try_lock_exclusive(&lease).is_ok() { return Err(LabError::new(130,"cancelled","Startup client disconnected before readiness")); }
         tokio::time::timeout(STARTUP,rpc_api.wait_initialized()).await.map_err(|_|LabError::internal("Simulator startup deadline exceeded"))??;
         if let Some(case_id)=&manifest.configuration.initial_case{rpc_api.arm_case(crate::cases::Arm{case_id:case_id.clone(),..Default::default()}).await.map_err(crate::cases::lab_error)?;}
+        let (client,owner)=crate::checks::spawn(crate::checks::Context{writer:handle.clone(),lab_id:manifest.lab_id.clone(),mode:manifest.configuration.mode,started},manifest.configuration.checks.clone()).map_err(|_|LabError::invalid("Invalid Check runtime configuration"))?;
+        *control.checks.write().unwrap_or_else(|e|e.into_inner())=Some(client);
+        checks_owner=Some(owner);
         let ready=event("lab.ready",started,serde_json::json!({"startup_seq":1,"capabilities":manifest.capabilities,"rpc_address":control.snapshot().rpc_address,"control_address":control.snapshot().control_address}));
         let seq=append(&handle,ready).await?;
         {
@@ -200,6 +206,10 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         Ok::<(),LabError>(())
     }.await;
     if let Err(error) = startup {
+        if let Some(owner) = checks_owner.take() {
+            let _ = owner.settle(tokio::time::Instant::now() + CLEANUP).await;
+        }
+
         rpc_api.set_ready(false);
         rpc_stop.cancel();
         rpc_force.cancel();
@@ -235,6 +245,25 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
         if failed {
             m.health = "failed".into();
         }
+    }
+    if let Some(client) = control
+        .checks
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        client.stop();
+    }
+    if let Some(owner) = checks_owner.take()
+        && owner
+            .settle(cleanup_deadline.unwrap_or(shutdown_started + CLEANUP))
+            .await
+            .is_err()
+    {
+        failed = true;
+        force = true;
+        rpc_force.cancel();
+        cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
     }
     rpc_api.set_ready(false);
     rpc_stop.cancel();

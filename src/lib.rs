@@ -69,6 +69,11 @@ enum Command {
     },
     /// Query one bounded page of existing Journal evidence
     Investigate(query::cli::Selection),
+    /// Collect application observations into the live Journal
+    Check {
+        #[command(subcommand)]
+        operation: CheckCommand,
+    },
     /// Run the standalone bundled reference application
     Reference {
         #[command(subcommand)]
@@ -85,9 +90,13 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe"])]
         operation: String,
     },
+}
+#[derive(Subcommand)]
+enum CheckCommand {
+    Observe(checks::cli::Selection),
 }
 #[derive(Subcommand)]
 enum ReferenceCommand {
@@ -226,6 +235,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
         Command::Schema { operation } => {
             let request = match operation.as_str() {
                 op if op.starts_with("investigate.") => schemars::schema_for!(query::Request),
+                "check.observe" => schemars::schema_for!(checks::Request),
                 "lab.up" => schemars::schema_for!(UpRequest),
                 "lab.status" => schemars::schema_for!(StatusRequest),
                 "lab.down" => schemars::schema_for!(DownRequest),
@@ -234,6 +244,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             };
             let response = if operation.starts_with("investigate.") {
                 schemars::schema_for!(query::Envelope)
+            } else if operation == "check.observe" {
+                schemars::schema_for!(checks::Envelope)
             } else if operation == "case.list" {
                 schemars::schema_for!(CatalogReply)
             } else {
@@ -286,6 +298,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Ok(()) => 0,
                 Err(error) => render_lab_error(cli.json, error),
             }
+        }
+        Command::Check {
+            operation: CheckCommand::Observe(selection),
+        } => {
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            checks::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
         }
         Command::Investigate(selection) => {
             let root = match project(cli.project.as_deref()) {

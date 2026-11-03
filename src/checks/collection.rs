@@ -44,6 +44,7 @@ impl Arguments {
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub contract_version: u32,
+    pub operation: String,
     pub request_id: String,
     pub lab_id: String,
     pub arguments: Arguments,
@@ -97,6 +98,7 @@ enum Command {
 pub struct Client {
     sender: mpsc::Sender<Command>,
     stop: CancellationToken,
+    context: Context,
 }
 pub struct Owner {
     task: Option<tokio::task::JoinHandle<Result<(), Error>>>,
@@ -128,9 +130,18 @@ impl Client {
         self.ask(|reply| Command::Start(args, reply)).await
     }
     pub async fn status(&self, id: String) -> Result<Report, Error> {
+        if self.sender.is_closed() {
+            return retained(&self.context, id)
+                .await?
+                .map(|(_, report)| report)
+                .ok_or_else(|| Error::new("collection_unavailable", "none"));
+        }
         self.ask(|reply| Command::Get(id, reply)).await
     }
     pub async fn cancel(&self, id: String) -> Result<Report, Error> {
+        if self.sender.is_closed() {
+            return self.status(id).await;
+        }
         self.ask(|reply| Command::Cancel(id, reply)).await
     }
     pub fn stop(&self) {
@@ -182,6 +193,7 @@ pub fn spawn(context: Context, config: Config) -> Result<(Client, Owner), Error>
     let (sender, receiver) = mpsc::channel(32);
     let stop = CancellationToken::new();
     let task_stop = stop.clone();
+    let client_context = context.clone();
     let task = tokio::spawn(async move {
         let mut guard = FailureGuard {
             writer: context.writer.clone(),
@@ -195,6 +207,7 @@ pub fn spawn(context: Context, config: Config) -> Result<(Client, Owner), Error>
         Client {
             sender,
             stop: stop.clone(),
+            context: client_context,
         },
         Owner {
             task: Some(task),
@@ -243,7 +256,7 @@ async fn supervise(
                     }
                     Command::Cancel(id,reply)=>{
                         if let Some(entry)=active.get(&id){entry.cancel.cancel();let _=reply.send(Ok(entry.report.borrow().clone()));}
-                        else{let result=completed.iter().find(|(key,_,_)|key==&id).map(|(_,_,report)|report.clone()).or(retained(&context,id).await?.map(|(_,report)|report)).ok_or_else(||Error::new("collection_unavailable","none"));let _=reply.send(result);}
+                        else{let prior=completed.iter().find(|(key,_,_)|key==&id).map(|(_,_,report)|report.clone());let result=if prior.is_some(){prior}else{retained(&context,id).await?.map(|(_,report)|report)}.ok_or_else(||Error::new("collection_unavailable","none"));let _=reply.send(result);}
                     }
                     Command::Start(args,reply)=>{
                         let result=start(&context,&sources,&slots,&stop,StartState{active:&mut active,tasks:&mut tasks,completed:&completed},args).await;

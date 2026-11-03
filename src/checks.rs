@@ -361,3 +361,5 @@ impl Error {
 
 mod collection;
 pub use collection::{Arguments, Client, Envelope, Failure, Owner, Reply, Report, Request, spawn};
+
+pub(crate) mod cli;

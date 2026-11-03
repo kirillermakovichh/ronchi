@@ -27,6 +27,7 @@ pub struct Control {
     pub token: String,
     pub stop: mpsc::Sender<bool>,
     pub cases: Arc<RwLock<Option<crate::rpc::Rpc>>>,
+    pub checks: Arc<RwLock<Option<crate::checks::Client>>>,
 }
 impl Control {
     pub fn snapshot(&self) -> Manifest {
@@ -119,6 +120,18 @@ pub fn router(control: Control) -> Router {
     Router::new()
         .route("/v1/labs/{id}/status", get(status))
         .route("/v1/labs/{id}/down", post(down))
+        .route(
+            "/v1/labs/{id}/checks/observe",
+            post(check_observe).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/v1/labs/{id}/check-collections/{collection}",
+            get(check_status),
+        )
+        .route(
+            "/v1/labs/{id}/check-collections/{collection}/cancel",
+            post(check_cancel),
+        )
         .route("/v1/labs/{id}/case/arm", post(case_arm))
         .route("/v1/labs/{id}/case/disarm", post(case_disarm))
         .route("/v1/labs/{id}/cases", get(case_list))
@@ -506,4 +519,226 @@ pub async fn query_request(
         result=tokio::time::timeout(std::time::Duration::from_secs(10),future)=>result.map_err(|_|Error::new("deadline_exceeded","Investigation control deadline exceeded"))?,
         _=cancel.cancelled()=>Err(Error::new("cancelled","Investigation cancelled; the Lab keeps running"))
     }
+}
+
+fn check_failure(
+    id: &str,
+    request_id: &str,
+    collection_id: Option<String>,
+    error: crate::checks::Error,
+) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(
+            serde_json::to_value(crate::checks::Failure {
+                contract_version: 1,
+                request_id: request_id.into(),
+                lab_id: Some(id.into()),
+                collection_id,
+                error,
+            })
+            .expect("typed Check error serializes"),
+        ),
+    )
+}
+fn check_client(control: &Control) -> Result<crate::checks::Client, crate::checks::Error> {
+    control
+        .checks
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .ok_or_else(crate::checks::Error::invalid)
+}
+async fn check_observe(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    args: Result<Json<crate::checks::Request>, axum::extract::rejection::JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    let Ok(Json(request)) = args else {
+        return Ok(check_failure(
+            &id,
+            "unparsed",
+            None,
+            crate::checks::Error::invalid(),
+        ));
+    };
+    let collection = Some(request.arguments.collection_id.clone());
+    if request.contract_version != 1
+        || request.operation != "check.observe"
+        || request.lab_id != id
+        || !crate::workspace::identifier(&request.request_id)
+    {
+        return Ok(check_failure(
+            &id,
+            &request.request_id,
+            collection,
+            crate::checks::Error::invalid(),
+        ));
+    }
+    if control.snapshot().state != crate::lab::Lifecycle::Ready {
+        return Ok(check_failure(
+            &id,
+            &request.request_id,
+            collection,
+            crate::checks::Error::new("state_conflict", "none"),
+        ));
+    }
+    let result = match check_client(&control) {
+        Ok(client) => client.start(request.arguments).await,
+        Err(error) => Err(error),
+    };
+    Ok(match result {
+        Ok(report) => (
+            StatusCode::OK,
+            Json(
+                serde_json::to_value(crate::checks::Reply {
+                    contract_version: 1,
+                    request_id: request.request_id,
+                    lab_id: id,
+                    result: report,
+                })
+                .expect("typed Check reply serializes"),
+            ),
+        ),
+        Err(error) => check_failure(&id, &request.request_id, collection, error),
+    })
+}
+async fn check_status(
+    State(control): State<Control>,
+    Path((id, collection)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    check_action(control, id, collection, false).await
+}
+async fn check_cancel(
+    State(control): State<Control>,
+    Path((id, collection)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    if !body.is_empty()
+        && serde_json::from_slice::<serde_json::Value>(&body).ok() != Some(serde_json::json!({}))
+    {
+        return Ok(check_failure(
+            &id,
+            &collection,
+            Some(collection.clone()),
+            crate::checks::Error::invalid(),
+        ));
+    }
+    check_action(control, id, collection, true).await
+}
+async fn check_action(
+    control: Control,
+    id: String,
+    collection: String,
+    cancel: bool,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    if !crate::workspace::identifier(&collection) {
+        return Ok(check_failure(
+            &id,
+            "unparsed",
+            None,
+            crate::checks::Error::invalid(),
+        ));
+    }
+    let result = match check_client(&control) {
+        Ok(client) => {
+            if cancel {
+                client.cancel(collection.clone()).await
+            } else {
+                client.status(collection.clone()).await
+            }
+        }
+        Err(error) => Err(error),
+    };
+    Ok(match result {
+        Ok(report) => (
+            StatusCode::OK,
+            Json(
+                serde_json::to_value(crate::checks::Reply {
+                    contract_version: 1,
+                    request_id: collection,
+                    lab_id: id,
+                    result: report,
+                })
+                .expect("typed Check reply serializes"),
+            ),
+        ),
+        Err(error) => check_failure(&id, &collection, Some(collection.clone()), error),
+    })
+}
+
+/// One bounded authenticated collection control exchange; no transport retry.
+pub async fn check_request(
+    ws: &Workspace,
+    manifest: &Manifest,
+    start: Option<&crate::checks::Request>,
+    collection: &str,
+    cancel: bool,
+) -> Result<crate::checks::Reply, crate::checks::Error> {
+    use crate::checks::Error;
+    let token = crate::workspace::read_token(
+        &ws.lab(&manifest.lab_id)
+            .map_err(|_| Error::journal())?
+            .join("token"),
+    )
+    .map_err(|_| Error::journal())?;
+    let address = manifest
+        .control_address
+        .filter(|a| a.ip().is_loopback())
+        .ok_or_else(|| Error::new("lab_unavailable", "unknown"))?;
+    let (method, suffix, body) = if let Some(request) = start {
+        (
+            "POST",
+            "checks/observe".to_string(),
+            serde_json::to_vec(request).map_err(|_| Error::invalid())?,
+        )
+    } else if cancel {
+        (
+            "POST",
+            format!("check-collections/{collection}/cancel"),
+            b"{}".to_vec(),
+        )
+    } else {
+        ("GET", format!("check-collections/{collection}"), Vec::new())
+    };
+    let request = hyper::Request::builder()
+        .method(method)
+        .uri(format!(
+            "http://{address}/v1/labs/{}/{suffix}",
+            manifest.lab_id
+        ))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(body)))
+        .map_err(|_| Error::invalid())?;
+    let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_max_idle_per_host(0)
+        .build_http();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let response = client
+            .request(request)
+            .await
+            .map_err(|_| Error::new("lab_unavailable", "unknown"))?;
+        let status = response.status();
+        let bytes = Limited::new(response.into_body(), 32 * 1024)
+            .collect()
+            .await
+            .map_err(|_| Error::journal())?
+            .to_bytes();
+        if status.is_success() {
+            serde_json::from_slice(&bytes).map_err(|_| Error::journal())
+        } else {
+            Err(serde_json::from_slice::<crate::checks::Failure>(&bytes)
+                .map_err(|_| Error::new("lab_unavailable", "unknown"))?
+                .error)
+        }
+    })
+    .await
+    .map_err(|_| Error::new("lab_unavailable", "unknown"))?
 }

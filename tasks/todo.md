@@ -320,7 +320,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 11c. Public collection operation
 
-- [ ] Expose CLI/control/schema, normalized scopes, bounded status/references, explicit polling, per-Lab concurrency, and Check/scope exclusivity.
+- [x] Expose CLI/control/schema, normalized scopes, bounded status/references, explicit polling, per-Lab concurrency, and Check/scope exclusivity.
+
+- **Verified 11c:** Native CLI collected a fact from an independent HTTP source, resolved its Evidence reference live and after stop, rejected mutation of the stopped Lab, and exposed offline schema. All four locked checks passed (139 tests). Scoped review checked authenticated exact-Lab selection, bounded control bodies/results, no automatic retry, and application authority. Process cancellation and adversarial transport histories remain in 11d/11e.
 
 #### 11d. Cancellation and Lab shutdown
 
