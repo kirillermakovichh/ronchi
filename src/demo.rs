@@ -45,6 +45,7 @@ pub struct Report {
     pub findings: Value,
     pub evidence_gaps: Vec<query::Gap>,
     pub commands: Vec<String>,
+    pub artifacts: PathBuf,
 }
 #[derive(Debug, Serialize)]
 pub struct Error {
@@ -58,10 +59,14 @@ pub struct Error {
     pub reference_pid: Option<u32>,
     pub reference_stopped: bool,
     pub lab_state: String,
+    pub lab_stopped: bool,
     pub collection_id: Option<String>,
     pub intent_id: Option<String>,
+    pub snapshot_seq: Option<u64>,
     pub recovery: String,
     pub recovery_argv: Vec<String>,
+    pub cleanup_error: Option<String>,
+    pub artifacts: Option<PathBuf>,
     #[serde(skip)]
     exit: i32,
 }
@@ -78,8 +83,12 @@ impl Error {
             reference_pid: None,
             reference_stopped: true,
             lab_state: "not_started".into(),
+            lab_stopped: false,
             collection_id: None,
             intent_id: None,
+            snapshot_seq: None,
+            cleanup_error: None,
+            artifacts: None,
             recovery_argv: vec![],
             recovery:
                 "Inspect the selected project and reported immutable Lab ID before another mutation"
@@ -104,23 +113,43 @@ fn profile_name(profile: crate::reference::Profile) -> &'static str {
 struct Owner {
     project: PathBuf,
     manifest: Option<Manifest>,
+    known_lab_id: Option<String>,
     child: Option<child::Owned>,
     reference_name: String,
     collection: Option<String>,
     intent_id: Option<String>,
+    snapshot_seq: Option<u64>,
     cancel: CancellationToken,
     stop_lab: bool,
+    stage_initialized: bool,
+    lab_stopped: bool,
 }
 impl Owner {
     fn error(&self, code: &str, phase: &str) -> Box<Error> {
         let mut error = Error::new(code, phase);
         error.reference_name = Some(self.reference_name.clone());
+        error.artifacts = Some(self.project.join("ronchi/demos").join(&self.reference_name));
         error.collection_id = self.collection.clone();
         error.intent_id = self.intent_id.clone();
+        error.snapshot_seq = self.snapshot_seq;
+        if let Some(id) = &self.known_lab_id {
+            error.lab_id = Some(id.clone());
+            error.effects = "unknown".into();
+            error.lab_state = "inspect".into();
+            error.recovery_argv = vec![
+                executable(),
+                "--project".into(),
+                self.project.to_string_lossy().into_owned(),
+                "--lab-id".into(),
+                id.clone(),
+                "status".into(),
+            ];
+            error.recovery = quoted(&error.recovery_argv);
+        }
         if let Some(m) = &self.manifest {
             error.lab_id = Some(m.lab_id.clone());
             error.recovery_argv = vec![
-                "ronchi".into(),
+                executable(),
                 "--project".into(),
                 self.project.to_string_lossy().into_owned(),
                 "--lab-id".into(),
@@ -132,11 +161,38 @@ impl Owner {
             error.effects = "applied".into();
             error.lab_state = "ready_or_inspect".into();
         }
+        error.lab_stopped = self.lab_stopped;
         if let Some(child) = &self.child {
             error.reference_pid = Some(child.pid);
             error.reference_stopped = child.stopped;
         }
         error
+    }
+    async fn stage(&mut self, phase: &str, source: std::net::SocketAddr) -> Result<(), Box<Error>> {
+        let root = self.project.join("ronchi/demos");
+        crate::workspace::private_directory(&root)
+            .map_err(|_| self.error("metadata_failed", phase))?;
+        let directory = root.join(&self.reference_name);
+        if !self.stage_initialized {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&directory)
+                .map_err(|_| self.error("metadata_failed", phase))?;
+            self.stage_initialized = true;
+        }
+        crate::workspace::atomic_json(&directory.join("state.json"),&json!({"phase":phase,"reference_name":self.reference_name,"source_address":source,"lab_id":self.manifest.as_ref().map(|m|&m.lab_id),"lab_name":self.manifest.as_ref().map(|m|&m.name),"reference_pid":self.child.as_ref().map(|c|c.pid),"intent_id":self.intent_id})).map_err(|_|self.error("metadata_failed",phase))?;
+        #[cfg(debug_assertions)]
+        if std::env::var("RONCHI_DEMO_TEST_BARRIER").ok().as_deref() == Some(phase) {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            while !directory.join("release").exists() {
+                tokio::select! {_=self.cancel.cancelled()=>return Err(self.error("cancelled",phase)),_=tokio::time::sleep(Duration::from_millis(10))=>()}
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(self.error("deadline_exceeded", phase));
+                }
+            }
+        }
+        Ok(())
     }
     async fn query(
         &self,
@@ -248,7 +304,7 @@ impl Owner {
         }
         result
     }
-    async fn cleanup(&mut self) -> Result<(), Box<Error>> {
+    async fn cleanup(&mut self, force: bool) -> Result<(), Box<Error>> {
         let mut failed = false;
         if self.collection.is_some() {
             if self.settle_collection(true).await.is_err() {
@@ -258,22 +314,68 @@ impl Owner {
             }
         }
         if let Some(child) = &mut self.child
-            && child.stop().await.is_err()
+            && child.stop(force).await.is_err()
         {
             failed = true;
         }
         if self.stop_lab
-            && let Some(m) = &self.manifest
-            && !matches!(
-                tokio::time::timeout(
-                    Duration::from_secs(8),
-                    lab::down(self.project.clone(), &m.name, Some(&m.lab_id), true)
-                )
-                .await,
-                Ok(Ok(_))
-            )
+            && let Some(id) = self.known_lab_id.clone()
         {
-            failed = true;
+            let name = self.manifest.as_ref().map_or("demo", |m| m.name.as_str());
+            match tokio::time::timeout(
+                Duration::from_secs(8),
+                lab::down(self.project.clone(), name, Some(&id), force),
+            )
+            .await
+            {
+                Ok(Ok(result)) => {
+                    self.manifest = Some(result.manifest);
+                    self.lab_stopped = true;
+                }
+                _ => {
+                    match lab::status(self.project.clone(), name, Some(&id)).await {
+                        Ok(result)
+                            if matches!(
+                                result.manifest.state,
+                                lab::Lifecycle::Stopped
+                                    | lab::Lifecycle::Interrupted
+                                    | lab::Lifecycle::Failed
+                            ) && result.manifest.process.as_ref().is_none_or(|p| {
+                                crate::process::matches(p).is_ok_and(|live| !live)
+                            }) =>
+                        {
+                            self.manifest = Some(result.manifest);
+                            self.lab_stopped = true;
+                        }
+                        _ => failed = true,
+                    }
+                }
+            }
+        }
+        if !self.stop_lab
+            && let Some(id) = self.known_lab_id.clone()
+        {
+            match tokio::time::timeout(
+                Duration::from_secs(5),
+                lab::status(self.project.clone(), "demo", Some(&id)),
+            )
+            .await
+            {
+                Ok(Ok(result)) => {
+                    self.lab_stopped = matches!(
+                        result.manifest.state,
+                        lab::Lifecycle::Stopped
+                            | lab::Lifecycle::Interrupted
+                            | lab::Lifecycle::Failed
+                    ) && result
+                        .manifest
+                        .process
+                        .as_ref()
+                        .is_none_or(|p| crate::process::matches(p).is_ok_and(|live| !live));
+                    self.manifest = Some(result.manifest);
+                }
+                _ => failed = true,
+            }
         }
         if failed {
             Err(self.error("cleanup_failed", "cleanup"))
@@ -289,6 +391,18 @@ impl Owner {
             .map_err(|_| self.error("source_port_unavailable", "configuration"))?;
         let definition =
             checks::reference::definition(format!("http://{source_address}/checks/observe"));
+        let rpc_listen = ([127, 0, 0, 1], 0).into();
+        #[cfg(debug_assertions)]
+        let rpc_listen = if let Ok(port) = std::env::var("RONCHI_DEMO_TEST_RPC_PORT") {
+            (
+                [127, 0, 0, 1],
+                port.parse::<u16>()
+                    .map_err(|_| self.error("invalid_argument", "configuration"))?,
+            )
+                .into()
+        } else {
+            rpc_listen
+        };
         let configuration = crate::config::from_settings(
             self.project.clone(),
             crate::config::Settings {
@@ -297,29 +411,42 @@ impl Owner {
                     sources: vec![definition],
                 }),
                 mode: Some(Mode::Simulator),
-                rpc_listen: Some(([127, 0, 0, 1], 0).into()),
+                rpc_listen: Some(rpc_listen),
                 control_listen: Some(([127, 0, 0, 1], 0).into()),
                 initial_case: Some("tx-response-lost".into()),
                 ..Default::default()
             },
         )
         .map_err(|_| self.error("invalid_argument", "configuration"))?;
+        Workspace::new(&self.project)
+            .initialize()
+            .map_err(|_| self.error("metadata_failed", "configuration"))?;
+        self.stage("configured", source_address).await?;
         if self.cancel.is_cancelled() {
             return Err(self.error("cancelled", "startup"));
         }
         // The ordinary startup owns its lease, operation lock, readiness gate and SIGINT cleanup.
         match lab::up_fresh(configuration, self.cancel.clone()).await {
-            Ok(result) => self.manifest = Some(result.manifest),
+            Ok(result) => {
+                self.known_lab_id = Some(result.manifest.lab_id.clone());
+                self.manifest = Some(result.manifest);
+            }
             Err(error) => {
                 if let Some(id) = error.lab_id.as_deref() {
+                    self.known_lab_id = Some(id.into());
                     self.manifest = lab::status(self.project.clone(), "demo", Some(id))
                         .await
                         .ok()
-                        .map(|r| r.manifest);
+                        .map(|r| r.manifest)
+                        .or_else(|| Workspace::new(&self.project).manifest(id).ok());
                 }
                 let mut result = self.error(error.code, "startup");
                 result.exit = error.exit;
-                result.effects = error.effects.into();
+                result.effects = if self.known_lab_id.is_some() && error.effects == "none" {
+                    "unknown".into()
+                } else {
+                    error.effects.into()
+                };
                 return Err(result);
             }
         }
@@ -342,6 +469,7 @@ impl Owner {
                 .map_err(|_| self.error("reference_storage_conflict", "reference_startup"))?;
         }
         drop(reservation); // A bind race now fails normal child readiness; no Workload is sent.
+        self.stage("source_released", source_address).await?;
         let (child, readiness) = child::Owned::spawn(
             &self.project,
             &m.lab_id,
@@ -371,6 +499,7 @@ impl Owner {
         {
             return Err(self.error("child_start_failed", "reference_readiness"));
         }
+        self.stage("reference_ready", source_address).await?;
         let intent_id = format!(
             "I{}",
             &crate::workspace::nonce().map_err(|_| self.error("internal_error", "intent"))?[..24]
@@ -384,6 +513,7 @@ impl Owner {
                 error.effects = "unknown".into();
                 error
             })?;
+        self.stage("intent_created", source_address).await?;
         let horizon = tokio::time::Instant::now() + Duration::from_secs(70);
         let mut digest = None;
         let (check, snapshot) = loop {
@@ -404,11 +534,12 @@ impl Owner {
                 .and_then(|s| s["state"].as_str())
                 .is_some_and(|s| matches!(s, "succeeded" | "failed" | "unresolved"));
             let collected = self.collect(&intent_id).await?;
+            self.snapshot_seq = Some(collected.snapshot_seq);
             if self.cancel.is_cancelled() {
                 return Err(self.error("cancelled", "collection"));
             }
             if !self.child.as_mut().is_some_and(|c| c.alive()) {
-                return Err(self.error("child_exited", "workload"));
+                return Err(self.error("child_unavailable", "workload"));
             }
             if collected
                 .last_invocation
@@ -491,7 +622,24 @@ impl Owner {
                 },
             )
             .await?;
-        let commands = drill_down(&self.project, &m.lab_id, snapshot, &intent_id);
+        self.stage("proof_complete", source_address).await?;
+        let mut commands = drill_down(&self.project, &m.lab_id, snapshot, &intent_id);
+        if let Some(reference) = check.requirements.first().and_then(|r| r.supporting.last()) {
+            commands.push(vec![
+                executable(),
+                "--project".into(),
+                self.project.to_string_lossy().into_owned(),
+                "--lab-id".into(),
+                m.lab_id.clone(),
+                "investigate".into(),
+                "evidence".into(),
+                "--event-ref".into(),
+                format!("{}:{}", reference.lab_id, reference.event_seq),
+                "--snapshot-seq".into(),
+                snapshot.to_string(),
+                "--include-payload".into(),
+            ]);
+        }
         Ok(Report {
             project: self.project.clone(),
             command_argv: commands.clone(),
@@ -511,8 +659,15 @@ impl Owner {
             findings: findings.result,
             evidence_gaps: summary.view.evidence_gaps,
             commands: commands.iter().map(|args| quoted(args)).collect(),
+            artifacts: self.project.join("ronchi/demos").join(&self.reference_name),
         })
     }
+}
+fn executable() -> String {
+    std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ronchi".into())
 }
 fn quoted(args: &[String]) -> String {
     args.iter()
@@ -527,7 +682,7 @@ fn drill_down(
     intent: &str,
 ) -> Vec<Vec<String>> {
     let prefix = vec![
-        "ronchi".into(),
+        executable(),
         "--project".into(),
         project.to_string_lossy().into_owned(),
         "--lab-id".into(),
@@ -582,31 +737,71 @@ pub fn run(project: PathBuf, args: Args, json_output: bool) -> i32 {
         let mut owner = Owner {
             project,
             manifest: None,
+            known_lab_id: None,
             child: None,
             reference_name: name,
             collection: None,
             intent_id: None,
+            snapshot_seq: None,
             cancel,
             stop_lab: args.stop_after_demo,
+            stage_initialized: false,
+            lab_stopped: false,
         };
         let mut result = owner.work(args.profile).await;
-        let cleanup = owner.cleanup().await;
-        if let Err(error) = cleanup {
-            result = Err(error);
+        let cleanup = owner.cleanup(result.is_err()).await;
+        if let Err(cleanup_error) = cleanup {
+            match &mut result {
+                Err(error) => {
+                    error.cleanup_error = Some(cleanup_error.code.clone());
+                    error.reference_stopped =
+                        owner.child.as_ref().is_none_or(|child| child.stopped);
+                    error.lab_stopped = owner.lab_stopped;
+                    if owner.manifest.is_some() {
+                        error.lab_state = owner
+                            .manifest
+                            .as_ref()
+                            .and_then(|m| serde_json::to_value(&m.state).ok())
+                            .and_then(|v| v.as_str().map(String::from))
+                            .unwrap_or_else(|| "stopped".into());
+                    }
+                }
+                Ok(_) => result = Err(cleanup_error),
+            }
         } else {
             match &mut result {
                 Ok(report) => {
                     report.reference_stopped = true;
-                    if args.stop_after_demo {
-                        report.lab_state = "stopped".into();
-                        report.rpc_address = None;
-                        report.control_address = None;
+                    if let Some(m) = &owner.manifest {
+                        report.lab_state = serde_json::to_value(&m.state)
+                            .ok()
+                            .and_then(|v| v.as_str().map(String::from))
+                            .unwrap_or_else(|| "inspect".into());
+                        report.rpc_address = if m.state == lab::Lifecycle::Ready {
+                            m.rpc_address
+                        } else {
+                            None
+                        };
+                        report.control_address = if matches!(
+                            m.state,
+                            lab::Lifecycle::Ready | lab::Lifecycle::Stopping
+                        ) {
+                            m.control_address
+                        } else {
+                            None
+                        };
                     }
                 }
                 Err(error) => {
                     error.reference_stopped = true;
-                    if args.stop_after_demo && owner.manifest.is_some() {
-                        error.lab_state = "stopped".into();
+                    error.lab_stopped = owner.lab_stopped;
+                    if owner.manifest.is_some() {
+                        error.lab_state = owner
+                            .manifest
+                            .as_ref()
+                            .and_then(|m| serde_json::to_value(&m.state).ok())
+                            .and_then(|v| v.as_str().map(String::from))
+                            .unwrap_or_else(|| "stopped".into());
                     }
                 }
             }
@@ -628,7 +823,12 @@ pub fn run(project: PathBuf, args: Args, json_output: bool) -> i32 {
     let text = if json_output {
         value.to_string()
     } else {
-        serde_json::to_string_pretty(&value).expect("typed result serializes")
+        serde_json::to_string_pretty(&value)
+            .expect("typed result serializes")
+            .lines()
+            .map(crate::query::cli::safe_text)
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     match writeln!(io::stdout().lock(), "{text}") {
         Ok(()) => exit,

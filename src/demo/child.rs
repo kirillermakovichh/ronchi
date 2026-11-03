@@ -111,9 +111,12 @@ impl Owned {
     ) -> Result<Value, ()> {
         tokio::select! {_=cancel.cancelled()=>Err(()),result=tokio::time::timeout(Duration::from_secs(10),rx)=>result.map_err(|_|())?.map_err(|_|())?}
     }
-    pub async fn stop(&mut self) -> Result<(), ()> {
+    pub async fn stop(&mut self, allow_prior_failure: bool) -> Result<(), ()> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        let status = if let Some(status) = self.child.try_wait().map_err(|_| ())? {
+        let exited = self.child.try_wait().map_err(|_| ())?;
+        let already_exited = exited.is_some();
+        let mut forced = false;
+        let status = if let Some(status) = exited {
             status
         } else {
             if unsafe { libc::kill(self.pid as i32, libc::SIGTERM) } != 0 {
@@ -124,24 +127,40 @@ impl Owned {
                 Ok(Err(_)) => return Err(()),
                 Err(_) => {
                     self.child.start_kill().map_err(|_| ())?;
+                    forced = true;
                     tokio::time::timeout(Duration::from_secs(1), self.child.wait())
                         .await
                         .map_err(|_| ())?
-                        .map_err(|_| ())?;
-                    self.stopped = true;
-                    return Err(());
+                        .map_err(|_| ())?
                 }
             }
         };
         self.stopped = true;
-        for task in self.output.drain(..) {
-            tokio::time::timeout_at(deadline, task)
-                .await
-                .map_err(|_| ())?
-                .map_err(|_| ())?
-                .map_err(|_| ())?;
+        let drain_deadline = if forced {
+            tokio::time::Instant::now() + Duration::from_secs(1)
+        } else {
+            deadline
+        };
+        let mut drain_failed = false;
+        for mut task in self.output.drain(..) {
+            match tokio::time::timeout_at(drain_deadline, &mut task).await {
+                Ok(Ok(Ok(()))) => (),
+                Ok(_) => drain_failed = true,
+                Err(_) => {
+                    task.abort();
+                    let _ = task.await;
+                    drain_failed = true;
+                }
+            }
         }
-        if status.success() { Ok(()) } else { Err(()) }
+        if forced || drain_failed {
+            return Err(());
+        }
+        if status.success() || (already_exited && allow_prior_failure) {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 }
 impl Drop for Owned {

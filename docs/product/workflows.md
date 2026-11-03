@@ -1,6 +1,6 @@
 # Developer workflows
 
-Status: intended user experience, pending runtime implementation.
+Status: the simulator Lab, Investigation, public Checks, and bundled Demo paths below are implemented. Deferred execution modes, SDK, CI wrappers, and dashboard/MCP paths remain separately identified.
 Initial command behavior comes from [Investigation interfaces](investigation-interfaces.md), [Lab lifecycle](lab-lifecycle.md), and the [Reference Application](reference-application.md).
 Deferred CI wrappers and SDK APIs remain illustrative.
 The [product overview](overview.md) defines scope; this document owns the user journeys.
@@ -47,6 +47,14 @@ Default errors after Lab readiness retain that exact Lab.
 `--stop-after-demo` also attempts exact-ID cleanup on error and cancellation.
 The reference child is signalled and reaped before command completion.
 SIGKILL cannot guarantee cleanup.
+A failed primary phase remains visible when cleanup also reports a problem.
+`lab_stopped` in an error means process termination was confirmed; `lab_state` retains the actual stopped/interrupted/failed lifecycle state.
+The final ready/endpoints report follows a last public status read of the exact Lab ID.
+A stopped or failed reference child is reaped independently from Lab cleanup.
+Each run keeps bounded orchestration metadata under `ronchi/demos/`; this metadata is not Lab evidence.
+Debug-build tests use closed stage barriers and an occupied RPC-port override to exercise real startup, binding, and process failures.
+These controls execute no supplied code and are ignored in release builds.
+
 
 The Demo must not use canned traces or a private fault/evidence path unavailable to real applications.
 Unsafe and resilient profiles share one reference codebase; they do not implement the catalog one application at a time.

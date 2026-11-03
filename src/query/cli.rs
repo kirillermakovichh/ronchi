@@ -143,7 +143,7 @@ async fn execute(
     }
 }
 // Escape all terminal controls, including C1 and Unicode direction controls.
-fn safe_text(value: &str) -> String {
+pub(crate) fn safe_text(value: &str) -> String {
     value
         .chars()
         .flat_map(|c| {

@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. The public-path Demo is implemented; failure-path acceptance is tracked in task 13.
+Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. The public-path Demo and its bounded native failure/isolation histories are implemented in task 13.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -10,7 +10,9 @@ Simulator-mode outcomes never claim that a withdrawal executed economically.
 
 The Reference Application is bundled with Ronchi but is not the product core. It is an example consumer, the System Under Test for the self-contained Demo, and an acceptance harness that prevents the product from becoming a fault generator with no proof of application-level value.
 
-The Demo must exercise the Reference Application through the same external RPC, control, evidence, Check, dashboard, CLI, and MCP-facing behavior used by real applications. It must not depend on canned Journal Evidence or a private shortcut unavailable to users.
+The implemented Demo uses the same external RPC, control, evidence, Check, and CLI operations used by real applications.
+Dashboard and MCP integration remain later tasks and must reuse those operations.
+The Demo does not depend on canned Journal Evidence or a private shortcut unavailable to users.
 
 ## Implemented reference process
 
@@ -69,7 +71,7 @@ State transitions and their supporting observations share one SQLite transaction
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
 The generic HTTP Check collector and deterministic evaluator are implemented separately from the relayer source.
-The public-path Demo is implemented; failure-path acceptance is tracked in task 13.
+The public-path Demo and its bounded native failure/isolation histories are implemented in task 13.
 
 ### Read-only observation source
 

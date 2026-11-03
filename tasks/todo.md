@@ -371,7 +371,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 13. Self-contained public-path Demo
 
-- [ ] **Accept:** Orchestrate fresh Demo-owned Lab/relayer state and public RPC/Checks; return bounded results and retain the Lab unless `--stop-after-demo` is explicit.
+- [x] **Accept:** Orchestrate fresh Demo-owned Lab/relayer state and public RPC/Checks; return bounded results and retain the Lab unless `--stop-after-demo` is explicit.
 - **Verify:** Both profiles offline, unsafe identity failure, evidence-backed resilient success, fresh names, JSON output, and owned-child cleanup.
 - **Dependencies:** 10, 12. **Scope:** Medium. **Likely files:** `src/demo.rs`, `src/demo/fixture.rs`, `src/cli/demo.rs`, `tests/demo.rs`.
 - **Sources:** [Demo workflow](../docs/product/workflows.md#first-proof-bundled-demo), [reference packaging](../docs/product/reference-application.md#packaging-and-configuration).
@@ -384,20 +384,23 @@ Checkpoints record results and do not require another approval interview.
 
 - [x] Submit one public intent, collect and evaluate through public clients, pin the retained definition digest and snapshot, and return bounded Investigation data.
 
-- **Verified 13a/13b:** All four locked checks passed (163 tests). The native tracer starts resilient and unsafe in fresh sequential Labs and distinct reference storage, proves pass/fail through public collection/evaluation, confirms reference process reaping, preserves the default ready Lab, supports retained replay, and stops only its exact Lab with `--stop-after-demo`. The first source digest comes from retained invocation evidence, not runtime configuration digest. Common configuration validation now has an explicit-settings seam; ordinary project-file precedence remains unchanged. Fresh startup selection stays inside the ordinary operation lock and supports owned cancellation without dropping startup cleanup. Source binding has a reservation-before-startup and explicit bind-race failure policy. Failure/concurrency/process-cancellation acceptance remains 13c/13d.
+- **Verified 13a/13b:** All four locked checks passed (163 tests). The native tracer starts resilient and unsafe in fresh sequential Labs and distinct reference storage, proves pass/fail through public collection/evaluation, confirms reference process reaping, preserves the default Demo ready-Lab behavior, supports retained replay, and stops only its exact Lab with `--stop-after-demo`. The first source digest comes from retained invocation evidence, not runtime configuration digest. Common configuration validation now has an explicit-settings seam; ordinary project-file precedence remains unchanged. Fresh startup selection stays inside the ordinary operation lock and supports owned cancellation without dropping startup cleanup. Source binding has a reservation-before-startup and explicit bind-race failure policy. Failure/concurrency/process-cancellation acceptance remains 13c/13d.
 
 #### 13c. Retained resources and failure cleanup
 
-- [ ] Verify default persistence, exact-ID stop-after-demo, cancellation/output closure, source/child failures, concurrent isolation, and preserved user configuration.
+- [x] Verify default persistence, exact-ID stop-after-demo, cancellation/output closure, source/child failures, concurrent isolation, and preserved user configuration.
 
 #### 13d. Public histories and Checkpoint C
 
-- [ ] Run native profile and replay histories, maintain workflow/limits, perform scoped review and all locked checks, and record applicable Checkpoint C evidence.
+- [x] Run native profile and replay histories, maintain workflow/limits, perform scoped review and all locked checks, and record applicable Checkpoint C evidence.
+
+- **Verified 13c/13d:** All four locked checks passed (169 tests, including seven native Demo histories). HTTP/process tests require local socket permission outside the sandbox. Histories cover evidence-derived profile outcomes, retained replay, sequential/concurrent isolation, unchanged user config/default Lab, text/JSON lifecycle parity, startup/bind failures, SIGINT/output closure, child death, source timeout, and bounded cleanup. Secret checks cover the control token and signing seed encodings. Scoped review checked ownership, primary-error preservation, exact-ID cleanup, and bounded output drains. Simulator-only, HTTP-only, 32 KiB source cap, one intent/signature, and 512-record/4 MiB evaluation limits remain unchanged. SIGKILL cannot guarantee Demo cleanup. Task 13 is complete; task 14 is next.
 
 ### Checkpoint C
 
-- [ ] The Demo distinguishes profiles from observations without trusting their labels.
+- [x] The Demo distinguishes profiles from observations without trusting their labels.
 - [ ] An independently run backend yields a useful RPC-only Investigation with explicit missing business evidence.
+- **Technical reference-consumer probe:** A separately launched reference relayer used a fresh Lab RPC URL without Checks or SDK. Its intent reached `succeeded`; RPC-only Investigation returned one Finding, `application_coverage_unknown`, zero `check.observation` events, and no formal Verdict at snapshot 37. Owned processes were stopped. This verifies independent reference-process wiring only. No suitable third-party backend was available; that acceptance item remains unchecked.
 
 ## Human and agent access
 
