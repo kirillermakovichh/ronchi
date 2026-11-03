@@ -28,7 +28,7 @@ pub(crate) fn config<T: serde::de::DeserializeOwned + Default>(
             .map_err(|_| RpcError::params("Invalid configuration keys, types, or values")),
     }
 }
-pub(super) fn check_context(
+pub(crate) fn check_context(
     clock: &Clock,
     cfg: &ContextConfig,
 ) -> Result<crate::simulator::clock::View, RpcError> {
@@ -51,6 +51,29 @@ pub(crate) fn hash(value: Option<&Value>) -> Result<&str, RpcError> {
         return Err(RpcError::params("Expected a 32-byte base58 blockhash"));
     }
     Ok(text)
+}
+pub(crate) fn validate(clock: &Clock, method: &str, params: &Value) -> Result<(), RpcError> {
+    let a = positional(params)?;
+    match method {
+        "getHealth" | "getVersion" | "getGenesisHash" => {
+            if !a.is_empty() {
+                return Err(RpcError::params("This method accepts no parameters"));
+            }
+        }
+        "getSlot" | "getBlockHeight" | "getLatestBlockhash" | "isBlockhashValid" => {
+            let offset = usize::from(method == "isBlockhashValid");
+            if a.len() < offset || a.len() > offset + 1 {
+                return Err(RpcError::params("Invalid positional parameter count"));
+            }
+            let cfg: ContextConfig = config(a.get(offset))?;
+            check_context(clock, &cfg)?;
+            if offset == 1 {
+                hash(a.first())?;
+            }
+        }
+        _ => return Err(RpcError::unsupported("Unavailable simulator method")),
+    }
+    Ok(())
 }
 pub(super) fn execute(clock: &Clock, method: &str, params: &Value) -> Result<Value, RpcError> {
     let args = positional(params)?;

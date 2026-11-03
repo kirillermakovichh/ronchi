@@ -292,6 +292,51 @@ impl Rpc {
             hold: Default::default(),
         }
     }
+    async fn validate_timeout(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<Vec<String>, RpcError> {
+        if self.0.backend.is_some() {
+            let prepared = crate::backend::prepare(method, params).await?;
+            crate::cases::timeout::validation::validate(method, params).await?;
+            if let Some(signed) = prepared.signed {
+                return Ok(vec![signed.signature]);
+            }
+        } else if crate::simulator::transactions::TRANSACTION_METHODS.contains(&method) {
+            return self
+                .0
+                .transactions
+                .validate_timeout(&self.0.clock, method, params)
+                .await;
+        } else if crate::upstream::READ_METHODS.contains(&method) {
+            if self.0.upstream.is_none() {
+                return Err(RpcError::unsupported(
+                    "This read requires an explicitly configured Read Upstream",
+                ));
+            }
+            crate::cases::timeout::validation::validate(method, params).await?;
+        } else {
+            methods::validate(&self.0.clock, method, params)?;
+        }
+        Ok(match method {
+            "getSignatureStatuses" => params
+                .get(0)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            "getTransaction" => params
+                .get(0)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .into_iter()
+                .collect(),
+            _ => vec![],
+        })
+    }
     async fn record(&self, kind: &str, items: Vec<Value>) -> Result<(), RpcError> {
         if items.is_empty() {
             return Ok(());
@@ -328,7 +373,7 @@ impl Exchange {
     pub(crate) async fn finish(&self, transport: &str) {
         let held = self.hold.close();
         if held {
-            self.hold.observed_committed.cancelled().await;
+            self.hold.settle_start(&self.rpc.0.writer).await;
         }
         let values =
             std::mem::take(&mut *self.boundaries.lock().unwrap_or_else(|e| e.into_inner()));
@@ -519,8 +564,56 @@ impl Exchange {
             let id = item.get("id").cloned().unwrap_or(Value::Null);
             let notification = valid && item.get("id").is_none();
             let method = item["method"].as_str().unwrap_or("");
+            let mut timeout_error = None;
+            if valid
+                && self.rpc.0.ready.load(Ordering::SeqCst)
+                && self.rpc.0.writer.status().health == WriterHealth::Healthy
+                && let Some(selection) =
+                    crate::cases::timeout::candidate(&binding, &reference, method, notification)
+            {
+                match self
+                    .rpc
+                    .validate_timeout(method, item.get("params").unwrap_or(&Value::Null))
+                    .await
+                {
+                    Err(error) => timeout_error = Some(error),
+                    Ok(signatures) if crate::cases::timeout::matches(&binding, &signatures) => {
+                        let policy = binding.policy.as_ref().expect("timeout policy");
+                        let admission=async {
+                                self.hold.reserve(&self.rpc.0.holds,policy.settings.max_held,registration,policy.revision)?;
+                                self.hold.reserve_evidence(self.rpc.0.writer.clone(),batch_size).await?;
+                                let fact=json!({"request":reference,"method":method,"signatures":signatures,"policy":policy,"selection":selection,"dispatch":"prevented","authority":if self.rpc.0.backend.is_some(){"execution_backend"}else if crate::upstream::READ_METHODS.contains(&method){"read_upstream"}else{"rpc_simulator"}});
+                                self.hold.record(&self.rpc.0.writer,self.rpc.0.started,"rpc.dispatch_prevented",vec![fact]).await?;
+                                self.hold.start(&self.rpc.0.writer,self.rpc.0.started,policy.settings.hold_ms,json!({"request":reference,"method":method,"hold_ms":policy.settings.hold_ms,"fault":"provider-timeout-burst","dispatch":"prevented"})).await?;
+                                Ok::<(),RpcError>(())
+                            }.await;
+                        match admission {
+                            Ok(()) => {
+                                let mut boundary = reference.clone();
+                                boundary["rpc_response"] = json!("not_prepared");
+                                boundary["dispatch"] = json!("prevented");
+                                boundaries.push(boundary.clone());
+                                if let Some(stored) = self
+                                    .boundaries
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .iter_mut()
+                                    .find(|v| v["request_id"] == reference["request_id"])
+                                {
+                                    *stored = boundary;
+                                }
+                                continue;
+                            }
+                            Err(error) => timeout_error = Some(error),
+                        }
+                    }
+                    Ok(_) => {}
+                }
+            }
             let mut upstream_source = None;
-            let result = if parse_error {
+            let result = if let Some(error) = timeout_error {
+                Err(error)
+            } else if parse_error {
                 Err(RpcError {
                     code: -32700,
                     message: "Parse error".into(),

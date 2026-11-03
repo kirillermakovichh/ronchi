@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub mod confirmation;
 pub mod status;
+pub mod timeout;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +27,8 @@ pub struct Arm {
     pub confirmation: Option<confirmation::Delay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<status::Settings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<timeout::Settings>,
 }
 fn default_hold() -> u64 {
     20_000
@@ -42,12 +45,14 @@ impl Default for Arm {
             signatures: vec![],
             confirmation: None,
             status: None,
+            timeout: None,
         }
     }
 }
 impl Arm {
     pub fn validate(&self) -> Result<(), RpcError> {
         if ![
+            "provider-timeout-burst",
             "tx-response-lost",
             "tx-confirmation-stalls",
             "finality-delayed",
@@ -68,6 +73,14 @@ impl Arm {
         }
         for signature in &self.signatures {
             crate::protocol::signature(&serde_json::json!(signature))?;
+        }
+        if let Some(timeout) = &self.timeout {
+            if self.case_id != "provider-timeout-burst" {
+                return Err(RpcError::params(
+                    "Timeout settings require provider-timeout-burst",
+                ));
+            }
+            timeout.validate()?;
         }
         if let Some(delay) = &self.confirmation {
             if !self.is_confirmation() {
@@ -181,6 +194,8 @@ pub(crate) struct Hold {
     pub observed_committed: CancellationToken,
     credits: Mutex<Vec<crate::journal::TransitionReservation>>,
     deadline: Mutex<Option<tokio::time::Instant>>,
+    start_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    start_result: Mutex<Option<Result<(), RpcError>>>,
 }
 impl Hold {
     pub fn reserve(
@@ -199,6 +214,7 @@ impl Hold {
         if permit.is_some() {
             return Ok(());
         }
+        let mut entries = pool.entries.lock().unwrap_or_else(|e| e.into_inner());
         if 16 - pool.slots.available_permits() >= usize::from(maximum) {
             return Err(capacity());
         }
@@ -208,7 +224,6 @@ impl Hold {
                 .try_acquire_owned()
                 .map_err(|_| capacity())?,
         );
-        let mut entries = pool.entries.lock().unwrap_or_else(|e| e.into_inner());
         entries.retain(|_, (_, hold)| {
             hold.upgrade()
                 .is_some_and(|hold| !hold.abort.is_cancelled())
@@ -252,7 +267,12 @@ impl Hold {
                 .unwrap_or_else(|e| e.into_inner())
                 .pop()
                 .ok_or_else(RpcError::internal)?;
-            let event = crate::lab::event(kind, started, data);
+            let mut event = crate::lab::event(kind, started, data);
+            if event.data["execution_mode"] == "surfpool"
+                || event.data["request"]["execution_mode"] == "surfpool"
+            {
+                event.execution_mode = crate::config::Mode::Surfpool;
+            }
             let writer = writer.clone();
             let receipt =
                 tokio::task::spawn_blocking(move || writer.try_append_reserved(&event, credit))
@@ -267,7 +287,7 @@ impl Hold {
         Ok(())
     }
     pub async fn start(
-        &self,
+        self: &Arc<Self>,
         writer: &crate::journal::WriterHandle,
         started: std::time::Instant,
         hold_ms: u64,
@@ -288,24 +308,81 @@ impl Hold {
             self.started.cancel();
             credit
         };
-        let event = crate::lab::event("fault.withholding_started", started, data);
-        let writer = writer.clone();
-        let result = async {
-            let receipt =
-                tokio::task::spawn_blocking(move || writer.try_append_reserved(&event, credit))
-                    .await
-                    .map_err(|_| RpcError::internal())?
-                    .map_err(|_| RpcError::internal())?;
-            receipt
-                .committed()
-                .await
-                .map_err(|_| RpcError::internal())?;
-            Ok(())
+        let mut event = crate::lab::event("fault.withholding_started", started, data);
+        if event.data["request"]["execution_mode"] == "surfpool" {
+            event.execution_mode = crate::config::Mode::Surfpool;
         }
-        .await;
-        self.observed_committed.cancel();
-        result
+        let writer = writer.clone();
+        let hold = self.clone();
+        let task = tokio::spawn(async move {
+            struct Completion {
+                token: CancellationToken,
+                writer: crate::journal::WriterHandle,
+                complete: bool,
+            }
+            impl Drop for Completion {
+                fn drop(&mut self) {
+                    if !self.complete {
+                        self.writer.fail_fatal();
+                    }
+                    self.token.cancel();
+                }
+            }
+            let mut completion = Completion {
+                token: hold.observed_committed.clone(),
+                writer: writer.clone(),
+                complete: false,
+            };
+            let result = async {
+                let receipt =
+                    tokio::task::spawn_blocking(move || writer.try_append_reserved(&event, credit))
+                        .await
+                        .map_err(|_| RpcError::internal())?
+                        .map_err(|_| RpcError::internal())?;
+                receipt
+                    .committed()
+                    .await
+                    .map_err(|_| RpcError::internal())?;
+                Ok(())
+            }
+            .await;
+            if result.is_err() {
+                completion.writer.fail_fatal();
+            }
+            *hold.start_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
+            completion.complete = true;
+        });
+        *self.start_task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
+        self.observed_committed.cancelled().await;
+        self.start_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| Err(RpcError::internal()))
     }
+    pub async fn settle_start(&self, writer: &crate::journal::WriterHandle) {
+        self.observed_committed.cancelled().await;
+        let task = self
+            .start_task
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(task) = task
+            && task.await.is_err()
+        {
+            writer.fail_fatal();
+        }
+        if self
+            .start_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_none_or(Result::is_err)
+        {
+            writer.fail_fatal();
+        }
+    }
+
     pub fn close(&self) -> bool {
         let deadline = self.deadline.lock().unwrap_or_else(|e| e.into_inner());
         self.abort.cancel();
@@ -344,6 +421,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
         "finality-delayed",
         "signature-status-null",
         "stale-transaction-read-after-submission",
+        "provider-timeout-burst",
     ]
     .into_iter()
     .map(|case_id| CatalogEntry {
@@ -351,6 +429,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
         modes: if matches!(
             case_id,
             "tx-response-lost"
+                | "provider-timeout-burst"
                 | "signature-status-null"
                 | "stale-transaction-read-after-submission"
         ) {
@@ -378,5 +457,92 @@ pub fn lab_error(error: RpcError) -> crate::lab::LabError {
         crate::lab::LabError::unsupported(error.message)
     } else {
         crate::lab::LabError::internal(error.message)
+    }
+}
+
+#[cfg(test)]
+mod hold_commit_tests {
+    use super::*;
+    use crate::journal::{JournalReader, JournalStore, JournalWriter, WriterHealth};
+    #[tokio::test]
+    async fn cancelled_start_caller_keeps_the_gated_commit_owned_and_joined() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("journal.sqlite");
+        let writer = JournalWriter::start(JournalStore::create(&path, "L-hold").unwrap()).unwrap();
+        let hold = Arc::new(Hold::default());
+        hold.reserve_evidence(writer.handle(), 1).await.unwrap();
+        let gate = rusqlite::Connection::open(&path).unwrap();
+        gate.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = hold.clone();
+        let handle = writer.handle();
+        let caller = tokio::spawn(async move {
+            started
+                .start(
+                    &handle,
+                    std::time::Instant::now(),
+                    1000,
+                    serde_json::json!({"method":"getLatestBlockhash"}),
+                )
+                .await
+        });
+        hold.started.cancelled().await;
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            JournalReader::open(&path)
+                .unwrap()
+                .snapshot(true)
+                .unwrap()
+                .snapshot_seq,
+            0
+        );
+        gate.execute_batch("COMMIT").unwrap();
+        tokio::time::timeout(Duration::from_secs(2), hold.settle_start(&writer.handle()))
+            .await
+            .unwrap();
+        assert_eq!(writer.handle().status().health, WriterHealth::Healthy);
+        assert_eq!(
+            JournalReader::open(&path)
+                .unwrap()
+                .event(1)
+                .unwrap()
+                .unwrap()
+                .kind,
+            "fault.withholding_started"
+        );
+        hold.release();
+        tokio::task::spawn_blocking(move || writer.shutdown(None))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn failed_required_hold_evidence_signals_completion_and_fails_the_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("journal.sqlite");
+        let writer =
+            JournalWriter::start(JournalStore::create(&path, "L-hold-failure").unwrap()).unwrap();
+        let gate = rusqlite::Connection::open(&path).unwrap();
+        gate.execute_batch("CREATE TRIGGER reject_hold BEFORE INSERT ON events WHEN json_extract(NEW.event_json,'$.kind')='fault.withholding_started' BEGIN SELECT RAISE(ABORT,'hold commit fixture'); END;").unwrap();
+        let hold = Arc::new(Hold::default());
+        hold.reserve_evidence(writer.handle(), 1).await.unwrap();
+        assert!(
+            hold.start(
+                &writer.handle(),
+                std::time::Instant::now(),
+                1000,
+                serde_json::json!({})
+            )
+            .await
+            .is_err()
+        );
+        tokio::time::timeout(Duration::from_secs(2), hold.settle_start(&writer.handle()))
+            .await
+            .unwrap();
+        assert_ne!(writer.handle().status().health, WriterHealth::Healthy);
+        hold.release();
+        let _ = tokio::task::spawn_blocking(move || writer.shutdown(None))
+            .await
+            .unwrap();
     }
 }

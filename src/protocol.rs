@@ -43,7 +43,7 @@ fn decode_wire(bytes: &[u8]) -> Result<VersionedTransaction, RpcError> {
     }
     Ok(tx)
 }
-pub fn decode(encoded: &str, encoding: &str) -> Result<SignedTransaction, RpcError> {
+fn decode_input(encoded: &str, encoding: &str) -> Result<Vec<u8>, RpcError> {
     if encoded.len() > 6000 {
         return Err(RpcError::params("Encoded transaction exceeds its bound"));
     }
@@ -65,6 +65,23 @@ pub fn decode(encoded: &str, encoding: &str) -> Result<SignedTransaction, RpcErr
             "Transaction exceeds the largest supported packet bound",
         ));
     }
+    Ok(bytes)
+}
+pub(crate) fn validate_simulation(
+    encoded: &str,
+    encoding: &str,
+    verify: bool,
+) -> Result<(), RpcError> {
+    let bytes = decode_input(encoded, encoding)?;
+    let tx = decode_wire(&bytes)?;
+    if verify {
+        tx.verify_and_hash_message()
+            .map_err(|_| RpcError::params("Simulation signature verification failed"))?;
+    }
+    Ok(())
+}
+pub fn decode(encoded: &str, encoding: &str) -> Result<SignedTransaction, RpcError> {
+    let bytes = decode_input(encoded, encoding)?;
     let tx = decode_wire(&bytes)?;
     tx.verify_and_hash_message().map_err(|_| RpcError {
         code: -32003,

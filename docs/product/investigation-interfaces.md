@@ -84,16 +84,21 @@ Mutations resolve only the current named Lab; an absent live target returns a st
 Every new Lab has a new `lab_id`; names may be reused without making old references ambiguous.
 An event reference is `{lab_id,event_seq}`; a Finding reference adds its stable `finding_id`.
 Links preserve the source Lab, selected scope, and snapshot so the dashboard and machine views agree.
+A Finding scope uses `signature` and `accepted_request_id` for an accepted transaction.
+A request-based scope uses `request_id`, `rpc_method`, and an optional known `signature` without asserting acceptance.
+Existing accepted-transaction Findings preserve their wire fields and semantic IDs.
 An Investigation has query state, not a separate start, capture, or stop lifecycle.
 
 ### Implemented Case operations
 
 `case list` works offline and lists maintained Cases with their supported modes.
-The current simulator catalog includes `tx-response-lost`, `tx-confirmation-stalls`, and `finality-delayed`.
+The current simulator catalog includes `tx-response-lost`, `tx-confirmation-stalls`, `finality-delayed`, and `provider-timeout-burst`.
+`provider-timeout-burst` also supports managed Surfpool.
 The dashboard Case selector uses this core catalog and disables unsupported modes.
 `case arm tx-response-lost` arms or replaces a continuing policy without restarting the Lab.
 `case disarm` changes later registrations; existing holds retain their original policy and deadline.
 Arm accepts `--hold-ms` (1..20000, default 20000), `--max-held` (1..16, default 16), and up to 16 repeated exact `--signature` filters.
+Timeout arm additionally accepts repeated `--rpc-method`, `--outage-ms`, and `--recovery-ms` under the [Case contract](cases.md#implemented-timeout-coverage-claim).
 Each successful arm/disarm commits a new `registration_seq`; arm uses that sequence as its immutable policy revision.
 Repeated arm creates a new revision; it does not clear the identity ledger.
 Invalid settings or unsupported Case IDs leave the current revision unchanged.

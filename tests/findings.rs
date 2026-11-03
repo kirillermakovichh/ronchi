@@ -40,6 +40,10 @@ fn lookup_after_observed_withholding_has_stable_factual_support() {
     assert_eq!(result.state, State::Matched);
     let finding = result.finding.unwrap();
     assert_eq!(
+        finding.finding_id, "f1-16ac881db569c2baa69552ae848f62f0067d92e773cb95cbaae548ef9ae3af94",
+        "Legacy accepted-transaction scope must preserve semantic IDs"
+    );
+    assert_eq!(
         finding.statement,
         "Ronchi received a status or transaction lookup for A after observing response withholding for its accepted submission."
     );

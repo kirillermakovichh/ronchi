@@ -1,6 +1,6 @@
 # Cases and coverage
 
-Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. Other families remain planned; managed Surfpool response loss has the scoped claim below. Names, parameters, and YAML syntax are not stable APIs.
+Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. `provider-timeout-burst` is implemented with the scoped claim below. Other families remain planned; managed Surfpool response loss has the scoped claim below. Names, parameters, and YAML syntax are not stable APIs.
 This document owns Case scope and catalog status; [overview.md](overview.md) owns the overall product definition.
 
 ## Continuing Case model
@@ -260,6 +260,45 @@ The Journal records cycle position, selection, non-dispatch, hold start, and act
 A Finding can explain that Ronchi prevented dispatch and later received another RPC attempt.
 It cannot call the client result a timeout without client evidence.
 This variant does not reproduce an upstream timeout after ambiguous acceptance, rate limiting, DNS failure, or an entire provider outage outside the selected HTTP path.
+
+### Implemented timeout Coverage Claim
+
+`provider-timeout-burst` is available in simulator and managed Surfpool modes.
+The continuing policy freezes its cycle at whole-batch registration.
+Outage and recovery do not depend on polling or later dispatch time.
+The default outage/recovery intervals are 5000/10000 ms.
+The optional `timeout` settings accept `outage_ms` and `recovery_ms` in 1..120000 ms and up to 32 supported method names.
+An empty method list uses the maintained default four methods.
+CLI equivalents are `--outage-ms`, `--recovery-ms`, and repeated `--rpc-method`.
+`hold_ms` remains 1..20000 ms and defaults to 20000 ms.
+`max_held` remains 1..16 shared HTTP exchanges; a batch consumes one slot.
+An exact signature filter selects calls containing one of its eligible signatures.
+Methods without a signature do not match a nonempty signature filter.
+
+Before selecting a hold, Ronchi checks request shape, supported parameters, mode capabilities, signed input, and required local simulator ALT/nonce state.
+Surfpool retains authority over state-dependent results that require execution or a source read.
+The pre-dispatch validator does not contact the source to learn those results during outage.
+Invalid calls, notifications, missing Read Upstream capabilities, and unknown methods do not consume a hold.
+Capacity failure returns explicit `case_capacity_exceeded` before dispatch.
+Earlier accepted transactions continue their own lifecycle while another attempt is held.
+
+`rpc.dispatch_prevented` records the original binding, cycle position, method, signatures when available, and intended authority.
+Its held attempt has no `rpc.response_prepared` result and no new transaction acceptance.
+`fault.withholding_started` and `rpc.boundary` retain the actual shared-transport history.
+Cancellation preserves reserved evidence and releases the hold after its owned start commit settles.
+A required evidence write failure fails the writer instead of leaving cleanup waiting indefinitely.
+
+The version-1 `provider-timeout-burst.later-rpc-attempt` Finding requires selected non-dispatch, hold-start, actual transport boundary, and a later same-method registration inside the selected scope.
+Its `RpcRequest` scope contains the original request and method without inventing an accepted transaction.
+The statement describes receipt of the later request.
+It does not establish that the application retried because of this Fault or observed a timeout.
+Missing support produces an Evidence Gap or no match.
+
+Focused histories cover exact cycle-coordinate boundaries, no-traffic recovery, repetition, delayed batch dispatch after replacement, shared batch withholding, malformed/unsupported calls, simultaneous capacity admission, disconnect, cancellation during a gated start commit, and required-write failure.
+Simulator histories also verify preflight/ALT/nonce capability checks and preserved earlier acceptance.
+A fake Read Upstream verifies zero dispatch during outage and one allowlisted read after disarm.
+Native pinned Surfpool 1.7.0 histories verify held reads and signed submission without backend dispatch, then authoritative recovery and retained Finding inspection.
+These checks do not establish production-provider fidelity or an unobserved Client Outcome.
 
 ### Unavailable or stale transaction status
 

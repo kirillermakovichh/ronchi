@@ -252,6 +252,15 @@ impl JournalReader {
             cancel,
             &mut report,
         )?;
+        self.timeout_findings(
+            selected_cte,
+            values,
+            lab,
+            snapshot,
+            deadline,
+            cancel,
+            &mut report,
+        )?;
         for rule in &mut report.rules {
             rule.state = if rule.operational_limit {
                 State::OperationalLimit
@@ -274,6 +283,8 @@ impl JournalReader {
 mod confirmation;
 #[path = "findings/status.rs"]
 mod status;
+#[path = "findings/timeout.rs"]
+mod timeout;
 type RowData = (u64, String, String, String);
 fn row_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<RowData> {
     Ok((

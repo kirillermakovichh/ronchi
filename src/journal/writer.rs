@@ -116,7 +116,8 @@ impl WriterHandle {
     ) -> Result<CommitReceipt, JournalError> {
         if !matches!(
             event.kind.as_str(),
-            "rpc.response_prepared"
+            "rpc.dispatch_prevented"
+                | "rpc.response_prepared"
                 | "rpc.boundary"
                 | "fault.withholding_started"
                 | "check.observation"

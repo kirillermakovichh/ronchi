@@ -185,6 +185,13 @@ enum CaseCommand {
         /// Lower the status Case serialized state budget (1024..4194304 bytes)
         #[arg(long)]
         status_max_snapshot_bytes: Option<usize>,
+        /// Select supported timeout methods; omitted means the maintained default set
+        #[arg(long = "rpc-method")]
+        methods: Vec<String>,
+        #[arg(long)]
+        outage_ms: Option<u64>,
+        #[arg(long)]
+        recovery_ms: Option<u64>,
     },
     /// Disarm for later registrations; held requests retain their deadlines
     Disarm,
@@ -490,7 +497,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                         .expect("typed schema serializes");
                 value["maintained_case_rules"] = serde_json::json!([
                     cases::confirmation::finding_definition(),
-                    cases::status::finding_definition()
+                    cases::status::finding_definition(),
+                    cases::timeout::finding_definition()
                 ]);
             }
             match write_output(true, &value, "", false) {
@@ -666,6 +674,9 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     signatures,
                     status_max_keys,
                     status_max_snapshot_bytes,
+                    methods,
+                    outage_ms,
+                    recovery_ms,
                 } => Some(cases::Arm {
                     case_id: case,
                     hold_ms,
@@ -678,6 +689,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                             max_snapshot_bytes: status_max_snapshot_bytes
                                 .unwrap_or(4 * 1024 * 1024),
                         }),
+                    timeout: if methods.is_empty() && outage_ms.is_none() && recovery_ms.is_none() {
+                        None
+                    } else {
+                        Some(cases::timeout::Settings {
+                            methods,
+                            outage_ms: outage_ms.unwrap_or(5000),
+                            recovery_ms: recovery_ms.unwrap_or(10000),
+                        })
+                    },
                 }),
                 _ => None,
             };

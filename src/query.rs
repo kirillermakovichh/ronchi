@@ -539,6 +539,7 @@ impl Request {
                 ],
                 crate::cases::confirmation::finding_definition(),
                 crate::cases::status::finding_definition(),
+                crate::cases::timeout::finding_definition(),
             ))
             .expect("typed request serializes"),
         )

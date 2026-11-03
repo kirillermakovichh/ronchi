@@ -62,6 +62,11 @@ enum Operation {
         Option<std::sync::Arc<crate::cases::Activation>>,
     ),
     StatusView(Box<status::Read>),
+    ValidateSubmit(SignedTransaction),
+    ValidateFee(
+        crate::protocol::fees::FeeMessage,
+        crate::rpc::methods::ContextConfig,
+    ),
     BackendSubmit(
         crate::backend::Client,
         crate::backend::Prepared,
@@ -139,6 +144,17 @@ impl Transactions {
         hold: std::sync::Arc<crate::cases::Hold>,
         activation: Option<std::sync::Arc<crate::cases::Activation>>,
     ) -> Result<Value, RpcError> {
+        let operation = Self::prepare(clock, method, params, reference, hold, activation).await?;
+        self.job(operation).await
+    }
+    async fn prepare(
+        clock: &Clock,
+        method: &str,
+        params: &Value,
+        reference: Value,
+        hold: std::sync::Arc<crate::cases::Hold>,
+        activation: Option<std::sync::Arc<crate::cases::Activation>>,
+    ) -> Result<Operation, RpcError> {
         let args = crate::rpc::methods::positional(params)?;
         let operation = match method {
             "getFeeForMessage" => {
@@ -248,7 +264,30 @@ impl Transactions {
             }
             _ => return Err(RpcError::unsupported("Unknown transaction operation")),
         };
-        self.job(operation).await
+        Ok(operation)
+    }
+    pub(crate) async fn validate_timeout(
+        &self,
+        clock: &Clock,
+        method: &str,
+        params: &Value,
+    ) -> Result<Vec<String>, RpcError> {
+        let prepared =
+            Self::prepare(clock, method, params, Value::Null, Default::default(), None).await?;
+        match prepared {
+            Operation::Submit(signed, _, _, _) => {
+                let signature = signed.signature.clone();
+                self.job(Operation::ValidateSubmit(signed)).await?;
+                Ok(vec![signature])
+            }
+            Operation::Statuses(signatures, _) => Ok(signatures),
+            Operation::Lookup(signature, _) => Ok(vec![signature]),
+            Operation::Fee(message, cfg) => {
+                self.job(Operation::ValidateFee(message, cfg)).await?;
+                Ok(vec![])
+            }
+            _ => Err(RpcError::internal()),
+        }
     }
     pub(crate) async fn backend_submit(
         &self,
@@ -290,9 +329,12 @@ impl Transactions {
     }
     pub(crate) async fn change(
         &self,
-        args: Option<crate::cases::Arm>,
+        mut args: Option<crate::cases::Arm>,
     ) -> Result<crate::cases::Binding, RpcError> {
-        if let Some(args) = &args {
+        if let Some(args) = &mut args {
+            if args.case_id == "provider-timeout-burst" && args.timeout.is_none() {
+                args.timeout = Some(Default::default());
+            }
             args.validate()?;
         }
         serde_json::from_value(self.job(Operation::Change(args)).await?)
@@ -829,6 +871,62 @@ impl Owner {
                 };
                 let value = valid.then_some(fee);
                 Ok(json!({"context":{"slot":view.slot},"value":value}))
+            }
+            Operation::ValidateFee(message, cfg) => {
+                let view = crate::rpc::methods::check_context(&self.clock, &cfg)?;
+                message.quote(&self.state, view.slot)?;
+                if let Some(context) = message.nonce_use(&self.state, view.slot)? {
+                    let key = context.address;
+                    self.read(move |reader| reader.nonce(&key, Some(view.slot)))
+                        .await
+                        .map_err(|_| RpcError::internal())?
+                        .ok_or_else(|| {
+                            crate::protocol::state::unavailable(
+                                "Required nonce account is absent from simulator_state",
+                            )
+                        })?;
+                }
+                Ok(Value::Null)
+            }
+            Operation::ValidateSubmit(signed) => {
+                let key = signed.signature.clone();
+                let existing = self
+                    .read(move |reader| reader.transaction(&key))
+                    .await
+                    .map_err(|_| RpcError::internal())?;
+                if let Some(existing) = existing {
+                    if existing.digest != signed.digest
+                        || existing.wire_base64 != signed.wire_base64
+                    {
+                        return Err(RpcError::params(
+                            "Signed identity conflicts with previously retained content",
+                        ));
+                    }
+                } else {
+                    let (_, nonce) = crate::protocol::resolve_signed(
+                        &signed.wire_base64,
+                        &self.state,
+                        self.clock.view(Commitment::Processed).slot,
+                    )?;
+                    if let Some(context) = nonce {
+                        let key = context.address.clone();
+                        let account = self
+                            .read(move |reader| reader.nonce(&key, None))
+                            .await
+                            .map_err(|_| RpcError::internal())?
+                            .ok_or_else(|| {
+                                crate::protocol::state::unavailable(
+                                    "Required nonce account is absent from simulator_state",
+                                )
+                            })?;
+                        if account.authority != context.authority {
+                            return Err(RpcError::params(
+                                "Nonce authority does not match the signed instruction",
+                            ));
+                        }
+                    }
+                }
+                Ok(Value::Null)
             }
             Operation::Submit(signed, reference, hold, activation) => {
                 self.submit(signed, reference, hold, activation).await
