@@ -130,6 +130,13 @@ The Finding ID hashes rule ID/version, Lab, semantic incident scope, and role-la
 It excludes the evaluation time, watermark, page size, and projection.
 An unchanged supporting fact set therefore keeps its ID and statement at a newer watermark.
 The five supporting roles are `submission`, `acceptance`, `fault_selection`, `observed_withholding`, and `later_action`.
+The independent `sim.confirmation-delay.observed@1` rule reads selected metadata for simulator acceptance, assigned schedule, held-commitment transition, and recovery transition.
+Its four supporting roles remain inside the selected scope and watermark.
+It states the recorded simulator-time interval and makes no client or economic conclusion.
+Its stable `f1-` identity includes the maintained rule definition and supporting incident coordinates.
+The [confirmation-delay claim](cases.md#verified-simulator-confirmation-delay-claim) defines its tested boundary.
+Findings cursors bind this rule definition as well as the response-loss definitions.
+
 A shared batch boundary is not a separately selected Fault for each sibling element.
 These initial patterns require the identity's own selected Fault and withholding observation.
 

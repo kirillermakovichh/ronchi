@@ -422,23 +422,27 @@ Checkpoints record results and do not require another approval interview.
 - **Final acceptance:** `npm --prefix dashboard ci`, `run typecheck`, `test -- --run` (13 tests), `run build`, `cargo build --locked`, and `run test:browser` (8 native Chromium flows) passed. `cargo fmt --check`, `cargo check --locked`, `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --release --locked` passed with built embedded assets. A focused real-process viewer test confirms stdout closure exits the owner, releases its listener, preserves Journal bytes, and leaves another Lab ready. Desktop and 390px screenshots, including connection loss and retained recovery controls, were viewed. Long recovery commands now wrap without overflow.
 - **Coverage boundary:** Native browser flows cover no selected Lab, no traffic/waiting for match, more than five real Findings, event/Finding bookmarks, retained name reuse, late-read cancellation, keyboard focus, source collection with lost response, status inspection without retry, confirmed collection cancellation, Unicode payload byte continuation, operational errors, connection loss, and browser closure with the same armed Case. Visibility uses a controlled `document.hidden` signal in real Chromium with native HTTP. Starting, unsupported capability, analysis-limit, and core-failure renderer branches use controlled DTO tests; native lifecycle was not fabricated for those branches.
 - **Known observation:** The earlier isolated normal-down failure remains unconfirmed, not fixed. No original structured envelope was found. The harness now preserves known IDs, original command/output, operation sequence, and read-only resource inspection before owned failure cleanup. See [unconfirmed-down-observation.md](unconfirmed-down-observation.md). No runtime retry or speculative Lab fix was added.
-- **Preserved boundaries:** HTTP-only source collection; 32 KiB effective source cap; one intent/signature per evaluation; 512 records and 4 MiB evaluation evidence; read-only retained viewing; no runtime Node dependency. Checkpoint C's external-backend item remains unchecked. Task 14 is complete after the explicit detail-error recovery regression passed; task 15 is next and has not been started.
+- **Preserved boundaries:** HTTP-only source collection; 32 KiB effective source cap; one intent/signature per evaluation; 512 records and 4 MiB evaluation evidence; read-only retained viewing; no runtime Node dependency. Checkpoint C's external-backend item remains unchecked. Task 14 completed after the explicit detail-error recovery regression passed. The subsequent tasks15–24 run is recorded in parallel-run-state.md.
 
 ### 15. Local MCP adapter
 
-- [ ] **Accept:** Expose shared operations with official `rmcp`, structured bounded results, bootstrap identity exceptions, and clean stdio.
+- [x] **Accept:** Expose shared operations with official `rmcp`, structured bounded results, bootstrap identity exceptions, and clean stdio.
 - **Verify:** Scoped CLI/MCP parity, schema limits, cancellation, uncertain mutations, and EOF without Lab stop.
 - **Dependencies:** 12. **Scope:** Medium. **Likely files:** `src/mcp.rs`, `src/mcp/tools.rs`, `tests/mcp_stdio.rs`.
 - **Source:** [CLI and MCP behavior](../docs/product/investigation-interfaces.md#cli-and-mcp-transport-behavior).
 
 ## Complete modes and initial catalog
 
+- **Implemented / verified:** Official rmcp3.8.0 stdio with 12 shared tools, schemas/annotations, exact-ID enforcement, bounded structured content, cancellation/uncertain-effect inspection, retained maintenance lease, and EOF preserving persistent Lab. Main606b1fd; seven real SDK/process tests passed. Wave1 accumulated checkpoint passed.
+
 ### 16. Explicit Read-through
 
-- [ ] **Accept:** Forward only allowlisted reads to an explicit source; preserve source evidence, local transaction authority, and credential redaction.
+- [x] **Accept:** Forward only allowlisted reads to an explicit source; preserve source evidence, local transaction authority, and credential redaction.
 - **Verify:** Fake upstream proves no transaction, airdrop, simulation, unknown method, or silent local-history fallback reaches it.
 - **Dependencies:** 6, 8. **Scope:** Medium. **Likely files:** `src/upstream.rs`, `src/rpc/routing.rs`, `src/evidence/redact.rs`, `tests/read_through.rs`.
 - **Source:** [Read-through allowlist](../docs/product/solana-rpc-contract.md#read-through-allowlist).
+
+- **Implemented / verified:** Seven explicit read methods through final-boundary allowlist; local transaction authority, no redirect/fallback, opaque source identity, runtime-only credentials, bounded redacted source chunks. Main0b8b297; ten fake-upstream/process histories passed. Full suite/build/browser/Clippy passed. Positive trusted-cert HTTPS remains untested; invalid TLS fails closed.
 
 ### 17. Managed native Surfpool
 
@@ -491,10 +495,12 @@ Checkpoints record results and do not require another approval interview.
 
 ### 23. Retained evidence maintenance
 
-- [ ] **Accept:** Expose explicit stopped-Lab deletion and bounded selected export; preserve originals on migration failure and distinguish export from replayable Chaincase.
+- [x] **Accept:** Expose explicit stopped-Lab deletion and bounded selected export; preserve originals on migration failure and distinguish export from replayable Chaincase.
 - **Verify:** Reject live deletion; check interrupted reads, export limits/redaction, immutable references, WAL recovery, and workspace ownership.
 - **Dependencies:** 8, 9. **Scope:** Medium. **Likely files:** `src/journal/maintenance.rs`, `src/export.rs`, `src/cli/artifacts.rs`, `tests/journal_maintenance.rs`.
 - **Sources:** [Retention/export](../docs/product/evidence-and-findings.md#finalization-retention-and-export), [recovery](../docs/product/lab-lifecycle.md#recovery-retention-and-cleanup).
+
+- **Implemented / verified:** Exact-ID stopped-Lab delete and bounded selected NDJSON export, shared reader leases, workspace ownership, preserved independent exports, interrupted WAL reads, cancellation, explicit payload chunk limits, and unchanged DB/WAL on unsupported-schema rejection. Main949a7ec plus process-disappearance fix31baf3f; ten maintenance process histories passed. No schema migration command is exposed; retained readers never upgrade original files. Wave1 accumulated checkpoint passed.
 
 ### 24. Recovery and resource measurements
 

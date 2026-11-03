@@ -1,13 +1,13 @@
 # Task 14 completed: embedded dashboard
 
 Task 14 and slices 14a–14f are complete. The final explicit invalid-detail recovery regression passed.
-Task 15 is the next task. It has not been started.
+The authorized tasks15–24 run is active. Tasks15,16,23 and the simulator task20 slice are integrated. See [parallel-run-state.md](parallel-run-state.md) for current assignments, commits, checks, and remaining acceptance. The task14 evidence below remains the historical baseline.
 
 ## Next session
 
 The user requested one autonomous coordinated run for tasks 15–24.
 Use [remaining-implementation-run.md](remaining-implementation-run.md) and [parallel-run-state.md](parallel-run-state.md).
-The preparation session did not start implementation workers or change runtime code.
+The preparation session did not start implementation workers or change runtime code. The subsequent implementation run is recorded in the assignment ledger.
 Keep the task-14 verification and unconfirmed observation below as the recorded baseline.
 
 Existing layout, browser authentication, controls, embedded assets, and retained viewer were preserved.

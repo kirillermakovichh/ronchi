@@ -51,6 +51,7 @@ All operations accept optional `snapshot_seq` (`--snapshot-seq`) to pin an exist
 Findings cursors additionally bind the maintained rule definitions and versions.
 The authenticated control operation uses the existing `POST /v1/labs/{id}/investigate` route.
 `schema investigate.findings` works offline and includes the Finding and rule-definition schemas.
+Its `maintained_case_rules` field publishes additional Case rule definitions and versions.
 Dashboard and MCP use these shared query operations.
 Follow streams and export have separate contracts.
 The sections below retain the full accepted contract.
@@ -87,7 +88,9 @@ An Investigation has query state, not a separate start, capture, or stop lifecyc
 
 ### Implemented Case operations
 
-`case list` works offline and currently lists only simulator `tx-response-lost`.
+`case list` works offline and lists maintained Cases with their supported modes.
+The current simulator catalog includes `tx-response-lost`, `tx-confirmation-stalls`, and `finality-delayed`.
+The dashboard Case selector uses this core catalog and disables unsupported modes.
 `case arm tx-response-lost` arms or replaces a continuing policy without restarting the Lab.
 `case disarm` changes later registrations; existing holds retain their original policy and deadline.
 Arm accepts `--hold-ms` (1..20000, default 20000), `--max-held` (1..16, default 16), and up to 16 repeated exact `--signature` filters.
@@ -98,7 +101,8 @@ Mutations require an authenticated ready Lab; retained or stopping Labs return `
 A transport deadline can leave mutation effects unknown; inspect status before another mutation.
 
 Authenticated control routes are `GET /v1/labs/{id}/cases`, `POST /v1/labs/{id}/case/arm`, and `POST /v1/labs/{id}/case/disarm`.
-Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, and `signatures`.
+Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, `signatures`, and optional typed `confirmation` settings.
+The [confirmation-delay claim](cases.md#verified-simulator-confirmation-delay-claim) defines those settings and evidence limits.
 Unknown arm keys return a structured `invalid_argument` without changing policy.
 Disarm accepts an empty body or `{}` and rejects supplied settings.
 Transient control-queue capacity returns `state_conflict`; Journal failure returns a product error and fails the Lab.
