@@ -70,11 +70,9 @@ impl Exchange {
         if method == "getBlockHeight" {
             if let Some(height) = value.as_u64() {
                 self.rpc.record("rpc.blockhash_height",vec![json!({"request":reference,"method":method,"internal":false,"source_identity":source,"commitment":commitment,"block_height":height})]).await?;
-                let facts = active
-                    .blockhash
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .height(height, &source, commitment, now());
+                let facts = active.with_blockhash(commitment, |cache| {
+                    cache.height(height, &source, commitment, now())
+                });
                 self.blockhash_facts(facts, reference).await?;
             }
             return Ok(None);
@@ -101,11 +99,12 @@ impl Exchange {
         };
         let height = probe.as_ref().ok().and_then(Value::as_u64);
         self.rpc.record("rpc.blockhash_height",vec![json!({"request":reference,"method":"getBlockHeight","internal":true,"source_identity":source,"commitment":commitment,"block_height":height,"error_code":probe.as_ref().err().map(|error|error.code)})]).await?;
-        let (boundary, facts) = active
-            .blockhash
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .read(
+        let window = reference["custom_arguments"]["expiry_window_real_ms"].as_u64();
+        let (boundary, facts) = active.with_blockhash(commitment, |cache| {
+            if let Some(ms) = window {
+                cache.set_window(ms);
+            }
+            cache.read(
                 value,
                 &source,
                 commitment,
@@ -113,7 +112,8 @@ impl Exchange {
                 height,
                 reference,
                 now(),
-            );
+            )
+        });
         self.blockhash_facts(facts, reference).await?;
         Ok(Some(boundary))
     }

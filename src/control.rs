@@ -127,7 +127,11 @@ pub fn router(control: Control) -> Router {
         .route("/ui/{id}/api/cases", get(case_list))
         .route(
             "/ui/{id}/api/case/arm",
-            post(case_arm).layer(axum::extract::DefaultBodyLimit::max(4096)),
+            post(case_arm).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
+        )
+        .route(
+            "/ui/{id}/api/case/validate",
+            post(case_validate).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
         )
         .route(
             "/ui/{id}/api/case/disarm",
@@ -175,7 +179,14 @@ pub fn router(control: Control) -> Router {
             "/v1/labs/{id}/check-collections/{collection}/cancel",
             post(check_cancel),
         )
-        .route("/v1/labs/{id}/case/arm", post(case_arm))
+        .route(
+            "/v1/labs/{id}/case/arm",
+            post(case_arm).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
+        )
+        .route(
+            "/v1/labs/{id}/case/validate",
+            post(case_validate).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
+        )
         .route("/v1/labs/{id}/case/disarm", post(case_disarm))
         .route("/v1/labs/{id}/cases", get(case_list))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
@@ -326,6 +337,36 @@ async fn case_apply(
         Err(error) => case_failure(id, crate::cases::lab_error(error)),
     })
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CustomValidation {
+    yaml: String,
+}
+async fn case_validate(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    args: Result<Json<CustomValidation>, axum::extract::rejection::JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    let Ok(Json(args)) = args else {
+        return Ok(case_failure(
+            id,
+            LabError::invalid("Expected Custom Case YAML"),
+        ));
+    };
+    let result = crate::cases::custom::validate(&args.yaml, control.snapshot().configuration.mode);
+    Ok(match result {
+        Ok(plan) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"contract_version":1,"lab_id":id,"result":plan})),
+        ),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"contract_version":1,"lab_id":id,"error":error})),
+        ),
+    })
+}
 async fn case_arm(
     State(control): State<Control>,
     Path(id): Path<String>,
@@ -366,7 +407,7 @@ async fn case_list(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     authorize(&control, &id, &headers)?;
     Ok(Json(
-        serde_json::json!({"contract_version":1,"lab_id":id,"result":crate::cases::catalog()}),
+        serde_json::json!({"contract_version":1,"lab_id":id,"result":crate::cases::catalog(),"custom":crate::cases::custom::catalog()}),
     ))
 }
 pub async fn case_request(
@@ -421,6 +462,12 @@ pub async fn case_request(
             let message = value["error"]["message"]
                 .as_str()
                 .unwrap_or("Case operation failed");
+            if let Some(category) = crate::cases::validation_category(code) {
+                let mut error = LabError::invalid(message);
+                error.code = category;
+                error.phase = "case";
+                return Err(error);
+            }
             return Err(match code {
                 "invalid_argument" => LabError::invalid(message),
                 "unsupported_capability" => LabError::unsupported(message),

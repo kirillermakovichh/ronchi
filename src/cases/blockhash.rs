@@ -55,19 +55,30 @@ pub(crate) type Facts = Vec<(&'static str, Value)>;
 pub(crate) struct Cache {
     tuple: Option<Tuple>,
     recovery_until: Option<u64>,
+    window_ns: u64,
 }
 impl Cache {
+    pub(crate) fn set_window(&mut self, ms: u64) {
+        self.window_ns = ms * 1_000_000;
+    }
+    fn window(&self) -> u64 {
+        if self.window_ns == 0 {
+            WINDOW_NS
+        } else {
+            self.window_ns
+        }
+    }
     fn advance(&mut self, now: u64) -> Facts {
         let mut facts = vec![];
         if self.recovery_until.is_none()
             && let Some(tuple) = &self.tuple
             && let Some(expired) = tuple.expired_at
-            && now >= expired.saturating_add(WINDOW_NS)
+            && now >= expired.saturating_add(self.window())
         {
-            self.recovery_until = Some(expired.saturating_add(2 * WINDOW_NS));
+            self.recovery_until = Some(expired.saturating_add(2 * self.window()));
             let mut fact = tuple.facts();
             fact["expired_submission_observed"] = json!(false);
-            fact["window_end_elapsed_ns"] = json!(expired.saturating_add(WINDOW_NS));
+            fact["window_end_elapsed_ns"] = json!(expired.saturating_add(self.window()));
             fact["recovery_until_elapsed_ns"] = json!(self.recovery_until);
             facts.push(("fault.blockhash_window_elapsed", fact));
         }
@@ -185,7 +196,7 @@ impl Cache {
         if self.recovery_until.is_none() && tuple.expired_at.is_some() {
             let mut fact = tuple.facts();
             fact["signature"] = json!(signature);
-            self.recovery_until = Some(now.saturating_add(WINDOW_NS));
+            self.recovery_until = Some(now.saturating_add(self.window()));
             fact["recovery_until_elapsed_ns"] = json!(self.recovery_until);
             facts.push(("fault.blockhash_submission", fact));
         }

@@ -150,7 +150,7 @@ impl Rpc {
         let upstream = upstream.map(crate::upstream::Upstream::new).transpose()?;
         let (policy_status, _) = tokio::sync::watch::channel(crate::cases::Binding::default());
         let holds = Arc::new(crate::cases::HoldPool::default());
-        let (transactions, owner) = crate::simulator::transactions::Transactions::channel(
+        let (transactions, mut owner) = crate::simulator::transactions::Transactions::channel(
             clock.clone(),
             writer.clone(),
             started,
@@ -158,6 +158,9 @@ impl Rpc {
             policy_status.clone(),
             holds.clone(),
         );
+        if upstream.is_some() {
+            owner.enable_upstream();
+        }
         let (initialized, _) = tokio::sync::watch::channel(None);
         Ok(Self(Arc::new(State {
             transactions,
@@ -501,19 +504,62 @@ impl Exchange {
             Ok(value) => (false, vec![value], false),
             Err(_) => (false, vec![Value::Null], true),
         };
-        let registered = match self.rpc.0.transactions.register().await {
+        let registered = match self
+            .rpc
+            .0
+            .transactions
+            .register(items.clone(), self.hold.clone())
+            .await
+        {
             Ok(registered) => registered,
             Err(failure) => return http_response(503, Some(error(Value::Null, failure))),
         };
         let binding = registered.binding;
+        let mut custom = registered.custom.into_iter();
         let activation = registered.activation;
         let registration = binding.registration_seq;
         let batch_size = items.len();
+        let mut custom_decisions = std::collections::BTreeMap::new();
+        let mut custom_facts = Vec::new();
         let mut prepared = Vec::new();
         let mut responses = Vec::new();
         let mut received = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
-            let reference = json!({"registration_seq":registration,"registered_elapsed_ns":registered.elapsed_ns,"registered_simulated_ns":registered.simulated_ns,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size,"execution_mode":if self.rpc.0.backend.is_some(){"surfpool"}else{"simulator"}});
+            let mut reference = json!({"registration_seq":registration,"registered_elapsed_ns":registered.elapsed_ns,"registered_simulated_ns":registered.simulated_ns,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size,"execution_mode":if self.rpc.0.backend.is_some(){"surfpool"}else{"simulator"}});
+            if let Some(selection) = custom.next() {
+                match selection {
+                    Ok(selections) => {
+                        let method = item["method"].as_str().unwrap_or("");
+                        let mut projected =
+                            crate::cases::sequence::project(&binding, &selections, method);
+                        if method == "getLatestBlockhash"
+                            && let Some(policy) = &mut projected.policy
+                        {
+                            policy.settings.blockhash = crate::cases::blockhash::query(
+                                item.get("params").unwrap_or(&Value::Null),
+                            )
+                            .ok()
+                            .map(|(commitment, _)| crate::cases::blockhash::Settings {
+                                commitment,
+                            });
+                        }
+                        reference["binding"] = json!(projected);
+                        reference["custom_selection_count"] = json!(selections.len());
+                        if let Some(selection) = selections
+                            .iter()
+                            .find(|s| s.primitive == "rpc.timeout-before-dispatch@1")
+                            .or_else(|| selections.first())
+                        {
+                            reference["custom_arguments"] = selection.arguments.clone();
+                        }
+                        for selection in &selections {
+                            custom_facts.push(json!({"request":reference,"signature":selection.signature,"selection":selection,"method":method,"stage":"registration"}));
+                        }
+                        custom_decisions.insert(index, selections);
+                    }
+                    Err(error) => reference["custom_error"] = json!(error),
+                }
+            }
             let valid = item.is_object()
                 && item.get("jsonrpc") == Some(&json!("2.0"))
                 && item.get("method").is_some_and(Value::is_string)
@@ -570,8 +616,15 @@ impl Exchange {
                 value
             })
             .collect();
-        if let Err(failure) = self.rpc.record("rpc.registered", received).await {
-            return failures(&prepared, batch, failure);
+        for page in received.chunks(8) {
+            if let Err(failure) = self.rpc.record("rpc.registered", page.to_vec()).await {
+                return failures(&prepared, batch, failure);
+            }
+        }
+        for page in custom_facts.chunks(8) {
+            if let Err(failure) = self.rpc.record("custom.selection", page.to_vec()).await {
+                return failures(&prepared, batch, failure);
+            }
         }
         let pause = self
             .rpc
@@ -586,12 +639,23 @@ impl Exchange {
         }
         let mut decisions = Vec::new();
         let mut boundaries = Vec::new();
-        for (reference, item, valid) in prepared {
+        for (index, (reference, item, valid)) in prepared.into_iter().enumerate() {
+            let binding: crate::cases::Binding =
+                serde_json::from_value(reference["binding"].clone()).expect("constructed binding");
+            let custom_selections = custom_decisions.remove(&index).unwrap_or_default();
             let id = item.get("id").cloned().unwrap_or(Value::Null);
             let notification = valid && item.get("id").is_none();
             let method = item["method"].as_str().unwrap_or("");
-            let mut timeout_error = None;
+            let mut timeout_error = reference.get("custom_error").map(|e| RpcError {
+                code: e["code"].as_i64().unwrap_or(-32603),
+                message: e["message"]
+                    .as_str()
+                    .unwrap_or("Custom Case selection failed")
+                    .into(),
+                data: e.get("data").cloned(),
+            });
             if valid
+                && timeout_error.is_none()
                 && self.rpc.0.ready.load(Ordering::SeqCst)
                 && self.rpc.0.writer.status().health == WriterHealth::Healthy
                 && let Some(selection) =
@@ -762,6 +826,30 @@ impl Exchange {
                     item.get("params").unwrap_or(&Value::Null),
                 )
             };
+            let result = if matches!(method, "getSignatureStatuses" | "getTransaction")
+                && !custom_selections.is_empty()
+            {
+                match (result, activation.clone()) {
+                    (Ok(source), Some(active)) => {
+                        self.rpc
+                            .0
+                            .transactions
+                            .custom_lookup(
+                                method,
+                                item.get("params").unwrap_or(&Value::Null),
+                                source,
+                                reference.clone(),
+                                active,
+                                self.rpc.0.backend.clone(),
+                                custom_selections.clone(),
+                            )
+                            .await
+                    }
+                    (result, _) => result,
+                }
+            } else {
+                result
+            };
             let mut result = if matches!(method, "getSignatureStatuses" | "getTransaction")
                 && crate::cases::status::selected(&binding)
             {
@@ -830,7 +918,7 @@ impl Exchange {
             });
             match result {
                 Ok(result) => {
-                    if crate::cases::status::selected(&binding)
+                    if (crate::cases::status::selected(&binding) || !custom_selections.is_empty())
                         && matches!(method, "getSignatureStatuses" | "getTransaction")
                     {
                         fact["lookup_boundary_digests"] = if method == "getSignatureStatuses" {

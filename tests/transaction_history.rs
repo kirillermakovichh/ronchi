@@ -1732,3 +1732,6 @@ mod blockhash_cases;
 mod status_cases;
 #[path = "cases/timeout.rs"]
 mod timeout;
+
+#[path = "cases/custom.rs"]
+mod custom_cases;

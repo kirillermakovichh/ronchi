@@ -17,6 +17,8 @@ export function Controls({ api, status, snapshot, changed }: Props) {
     [busy, setBusy] = useState(false);
   const [selectedCase, setSelectedCase] = useState("tx-response-lost");
   const [catalogVisible, setCatalogVisible] = useState(false);
+  const [customYaml,setCustomYaml]=useState("");
+  const [customPlan,setCustomPlan]=useState<{yaml:string;mode:string;plan:unknown}>();
   const [collection, setCollection] = useState<{
       collection_id: string;
       status: string;
@@ -99,6 +101,23 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         >
           Arm / replace {selectedCase}
         </button>
+        <label>
+          Custom Case YAML
+          <textarea value={customYaml} maxLength={65536} disabled={!live || busy}
+            onChange={(event)=>{setCustomYaml(event.target.value);setCustomPlan(undefined);}} />
+        </label>
+        <button disabled={!live || busy || customYaml.length===0}
+          onClick={()=>void run(async()=>{
+            setCustomPlan(undefined);
+            const reply=await api.call<{result:unknown}>("api/case/validate",{yaml:customYaml});
+            setCustomPlan({yaml:customYaml,mode:status.configuration.mode,plan:reply.result});
+          })}>Validate Custom Case</button>
+        {customPlan!==undefined && <pre aria-label="Resolved Custom Case plan">{JSON.stringify(customPlan.plan,null,2)}</pre>}
+        <button disabled={!live || busy || customPlan===undefined || customPlan.yaml!==customYaml || customPlan.mode!==status.configuration.mode}
+          onClick={()=>void run(async()=>{
+            await api.call("api/case/arm",{case_id:"custom",custom_yaml:customYaml});
+            changed();
+          })}>Activate Custom Case</button>
         <button
           disabled={!live || busy}
           onClick={() =>

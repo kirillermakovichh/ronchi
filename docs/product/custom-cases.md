@@ -1,6 +1,6 @@
 # Custom Cases
 
-Status: prototype design contract for YAML v1. This is not a released schema or implemented capability.
+Status: implemented prototype YAML v1. The schema is not a released compatibility promise.
 [Cases and coverage](cases.md) owns built-in defaults, continuing policy, and mode limits.
 [ADR-0007](../adr/0007-declarative-custom-cases.md) records why extensions use maintained primitives.
 
@@ -222,3 +222,40 @@ The YAML alone cannot reproduce a changing upstream or an independently running 
 
 Implementation verification must include a valid composite sequence, each validation error class, mode rejection, capacity exhaustion, batch binding, reactivation, and incomplete Finding evidence.
 It must also verify that response-loss composition cannot reset an identity already affected in the same Lab.
+
+## Prototype authoring and inspection
+
+Use `ronchi case validate case.yaml --mode simulator --json` to inspect the resolved plan without a Lab.
+Use `ronchi case activate case.yaml --lab-id <id> --json` to replace the selected ready Lab's policy.
+Activation validates again against the actual mode before committing the replacement.
+The default mode of offline validation is `simulator`.
+`ronchi case list --json` and `ronchi schema case.validate` publish the primitive and template catalog.
+The resolved plan includes effective primitive defaults and the unchanged canonical input used for its digest.
+
+The control and dashboard operation accepts `{ "case_id": "custom", "custom_yaml": "..." }` on the existing Case arm route.
+`POST /v1/labs/{id}/case/validate` accepts `{ "yaml": "..." }` and uses the selected Lab mode without mutation.
+The dashboard shows the resolved plan before enabling activation of that exact text.
+The MCP tool `ronchi_case_validate` accepts `yaml` and `mode` without a Lab.
+`ronchi_case_arm` activates the same bounded artifact through `arguments.custom_yaml`.
+Validation errors include their symbolic category and field path.
+
+The activation event retains custom provenance and a reference to the resolved plan.
+Bounded `case.plan` payload chunks retain that plan under the ordinary explicit payload policy.
+`custom.selection` records one selected key, step, cycle, primitive, and argument mapping.
+Request references carry a count and compact policy binding instead of repeating all per-signature selections.
+A multi-signature request commits its cursor changes only after its entire transient-key admission succeeds.
+A selected pre-dispatch timeout reserves the shared HTTP hold before it commits those cursor changes.
+An invalid replacement preserves the old activation and its state.
+
+Custom lookup snapshots retain complete authoritative status entries.
+A transaction-first snapshot obtains an actual status observation before choosing a lifecycle view.
+A retained lifecycle view can hide a transaction response whose requested commitment it has not reached.
+Query-specific transaction snapshots preserve their encoding and version selection.
+Snapshot content has a 16 KiB per-value ceiling and a 4 MiB per-activation byte ceiling.
+A required snapshot that exceeds these bounds produces `case_capacity_exceeded`.
+The core does not silently pass through a weaker policy at capacity.
+
+The initial custom Finding template requires an available authoritative source, an actual change to null, a matching prepared-result digest, a completed HTTP write, and a later registered lookup for the same signature and declared step.
+Its evidence includes both the later registration and that registration's immutable step selection.
+Incomplete scoped evidence produces a gap instead of the stronger Finding.
+Author guidance remains separate from the fixed template statement.

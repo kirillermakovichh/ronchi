@@ -11,12 +11,16 @@ use tokio_util::sync::CancellationToken;
 
 pub mod blockhash;
 pub mod confirmation;
+pub mod custom;
+pub(crate) mod sequence;
 pub mod status;
 pub mod timeout;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Arm {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_yaml: Option<String>,
     pub case_id: String,
     #[serde(default = "default_hold")]
     pub hold_ms: u64,
@@ -43,6 +47,7 @@ impl Default for Arm {
     fn default() -> Self {
         Self {
             case_id: "tx-response-lost".into(),
+            custom_yaml: None,
             hold_ms: default_hold(),
             max_held: default_capacity(),
             signatures: vec![],
@@ -55,6 +60,22 @@ impl Default for Arm {
 }
 impl Arm {
     pub fn validate(&self) -> Result<(), RpcError> {
+        if self.custom_yaml.is_some() {
+            if self.case_id != "custom"
+                || self.hold_ms != default_hold()
+                || self.max_held != default_capacity()
+                || !self.signatures.is_empty()
+                || self.status.is_some()
+                || self.timeout.is_some()
+                || self.confirmation.is_some()
+                || self.blockhash.is_some()
+            {
+                return Err(RpcError::params(
+                    "Custom Case activation accepts custom_yaml with case_id:custom and no built-in settings",
+                ));
+            }
+            return Ok(());
+        }
         if ![
             "provider-timeout-burst",
             "tx-response-lost",
@@ -120,6 +141,8 @@ impl Arm {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Policy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom: Option<serde_json::Value>,
     pub revision: u64,
     #[serde(default)]
     pub activated_elapsed_ns: u64,
@@ -136,10 +159,32 @@ pub struct Binding {
 /// Activation state follows registered exchanges, independently of later replacements.
 #[derive(Debug, Default)]
 pub(crate) struct Activation {
+    pub custom: Option<sequence::Runtime>,
     pub status: Mutex<status::Cache>,
     pub blockhash: Mutex<blockhash::Cache>,
+    pub custom_blockhashes: Mutex<std::collections::BTreeMap<String, blockhash::Cache>>,
+}
+impl Activation {
+    pub(crate) fn with_blockhash<R>(
+        &self,
+        commitment: crate::simulator::clock::Commitment,
+        f: impl FnOnce(&mut blockhash::Cache) -> R,
+    ) -> R {
+        if self.custom.is_some() {
+            let mut caches = self
+                .custom_blockhashes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            f(caches
+                .entry(serde_json::to_string(&commitment).expect("commitment serializes"))
+                .or_default())
+        } else {
+            f(&mut self.blockhash.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+    }
 }
 pub(crate) struct Registration {
+    pub custom: Vec<Result<Vec<sequence::Selection>, RpcError>>,
     pub binding: Binding,
     pub activation: Option<Arc<Activation>>,
     pub elapsed_ns: u64,
@@ -456,6 +501,22 @@ pub fn catalog() -> Vec<CatalogEntry> {
     .collect()
 }
 pub fn lab_error(error: RpcError) -> crate::lab::LabError {
+    if let Some(category) = error
+        .data
+        .as_ref()
+        .and_then(|d| d["code"].as_str())
+        .and_then(validation_category)
+    {
+        let path = error
+            .data
+            .as_ref()
+            .and_then(|d| d["path"].as_str())
+            .unwrap_or("$");
+        let mut result = crate::lab::LabError::invalid(format!("{path}: {}", error.message));
+        result.code = category;
+        result.phase = "case";
+        return result;
+    }
     if error.data.as_ref().is_some_and(|data| {
         data["code"] == "capacity_exceeded" || data["code"] == "case_capacity_exceeded"
     }) {
@@ -471,6 +532,51 @@ pub fn lab_error(error: RpcError) -> crate::lab::LabError {
     } else {
         crate::lab::LabError::internal(error.message)
     }
+}
+
+/// Read one explicitly selected UTF-8 artifact within its declared byte budget.
+pub fn read_artifact(path: &std::path::Path) -> Result<String, crate::lab::LabError> {
+    use std::io::Read;
+    if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        return Err(crate::lab::LabError::invalid(
+            "Custom Case artifact must be a regular file",
+        ));
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|_| crate::lab::LabError::invalid("Cannot open Custom Case artifact"))?;
+    if !file.metadata().is_ok_and(|m| m.is_file()) {
+        return Err(crate::lab::LabError::invalid(
+            "Custom Case artifact must be a regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(65537)
+        .read_to_end(&mut bytes)
+        .map_err(|_| crate::lab::LabError::invalid("Cannot read Custom Case artifact"))?;
+    if bytes.len() > 65536 {
+        return Err(crate::lab::LabError::invalid(
+            "Custom Case artifact exceeds 64 KiB",
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| crate::lab::LabError::invalid("Custom Case artifact must be UTF-8"))
+}
+
+pub(crate) fn validation_category(code: &str) -> Option<&'static str> {
+    [
+        "invalid_yaml",
+        "unsupported_schema",
+        "unknown_field",
+        "unknown_primitive",
+        "incompatible_version",
+        "unsupported_mode",
+        "invalid_filter",
+        "invalid_sequence",
+        "invalid_finding_rule",
+        "limit_exceeded",
+    ]
+    .into_iter()
+    .find(|category| *category == code)
 }
 
 #[cfg(test)]

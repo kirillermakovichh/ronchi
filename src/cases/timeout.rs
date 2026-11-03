@@ -83,6 +83,14 @@ pub(crate) fn candidate(
     if !selected {
         return None;
     }
+    if p.custom.is_some() {
+        return Some(Selection {
+            cycle: 0,
+            position_ns: 0,
+            outage_ms: settings.outage_ms,
+            recovery_ms: settings.recovery_ms,
+        });
+    }
     let elapsed = reference["registered_elapsed_ns"]
         .as_u64()?
         .checked_sub(p.activated_elapsed_ns)?;

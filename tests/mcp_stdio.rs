@@ -34,7 +34,7 @@ async fn sdk_stdio_lists_and_calls_offline_catalog() {
     .unwrap()
     .unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 13);
     let result = client
         .call_tool(
             CallToolRequestParams::new("ronchi_case_list")
@@ -207,7 +207,7 @@ async fn sdk_modern_discovery_has_the_same_catalog_and_schemas() {
         .await
         .unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 13);
     let oversized = client
         .call_tool(
             CallToolRequestParams::new("ronchi_case_list").with_arguments(

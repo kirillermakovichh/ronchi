@@ -40,7 +40,7 @@ impl Owner {
             Ok(false)
         }
     }
-    async fn status_append(
+    pub(super) async fn status_append(
         &mut self,
         kind: &str,
         source: &str,

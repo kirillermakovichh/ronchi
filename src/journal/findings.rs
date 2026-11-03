@@ -270,6 +270,15 @@ impl JournalReader {
             cancel,
             &mut report,
         )?;
+        self.custom_findings(
+            selected_cte,
+            values,
+            lab,
+            snapshot,
+            deadline,
+            cancel,
+            &mut report,
+        )?;
         for rule in &mut report.rules {
             rule.state = if rule.operational_limit {
                 State::OperationalLimit
@@ -356,3 +365,6 @@ fn decode(lab: &str, (seq, kind, source, text): RowData) -> Result<Fact, Error> 
 
 #[path = "findings/blockhash.rs"]
 mod blockhash;
+
+#[path = "findings/custom.rs"]
+mod custom;

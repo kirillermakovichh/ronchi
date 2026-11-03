@@ -1,6 +1,6 @@
 # Remaining run assignments
 
-Status: active. Modes integrated and verified; parallel18/19/21 implementation active.
+Status: active. Tasks18/19/21 integrated; Checkpoint D review and task22 implementation active.
 Runtime baseline at preparation: `700949e`, with a clean `main` and no remote.
 Tasks 1–14 are recorded complete in [todo.md](todo.md).
 The preparation commit is later than this runtime baseline; use actual current HEAD for new worktrees.
@@ -12,7 +12,7 @@ Read [remaining-implementation-run.md](remaining-implementation-run.md) before d
 - Coordinator checkout: `/Users/kirillermakovic/Downloads/PROJECTS/SELF/ronchi`, branch `main`.
 - Agent runtime: Codex collaboration tools (`spawn_agent`, messaging, follow-up) available.
 - Actual concurrency: one coordinator and three isolated implementation workers; no recursive delegation.
-- Current integration code HEAD: `bd3f8bf` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
+- Current integration code HEAD: `d7503b9` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
 
 ## Assignments
 
@@ -26,13 +26,13 @@ Record exact focused checks and their outcomes before a row becomes `verified`.
 | 15 MCP | verified | `/root/task15` | `run/20261103-a/task-15` / `.worktrees/20261103-a-task-15` / `7b94a24` | worker `e2e7bfc` → main `606b1fd` | 7 actual rmcp stdio process tests passed on combined main; retained read lease added during integration; accumulated checkpoint passed |
 | 16 Read-through | verified | `/root/task16` | `run/20261103-a/task-16` / `.worktrees/20261103-a-task-16` / `7b94a24` | worker `131d0f9` → main `0b8b297` | 10 Read-through HTTP/process tests passed on combined main; redaction review fix included; accumulated checkpoint passed |
 | 17 Surfpool | verified | `/root/task23` | `run/20261103-a/task-17` / `.worktrees/20261103-a-task-17` / `606b1fd` | worker755c20d/c3e4f13 → main7326fd3/bd3f8bf | Native8 + Read-through10 + transaction33 passed; fake source -32603 regression passed; native8 passed again after shared registration seam. macOS arm64 actual execution only. |
-| 18 Timeout bursts | active | `/root/task15` | `run/20261103-a/task-18` / `.worktrees/20261103-a-task-18` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
-| 19 Status views | active | `/root/task16` | `run/20261103-a/task-19` / `.worktrees/20261103-a-task-19` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
+| 18 Timeout bursts | integrated | `/root/task15` | `run/20261103-a/task-18` / `.worktrees/20261103-a-task-18` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
+| 19 Status views | integrated | `/root/task16` | `run/20261103-a/task-19` / `.worktrees/20261103-a-task-19` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
 | 20 Confirmation stalls | verified | coordinator | `main` / coordinator checkout / `7b94a24` | `53528f7`, `b0b0eea` | 4 controlled-clock histories; combined transaction34 passed. Finding drill-down/rule cursor tests passed; native Surfpool confirmation capability rejection verified. fmt/check/Clippy passed. |
-| 21 Expired-blockhash reuse | active | `/root/task23` | `run/20261103-a/task-21` / `.worktrees/20261103-a-task-21` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
-| 22 Custom Cases | pending | — | — | — | — |
+| 21 Expired-blockhash reuse | integrated | `/root/task23` | `run/20261103-a/task-21` / `.worktrees/20261103-a-task-21` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
+| 22 Custom Cases | active | coordinator + `/root/task16` | main runtime; isolated parser packet follows review | — | Parser validation and runtime sequencing split; no completion claim |
 | 23 Evidence maintenance | verified | `/root/task23` | `run/20261103-a/task-23` / `.worktrees/20261103-a-task-23` / `7b94a24` | worker `6481a7f` → main `949a7ec` | 10 maintenance process tests passed on combined main after precise process-disappearance fix 31baf3f; original first failure preserved below; accumulated checkpoint passed |
-| 24 Recovery / measurements | pending | — | — | — | — |
+| 24 Recovery / measurements | active | `/root/task23` | `run/20261103-a/task-24-harness` / `.worktrees/20261103-a-task-24-harness` / `d7503b9` | — | Recovery tests and harness only; combined measurements await15–23 |
 
 ## Integration checkpoints
 
@@ -93,3 +93,22 @@ Tasks18/19/21 are active. Integrate verified commits deliberately, then Checkpoi
 - Native oracle correction in17 regression: a32-byte base58 genesis may have43 or44 characters. tests/read_through now decodes to32 bytes. No runtime change followed. The original43!=44 failure is not a product regression.
 - Native backend may return -32002 for a default-preflight replay of an already processed identity. Tests preserve this backend result instead of fabricating unconditional duplicate success.
 - Source -32603 originally poisoned Journal health in backend-submit actor. Actual fake-backend first-error/second-acceptance RED→GREEN is integrated inbd3f8bf.
+
+## Resumed coordinator audit
+
+Actual main HEAD `d7503b9`, clean checkout, no remote. Integrated18=`51cf510`,19=`7ac917b`,21=`d7503b9`; checkboxes await fresh integration evidence and scoped review. Active source-error correction: `/root/task15`, branch `run/20261103-a/source-errors`, checkout `.worktrees/20261103-a-source-errors`, base `d7503b9`; backend canonical errors/data/provenance. Worker16 reviews integrated Case wave before parser work. Worker23 owns task24 recovery/harness. Coordinator owns Custom Case runtime and all ledgers. No accumulated suite or measurement running at resume.
+
+## Custom runtime integration in progress
+
+Current committed main `89d41c4`; uncommitted runtime/interface/query/UI slice belongs to coordinator.
+Compiler5f57c2f/171c7af integrated asbfd4851/89d41c4; eleven isolated compiler tests passed with scoped check/Clippy.
+Source-error dad116b integrated8612f1e. Task24 harness4aa213a integrated82258a0.
+Source-budget7ccc314 integrated as2c12722 after combined rpc_response_budget2 + failure_recovery3 passed. Parsed batch RED→GREEN confirmed; writer/disk histories preserve acknowledged bytes and independent reference survival.
+Custom public focused histories passed: first-lookup window, mixed signature case-key selection + empty methods, atomic capacity/counters, unsupported v0 lookup not consuming a step, transaction-first complete snapshot/commitment gates.
+The first main tracer attempt could not bind loopback under sandbox; ordinary escalation enabled it and it passed. This is a permission result, not a product failure.
+Custom UI RED→GREEN passed; typecheck/build passed. All-target Clippy passed after moving helpers before the test module and documenting the existing lookup seam argument count.
+Reviewers15/23 checked parser/runtime. Confirmed issues corrected: numeric fallback, effective stage filters, exact case-key eligibility, any-selected timeout projection, atomic key/hold admission, bounded selection evidence, complete status projection, source/prepared/boundary lookup selection, and later actual registration evidence.
+Remaining task22 histories: response-loss ledger reactivation, whole-batch old activation, template positive/incomplete scopes, timeout/repeat/confirmation/blockhash primitive composition, native mode and public authoring surfaces.
+No accumulated suite or actual measurement has run for this slice. Tasks22/24 stay open.
+
+Custom runtime slice pre-commit: compiler11, five separate public custom RPC histories, dashboard unit16/typecheck/build, all-target Clippy, budget2 and recovery3 passed. Full accumulated acceptance and remaining Custom histories remain pending.

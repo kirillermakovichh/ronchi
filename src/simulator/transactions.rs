@@ -25,6 +25,7 @@ pub const TRANSACTION_METHODS: [&str; 4] = [
     "getFeeForMessage",
 ];
 const MAX_ACTIVE: usize = 128;
+mod custom;
 mod status;
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -62,6 +63,7 @@ enum Operation {
         Option<std::sync::Arc<crate::cases::Activation>>,
     ),
     StatusView(Box<status::Read>),
+    CustomLookup(Box<status::Read>, Vec<crate::cases::sequence::Selection>),
     ValidateSubmit(SignedTransaction),
     ValidateFee(
         crate::protocol::fees::FeeMessage,
@@ -74,7 +76,7 @@ enum Operation {
         std::sync::Arc<crate::cases::Hold>,
         Option<std::sync::Arc<crate::cases::Activation>>,
     ),
-    Register,
+    Register(Vec<Value>, std::sync::Arc<crate::cases::Hold>),
     Change(Option<crate::cases::Arm>),
     Statuses(Vec<String>, bool),
     Lookup(String, LookupConfig),
@@ -104,6 +106,7 @@ pub(crate) struct Owner {
     holds: std::sync::Arc<crate::cases::HoldPool>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
     backend: bool,
+    upstream_enabled: bool,
     status_activations: BTreeMap<String, std::sync::Weak<crate::cases::Activation>>,
 }
 impl Transactions {
@@ -131,6 +134,7 @@ impl Transactions {
                 holds,
                 credits: BTreeMap::new(),
                 backend: false,
+                upstream_enabled: false,
                 status_activations: BTreeMap::new(),
             },
         )
@@ -321,8 +325,39 @@ impl Transactions {
         })))
         .await
     }
-    pub(crate) async fn register(&self) -> Result<crate::cases::Registration, RpcError> {
-        match self.ask(Operation::Register).await? {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Extends the existing source-attributed lookup seam with immutable custom selections"
+    )]
+    pub(crate) async fn custom_lookup(
+        &self,
+        method: &str,
+        params: &Value,
+        source: Value,
+        reference: Value,
+        activation: std::sync::Arc<crate::cases::Activation>,
+        backend: Option<crate::backend::Client>,
+        selections: Vec<crate::cases::sequence::Selection>,
+    ) -> Result<Value, RpcError> {
+        self.job(Operation::CustomLookup(
+            Box::new(status::Read {
+                method: method.into(),
+                params: params.clone(),
+                source,
+                reference,
+                activation,
+                backend,
+            }),
+            selections,
+        ))
+        .await
+    }
+    pub(crate) async fn register(
+        &self,
+        items: Vec<Value>,
+        hold: std::sync::Arc<crate::cases::Hold>,
+    ) -> Result<crate::cases::Registration, RpcError> {
+        match self.ask(Operation::Register(items, hold)).await? {
             Reply::Registered(registration) => Ok(*registration),
             Reply::Value(_) => Err(RpcError::internal()),
         }
@@ -362,6 +397,9 @@ impl Transactions {
     }
 }
 impl Owner {
+    pub(crate) fn enable_upstream(&mut self) {
+        self.upstream_enabled = true;
+    }
     pub(crate) fn backend_mode(&mut self) {
         self.backend = true;
     }
@@ -435,17 +473,37 @@ impl Owner {
             json!({"request":reference,"signature":signed.signature,"blockhash":signed.blockhash,"lifetime":lifetime,"expiry_claim_eligible":eligible,"source_identity":source}),
         )];
         if let Some(active) = activation {
-            let selected = active
-                .blockhash
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .submission(
-                    &signed.signature,
-                    &signed.blockhash,
-                    lifetime,
-                    eligible && reference["responds"].as_bool().unwrap_or(false),
-                    self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
-                );
+            let now = self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64;
+            let responds = eligible && reference["responds"].as_bool().unwrap_or(false);
+            let selected = if active.custom.is_some() {
+                active
+                    .custom_blockhashes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .values_mut()
+                    .flat_map(|cache| {
+                        cache.submission(
+                            &signed.signature,
+                            &signed.blockhash,
+                            lifetime,
+                            responds,
+                            now,
+                        )
+                    })
+                    .collect()
+            } else {
+                active
+                    .blockhash
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .submission(
+                        &signed.signature,
+                        &signed.blockhash,
+                        lifetime,
+                        responds,
+                        now,
+                    )
+            };
             for (kind, mut data) in selected {
                 data["request"] = reference.clone();
                 facts.push(crate::lab::event(kind, self.started, data));
@@ -1062,20 +1120,50 @@ impl Owner {
             Operation::Submit(signed, reference, hold, activation) => {
                 self.submit(signed, reference, hold, activation).await
             }
-            Operation::Register => {
+            Operation::CustomLookup(read, selections) => {
+                self.custom_lookup(*read, &selections).await
+            }
+            Operation::Register(items, hold) => {
                 self.binding.registration_seq = self
                     .binding
                     .registration_seq
                     .checked_add(1)
                     .ok_or_else(RpcError::internal)?;
+                let real = self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64;
+                let sim = at.as_nanos().min(i64::MAX as u128) as u64;
+                let custom = self.custom_register(&items, real, sim, &hold).await;
                 return Ok(Reply::Registered(Box::new(crate::cases::Registration {
+                    custom,
                     binding: self.binding.clone(),
                     activation: self.activation.clone(),
                     elapsed_ns: self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
                     simulated_ns: at.as_nanos().min(i64::MAX as u128) as u64,
                 })));
             }
-            Operation::Change(args) => {
+            Operation::Change(mut args) => {
+                let custom = if let Some(yaml) = args.as_mut().and_then(|a| a.custom_yaml.take()) {
+                    let mode = if self.backend {
+                        crate::config::Mode::Surfpool
+                    } else {
+                        crate::config::Mode::Simulator
+                    };
+                    let plan = tokio::task::spawn_blocking(move || {
+                        crate::cases::custom::validate(&yaml, mode)
+                    })
+                    .await
+                    .map_err(|_| RpcError::internal())?
+                    .map_err(|error| error.to_rpc())?;
+                    let runtime = crate::cases::sequence::Runtime::new(plan);
+                    if let Some(args) = &mut args {
+                        args.case_id = runtime.artifact["id"]
+                            .as_str()
+                            .expect("validated id")
+                            .into();
+                    }
+                    Some(runtime)
+                } else {
+                    None
+                };
                 let seq = self
                     .binding
                     .registration_seq
@@ -1085,6 +1173,7 @@ impl Owner {
                     registration_seq: seq,
                     policy: args.map(|settings| crate::cases::Policy {
                         revision: seq,
+                        custom: custom.as_ref().map(|r| r.provenance()),
                         activated_elapsed_ns: self
                             .started
                             .elapsed()
@@ -1095,18 +1184,34 @@ impl Owner {
                         settings,
                     }),
                 };
-                self.append(vec![crate::lab::event(
+                let mut facts = vec![];
+                let plan_ref = if let Some(runtime) = &custom {
+                    use base64::Engine as _;
+                    let bytes =
+                        serde_json::to_vec(&runtime.plan).map_err(|_| RpcError::internal())?;
+                    let count = bytes.len().div_ceil(16 * 1024);
+                    for (index, chunk) in bytes.chunks(16 * 1024).enumerate() {
+                        facts.push(crate::lab::event("case.plan",self.started,json!({"policy_revision":seq,"digest":runtime.plan.digest,"chunk":index,"chunks":count,"encoding":"base64-json","payload":base64::engine::general_purpose::STANDARD.encode(chunk)})));
+                    }
+                    Some(
+                        json!({"digest":runtime.plan.digest,"kind":"case.plan","chunks":count,"policy_revision":seq}),
+                    )
+                } else {
+                    None
+                };
+                facts.push(crate::lab::event(
                     "case.changed",
                     self.started,
-                    json!({"binding":binding}),
-                )])
-                .await
-                .map_err(|_| RpcError::internal())?;
+                    json!({"binding":binding,"resolved_plan":plan_ref}),
+                ));
+                self.append(facts).await.map_err(|_| RpcError::internal())?;
                 self.binding = binding.clone();
-                self.activation = binding
-                    .policy
-                    .as_ref()
-                    .map(|_| std::sync::Arc::new(crate::cases::Activation::default()));
+                self.activation = binding.policy.as_ref().map(|_| {
+                    std::sync::Arc::new(crate::cases::Activation {
+                        custom,
+                        ..Default::default()
+                    })
+                });
                 self.policy_status.send_replace(binding.clone());
                 serde_json::to_value(binding).map_err(|_| RpcError::internal())
             }

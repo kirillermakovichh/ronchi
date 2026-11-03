@@ -73,3 +73,26 @@ it("loads mode capabilities when Case controls open", async () => {
   await waitFor(() => expect(call).toHaveBeenCalledWith("api/cases", undefined));
   expect((screen.getByRole("button", {name:"Arm / replace tx-response-lost"}) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it("requires the current YAML plan before activating a Custom Case", async () => {
+  const api = new Api("L4");
+  const call = vi.spyOn(api, "call").mockImplementation(async (path: string) => {
+    if (path === "api/case/validate") return { result: { digest: "pinned", artifact: { id: "custom.test" } } };
+    return { result: [] };
+  });
+  const changed = vi.fn();
+  render(<Controls api={api} status={{lab_id:"L4",name:"custom",state:"ready",health:"healthy",journal_state:"open",rpc_address:null,active_case:null,configuration:{mode:"simulator"},snapshot_seq:1}} changed={changed}/>);
+  await userEvent.click(screen.getByText(/Case controls/));
+  const input=screen.getByRole("textbox",{name:"Custom Case YAML"});
+  const activate=screen.getByRole("button",{name:"Activate Custom Case"}) as HTMLButtonElement;
+  expect(activate.disabled).toBe(true);
+  await userEvent.type(input,"schema: ronchi.case/v1");
+  await userEvent.click(screen.getByRole("button",{name:"Validate Custom Case"}));
+  await waitFor(()=>expect(activate.disabled).toBe(false));
+  expect(screen.getByLabelText("Resolved Custom Case plan").textContent).toContain("pinned");
+  await userEvent.click(activate);
+  expect(call).toHaveBeenLastCalledWith("api/case/arm",{case_id:"custom",custom_yaml:"schema: ronchi.case/v1"});
+  expect(changed).toHaveBeenCalledOnce();
+  await userEvent.type(input,"\nrevision: 2");
+  expect(activate.disabled).toBe(true);
+});

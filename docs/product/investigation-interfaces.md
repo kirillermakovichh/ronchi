@@ -64,7 +64,8 @@ The sections below retain the full accepted contract.
 | `lab.status` | `ronchi status` | `ronchi_lab_status` | Inspect readiness, mode, endpoints, Journal state, health, and active Case |
 | `lab.down` | `ronchi down` | `ronchi_lab_down` | Stop owned resources and finalize the Journal |
 | `case.list` | `ronchi case list` | `ronchi_case_list` | List available built-in Cases and mode requirements |
-| `case.arm` | `ronchi case arm <case>` | `ronchi_case_arm` | Arm or replace the active Case under the lifecycle contract |
+| `case.arm` | `ronchi case arm <case>` / `ronchi case activate <file>` | `ronchi_case_arm` | Arm or replace a built-in or validated Custom Case |
+| `case.validate` | `ronchi case validate <file> --mode <mode>` | `ronchi_case_validate` | Inspect a bounded Custom Case plan without effects |
 | `case.disarm` | `ronchi case disarm` | `ronchi_case_disarm` | Stop selecting the policy for new requests |
 | `check.observe` | `ronchi check observe <check-id>` | `ronchi_check_observe` | Collect bounded observations from a configured source into a live Journal |
 | `check.evaluate` | `ronchi check evaluate <check-id>` | `ronchi_check_evaluate` | Evaluate retained evidence at a pinned snapshot without contacting the source |
@@ -112,7 +113,8 @@ Unknown arm keys return a structured `invalid_argument` without changing policy.
 Disarm accepts an empty body or `{}` and rejects supplied settings.
 Transient control-queue capacity returns `state_conflict`; Journal failure returns a product error and fails the Lab.
 The CLI uses these routes and the same core mutation operation.
-`schema case.list`, `schema case.arm`, and `schema case.disarm` work offline.
+`schema case.list`, `schema case.arm`, `schema case.disarm`, and `schema case.validate` work offline.
+The Custom Case catalog and retained plan contract live in [Custom Cases](custom-cases.md#prototype-authoring-and-inspection).
 Status exposes `active_case`, `case_registration_seq`, and bounded `held_effects` with original policy revision and remaining real milliseconds.
 MCP exposes these controls through the operation names above.
 

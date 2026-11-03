@@ -541,6 +541,7 @@ impl Request {
                 crate::cases::status::finding_definition(),
                 crate::cases::timeout::finding_definition(),
                 crate::cases::blockhash::finding_definition(),
+                "lookup-hidden-then-queried@1",
             ))
             .expect("typed request serializes"),
         )

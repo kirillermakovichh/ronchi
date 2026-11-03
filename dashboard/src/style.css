@@ -368,3 +368,15 @@ code {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+.controls textarea {
+  display: block;
+  width: min(100%, 48rem);
+  min-height: 10rem;
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+  background: #171b1d;
+  color: inherit;
+  border: 1px solid var(--line);
+}

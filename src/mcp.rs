@@ -48,6 +48,13 @@ struct Down {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ValidateCase {
+    yaml: String,
+    #[serde(default)]
+    mode: config::Mode,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Arm {
     lab_id: String,
     arguments: cases::Arm,
@@ -180,6 +187,7 @@ fn tools() -> &'static [Tool] {
             "List maintained Cases and mode limits offline without a Lab.",
             true,
         ),
+        tool::<ValidateCase>("ronchi_case_validate","Validate a bounded YAML Custom Case and inspect its resolved versioned plan without effects.",true),
         tool::<Arm>(
             "ronchi_case_arm",
             "Arm or replace the continuing Case on an explicit live Lab. Repetition creates a new revision; inspect status after uncertain completion.",
@@ -231,9 +239,22 @@ impl Adapter {
         cancel: CancellationToken,
     ) -> Result<Value, query::Error> {
         match tool {
+            "ronchi_case_validate" => {
+                let input: ValidateCase = parse(input)?;
+                match cases::custom::validate(&input.yaml, input.mode) {
+                    Ok(plan) => {
+                        Ok(json!({"contract_version":1,"request_id":request_id,"result":plan}))
+                    }
+                    Err(error) => {
+                        Ok(json!({"contract_version":1,"request_id":request_id,"error":error}))
+                    }
+                }
+            }
             "ronchi_case_list" => {
                 let _: Empty = parse(input)?;
-                Ok(json!({"contract_version":1,"request_id":request_id,"result":cases::catalog()}))
+                Ok(
+                    json!({"contract_version":1,"request_id":request_id,"result":cases::catalog(),"custom":cases::custom::catalog()}),
+                )
             }
             "ronchi_lab_up" => {
                 let input: Up = parse(input)?;

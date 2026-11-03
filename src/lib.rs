@@ -170,6 +170,14 @@ enum ReferenceCommand {
 enum CaseCommand {
     /// List available built-in Cases offline
     List,
+    /// Validate a bounded Custom Case without starting or contacting a Lab
+    Validate {
+        file: PathBuf,
+        #[arg(long, default_value = "simulator")]
+        mode: Mode,
+    },
+    /// Activate one validated Custom Case on the selected live Lab
+    Activate { file: PathBuf },
     /// Arm or replace the continuing policy without restarting the Lab
     Arm {
         case: String,
@@ -204,6 +212,7 @@ struct CatalogReply {
     contract_version: u32,
     request_id: String,
     result: Vec<cases::CatalogEntry>,
+    custom: serde_json::Value,
 }
 #[derive(JsonSchema)]
 #[allow(dead_code)]
@@ -462,6 +471,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 "lab.delete" => schemars::schema_for!(maintenance::DeleteRequest),
                 "lab.export" => schemars::schema_for!(maintenance::ExportRequest),
                 "case.arm" => schemars::schema_for!(CaseRequest),
+                "case.validate" => schemars::schema_for!(cases::custom::Artifact),
                 _ => schemars::schema_for!(StatusRequest),
             };
             let response = if operation.starts_with("investigate.") || operation == "check.evaluate"
@@ -490,6 +500,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     checks::reference::definition("http://127.0.0.1:9001/checks/observe".into()),
                 )
                 .expect("typed fixture serializes");
+            }
+            if operation.starts_with("case.") {
+                value["custom_catalog"] = cases::custom::catalog();
+                value["custom_plan_schema"] =
+                    serde_json::to_value(schemars::schema_for!(cases::custom::Plan))
+                        .expect("typed schema serializes");
+                value["custom_error_schema"] =
+                    serde_json::to_value(schemars::schema_for!(cases::custom::ValidationError))
+                        .expect("typed schema serializes");
             }
             if operation.starts_with("investigate.") {
                 value["finding_schema"] =
@@ -653,6 +672,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     contract_version: 1,
                     request_id: format!("cli-{}", std::process::id()),
                     result: cases::catalog(),
+                    custom: cases::custom::catalog(),
                 };
                 let text = catalog
                     .result
@@ -666,11 +686,46 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     Err(_) => 6,
                 };
             }
+            if let CaseCommand::Validate { file, mode } = operation {
+                let yaml = match cases::read_artifact(&file) {
+                    Ok(yaml) => yaml,
+                    Err(error) => return render_lab_error(cli.json, error),
+                };
+                let result = cases::custom::validate(&yaml, mode);
+                let (value, text, exit) = match result {
+                    Ok(plan) => (
+                        serde_json::json!({"contract_version":1,"result":plan}),
+                        "Custom Case is valid".into(),
+                        0,
+                    ),
+                    Err(error) => (
+                        serde_json::json!({"contract_version":1,"error":error}),
+                        error.message.clone(),
+                        2,
+                    ),
+                };
+                return match write_output(cli.json, &value, &text, exit != 0) {
+                    Ok(()) => exit,
+                    Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
+                    Err(_) => 6,
+                };
+            }
             let root = match project(cli.project.as_deref()) {
                 Ok(root) => root,
                 Err(error) => return render_lab_error(cli.json, error),
             };
             let args = match operation {
+                CaseCommand::Activate { file } => {
+                    let yaml = match cases::read_artifact(&file) {
+                        Ok(yaml) => yaml,
+                        Err(error) => return render_lab_error(cli.json, error),
+                    };
+                    Some(cases::Arm {
+                        case_id: "custom".into(),
+                        custom_yaml: Some(yaml),
+                        ..Default::default()
+                    })
+                }
                 CaseCommand::Arm {
                     case,
                     hold_ms,
@@ -684,6 +739,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     blockhash_commitment,
                 } => Some(cases::Arm {
                     case_id: case,
+                    custom_yaml: None,
                     hold_ms,
                     max_held,
                     signatures,
