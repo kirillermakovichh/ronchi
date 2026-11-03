@@ -82,7 +82,7 @@ impl Store {
                     }
                 }
             })?;
-        let key = match opened.await.map_err(|_| Error::Storage)? {
+        let key = match opened.await.unwrap_or(Err(Error::Storage)) {
             Ok(key) => key,
             Err(error) => {
                 tokio::task::spawn_blocking(move || thread.join())
@@ -319,7 +319,7 @@ impl Store {
     }
     pub(super) async fn recover(&self) -> Result<Option<super::sender::Active>, Error> {
         self.call(true,|db|{
-            if let Some(active)=db.active()?{match active.state.as_str(){"prepared"=>db.record(&active.id,"prepared","recovery_prepared",json!({"action":"query_saved_identity_before_send"}))?,"submitting"=>db.record(&active.id,"reconciling","recovery_unknown",json!({"network_result":"unknown","client_outcome":{"availability":"unavailable"}}))?,_=>()}}
+            if let Some(active)=db.active()?{match active.state.as_str(){"prepared"=>db.record(&active.id,"prepared","recovery_prepared",json!({"planned_action":"query_saved_identity_before_send"}))?,"submitting"=>db.record(&active.id,"reconciling","recovery_unknown",json!({"network_result":"unknown","client_outcome":{"availability":"unavailable"}}))?,_=>()}}
             db.active()
         }).await
     }

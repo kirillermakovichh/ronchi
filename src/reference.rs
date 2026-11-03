@@ -32,6 +32,7 @@ impl IntentInput {
     fn digest(&self) -> Result<String, Error> {
         if !crate::workspace::identifier(&self.intent_id)
             || self.amount_lamports == 0
+            || self.recipient.len() > 44
             || bs58::decode(&self.recipient)
                 .into_vec()
                 .ok()
@@ -146,10 +147,11 @@ async fn public_binding(ws: &crate::workspace::Workspace, id: &str) -> Result<Bi
         .response()
         .and_then(Value::as_str)
         .filter(|s| {
-            bs58::decode(s)
-                .into_vec()
-                .ok()
-                .is_some_and(|v| v.len() == 32)
+            s.len() <= 44
+                && bs58::decode(s)
+                    .into_vec()
+                    .ok()
+                    .is_some_and(|v| v.len() == 32)
         })
         .ok_or(Error::Unavailable)?;
     Ok(Binding {
@@ -190,7 +192,6 @@ pub async fn run(
             || args
                 .horizon_seconds
                 .is_some_and(|n| n != saved.horizon_seconds)
-            || saved.lab_id != id
         {
             return Err(Error::Conflict);
         }
@@ -201,6 +202,7 @@ pub async fn run(
         binding.horizon_seconds = args.horizon_seconds.unwrap_or(60);
         binding
     };
+    let requested_mismatch = binding.lab_id != id;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let (store, owner) = Store::open(directory.clone(), binding.clone()).await?;
@@ -211,7 +213,13 @@ pub async fn run(
             return Err(Error::Unavailable);
         }
     };
-    let address = listener.local_addr()?;
+    let address = match listener.local_addr() {
+        Ok(address) => address,
+        Err(_) => {
+            owner.close().await?;
+            return Err(Error::Storage);
+        }
+    };
     let stop = tokio_util::sync::CancellationToken::new();
     let force = stop.clone();
     let mut worker = tokio::spawn(sender::run(
@@ -221,6 +229,7 @@ pub async fn run(
         project,
         directory,
         stop.clone(),
+        requested_mismatch,
     ));
     let mut server = tokio::spawn(crate::network::serve(
         listener,
@@ -232,7 +241,7 @@ pub async fn run(
         stop.clone(),
         force,
     ));
-    let ready = serde_json::json!({"contract_version":1,"operation":"reference.relayer","lab_id":binding.lab_id,"result":{"listen":address,"name":args.name,"profile":binding.profile,"signer":bs58::encode(owner.key.verifying_key().to_bytes()).into_string(),"submission":"enabled"}});
+    let ready = serde_json::json!({"contract_version":1,"operation":"reference.relayer","lab_id":binding.lab_id,"result":{"listen":address,"name":args.name,"profile":binding.profile,"signer":bs58::encode(owner.key.verifying_key().to_bytes()).into_string(),"submission":if requested_mismatch{"blocked"}else{"enabled"},"source_gap":if requested_mismatch{Some("requested_lab_identity_mismatch")}else{None}}});
     let output = if json_output {
         writeln!(std::io::stdout().lock(), "{ready}")
     } else {
@@ -241,7 +250,7 @@ pub async fn run(
             "Reference relayer {} | {} | Lab {}",
             args.name,
             address,
-            id
+            binding.lab_id
         )
     };
     if output.is_err() {

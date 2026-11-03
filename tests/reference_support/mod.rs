@@ -68,18 +68,30 @@ impl Lab {
         std::fs::write(self.reference_dir().join("barrier.release"), []).unwrap();
     }
     pub fn start(&self, profile: &str, barrier: Option<&str>) -> Relayer {
+        self.start_options(profile, barrier, None, None)
+    }
+    pub fn start_options(
+        &self,
+        profile: &str,
+        barrier: Option<&str>,
+        horizon: Option<u32>,
+        id: Option<&str>,
+    ) -> Relayer {
         for file in ["barrier.json", "barrier.release"] {
             let _ = std::fs::remove_file(self.reference_dir().join(file));
         }
         let mut command = base(self.path());
         command.args([
             "--lab-id",
-            &self.id,
+            id.unwrap_or(&self.id),
             "reference",
             "relayer",
             "--profile",
             profile,
         ]);
+        if let Some(horizon) = horizon {
+            command.args(["--horizon-seconds", &horizon.to_string()]);
+        }
         if let Some(barrier) = barrier {
             command.env("RONCHI_REFERENCE_TEST_BARRIER", barrier);
         }

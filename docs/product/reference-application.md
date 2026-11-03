@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implementation in progress. Durable intake, foreground execution, submission, and profiles are implemented; the observation endpoint is implemented; full crash acceptance remains in the task queue.
+Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection/evaluation and Demo orchestration remain tasks 11–13.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -24,8 +24,10 @@ The immutable Lab ID is required; the default reference workspace name is `refer
 The process uses `ronchi/reference/<name>/relayer.sqlite` in the selected Project Workspace.
 Its separate owner lock prevents two relayer processes from writing this database.
 One bounded 16-command storage owner serializes reads and writes outside Tokio workers.
+Queue saturation rejects HTTP admission; a worker/storage failure stops new actions and preserves committed state for explicit recovery.
 SQLite uses version 1, WAL, FULL synchronization, foreign keys, short transactions, and automatic checkpoints.
-The database has a 64 MiB page ceiling and retains at most 128 intents with one active intent.
+The database has a 16,384-page ceiling (64 MiB at the default 4 KiB page size) and retains at most 128 intents with one active intent.
+WAL files are separate; automatic checkpoints and short application snapshots control their reuse.
 A private 32-byte demo seed lives in `signing.seed` with mode `0600` inside a `0700` reference directory.
 The public readiness signer is only its public key.
 
@@ -51,7 +53,8 @@ It commits exact base64 bytes, signature, local blockhash, context slot, and las
 It then commits attempt-start before sending `sendTransaction` with explicit `skipPreflight:true` and `maxRetries:0`.
 Each RPC owns its connection task; timeout or shutdown cancels and joins that task.
 No SQL transaction spans an HTTP call.
-Client response, actual 5-second timeout, transport error, and unknown crash outcome remain separate observations.
+Client response, actual client timeout, transport error, and unknown crash outcome remain separate observations.
+Each client RPC deadline is capped at 5 seconds and the remaining original intent horizon.
 A null status and submission acceptance leave the intent reconciling.
 Only a positive finalized status with `err:null` permits `succeeded`.
 A positive status error permits `failed`; missing/expired validity alone does not.
@@ -80,6 +83,7 @@ The same SQLite read transaction supplies the intent row and its identities, att
 `snapshot_relation:application_only` explicitly separates this application snapshot from the caller's Lab evidence prefix.
 The endpoint does not send RPC, notify the worker, append observations, mutate state, or return a Verdict.
 Signing material and exact signed bytes are excluded from public responses.
+`wire_digest` is SHA-256 over the retained canonical base64 UTF-8 representation; it is not the Lab raw-wire digest.
 A direct HTTP test of this source does not implement the generic collector in task 11.
 
 ## Reference Behavior Profiles
@@ -298,10 +302,44 @@ A missing signature mapping, lost evidence, or unknown final boundary cannot bec
 Real native SOL or SPL execution remains outside this default simulator-based reference incident.
 It requires the optional [Surfpool execution mode](../adr/0013-managed-surfpool-execution-mode.md) and separate execution-backed requirements.
 
-## Implementation acceptance
+## Verified recovery histories
 
-Exercise both profiles through actual HTTP RPC requests and the generic Check adapter.
-Crash the relayer before submission, after attempt-start commit, and after RPC acceptance before local result commit.
-Reopen the file-backed database and verify idempotent intent intake, preserved bytes/signature, and evidence-backed recovery.
-Verify that Check facts cannot alter the simulator history or manufacture an economic execution claim.
-The implementation must establish these outcomes; this design document does not report passing tests.
+The acceptance suite runs separate native Lab and relayer processes, public HTTP RPC/control, and temporary file-backed relayer databases.
+It verifies concurrent idempotent intake and payload conflict, immutable profile/horizon, private signing material, and both policies under actual response loss.
+A retained client timeout comes from the client timer, not a server withholding record.
+A null status remains uncertainty; only observed finalized status permits simulated-lifecycle success.
+Unsafe prepares exactly one replacement, including at an unchanged local blockhash.
+A real SQLite identity-insert failure prevents any submission and fails the relayer process.
+
+| Observed crash boundary | Recovery behavior verified |
+| --- | --- |
+| Prepared commit, before send | Reopen exact bytes/signature; query saved identity and verify validity before the first send |
+| Attempt-start commit, before send | Reconcile an unknown network outcome; create no timeout or replacement; finish unresolved at the original short horizon |
+| Public RPC acceptance, before local result commit | Retain the unknown attempt result; reconcile original-signature finality without inventing a Client Outcome |
+| Replacement prepared commit | Retain both identities and original mapping; query/send the saved replacement; repeated restarts create no third identity |
+| Terminal commit | Return the same terminal snapshot without new RPC work |
+
+Debug builds expose a closed test barrier set through `RONCHI_REFERENCE_TEST_BARRIER`.
+Phases are `before_prepare_commit`, `prepared`, `attempt_start`, `rpc_result`, `replacement_prepared`, and `terminal`.
+A barrier atomically writes `barrier.json` in the private reference directory and waits for `barrier.release` or shutdown.
+These development barriers execute no supplied code and are ignored in release builds.
+Read-only HTTP observations do not release them.
+Tests observe these markers before SIGKILL and reopen the same database in a new process.
+They do not use an arbitrary sleep as the crash-boundary oracle.
+
+Recovery keeps the stored absolute acceptance deadline.
+A caller cannot change the profile or horizon when reopening a database.
+An unavailable original Lab or a mismatched public genesis produces unresolved state with a source gap.
+If `--lab-id` differs from the stored identity, readiness declares `submission:blocked` and `source_gap:requested_lab_identity_mismatch`.
+The API retains the original Lab mapping; the worker never redirects into the requested replacement Lab.
+Tests cover a new Lab reusing the exact RPC socket address with both old and new ID selections.
+A modified expected-genesis fixture also prevents submission.
+SIGTERM during an in-flight submission joins the transport, keeps the attempt outcome unknown, and leaves the Lab healthy.
+A subsequent process reconciles that original identity without treating shutdown as a client timeout.
+
+Schema 1 is the only supported reference database version.
+Private seed loss, unsupported schema, or storage failure requires explicit recovery; the process does not regenerate an existing signing identity or reset the database.
+The fixture is one legacy inert signed message; it does not execute a SOL/SPL transfer.
+Process-crash histories do not establish power-loss guarantees beyond SQLite FULL and the local filesystem contract.
+Linux/Windows process behavior has not been verified by this slice.
+The full Demo must later use the generic adapter and evaluator from tasks 11–12 through their public interfaces.

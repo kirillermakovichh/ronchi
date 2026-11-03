@@ -258,7 +258,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 10. Durable reference relayer
 
-- [ ] **Accept:** Run the bundled child mode with idempotent intent intake, durable signed identity, public state/observation endpoints, and bounded unsafe/resilient policies.
+- [x] **Accept:** Run the bundled child mode with idempotent intent intake, durable signed identity, public state/observation endpoints, and bounded unsafe/resilient policies.
 - **Verify:** Crash before send, after attempt-start, after acceptance, and before result commit; reopen storage and verify preserved original identity and source facts.
 - **Dependencies:** 5, 7. **Scope:** Medium. **Likely files:** `src/reference.rs`, `src/reference/store.rs`, `src/reference/sender.rs`, `src/reference/http.rs`, `tests/reference_recovery.rs`.
 - **Source:** [Reference Application](../docs/product/reference-application.md).
@@ -289,8 +289,14 @@ Checkpoints record results and do not require another approval interview.
 
 #### 10d. Crash recovery and completion review
 
-- [ ] Verify prepared, attempt-start, accepted-before-result, replacement-prepared, and terminal crash boundaries with new processes; preserve horizons and Lab identity.
+- [x] Verify prepared, attempt-start, accepted-before-result, replacement-prepared, and terminal crash boundaries with new processes; preserve horizons and Lab identity.
 - **Verify:** Profile mismatch, unavailable/replaced Lab, graceful relayer-only shutdown, all four locked checks, scoped self-review, and current implementation docs.
+
+- **Verified 10d:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (131 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Focused `cargo test --locked --test reference_recovery --test reference_storage` and individual crash/source histories also passed. The reference suite has 17 native process/HTTP histories and one file-backed storage history.
+- **Crash evidence:** Private debug barriers establish prepared, attempt-start, RPC-result-before-local-commit, replacement-prepared, and terminal boundaries before SIGKILL. New processes reopen the same SQLite files and preserve exact signed bytes/signatures, original/tracked mapping, profile, and absolute deadline. A never-sent unknown attempt does not become a timeout or replacement; an already accepted unknown attempt reconciles the original. Repeated unsafe restarts retain two identities and create no third. Terminal restart performs no new RPC.
+- **Source and horizon:** Expired prepared recovery remains at the original deadline and submits nothing. Both old/new ID selections against a replacement Lab on the same RPC socket produce unresolved source gaps without redirecting the intent. A changed expected-genesis fixture also prevents submission. SIGTERM during an in-flight HTTP submission joins transport, leaves the Lab healthy, and recovers the original unknown outcome without inventing a Client Outcome.
+- **Self-review:** The final scoped review checked public-only Lab access, immutable binding, private key ownership, canonical intake, transaction boundaries, commit-before-send, first ambiguity, original-signature immutability, bounded generations/attempts, terminal evidence atomicity, honest availability, read-only snapshots, deadline preservation, queue/body/response bounds, source replacement, and task/process cleanup. Startup failures join storage ownership; base58 inputs are length-bounded before decoding. No confirmed blocking defect remains in this slice.
+- **Boundary:** One legacy inert simulator fixture, one active intent, no economic execution claim. Reference schema 1, at most 128 retained intents and 128 observations per intent, two identities and one attempt per identity. Retained signing bytes stay local; only mappings and metadata are public. Generic Check collection/evaluation, Demo orchestration, SDK, dashboard, MCP, and Surfpool remain unimplemented here. Native histories ran on macOS; no Linux/Windows or power-loss verification claim follows. Task 10 is complete; task 11 is next.
 
 ### 11. Public Check collection
 

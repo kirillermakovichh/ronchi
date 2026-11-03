@@ -35,6 +35,9 @@ pub(super) fn build(
     let blockhash = latest["value"]["blockhash"]
         .as_str()
         .ok_or(Error::Unavailable)?;
+    if blockhash.len() > 44 {
+        return Err(Error::Unavailable);
+    }
     let hash = bs58::decode(blockhash)
         .into_vec()
         .map_err(|_| Error::Unavailable)?;
@@ -181,6 +184,7 @@ pub(super) async fn run(
     project: PathBuf,
     directory: PathBuf,
     stop: CancellationToken,
+    requested_mismatch: bool,
 ) -> Result<(), Error> {
     let recovered = store.recover().await?;
     let mut precheck = recovered
@@ -197,6 +201,17 @@ pub(super) async fn run(
         if active.deadline <= now_ms() || active.observations >= 124 {
             store.record(&active.id,"unresolved","source_gap",json!({"reason":if active.deadline<=now_ms(){"original_horizon_ended"}else{"observation_limit"}})).await?;
             barrier(&directory, "terminal", &stop).await?;
+            continue;
+        }
+        if requested_mismatch {
+            store
+                .record(
+                    &active.id,
+                    "unresolved",
+                    "source_gap",
+                    json!({"reason":"requested_lab_identity_mismatch"}),
+                )
+                .await?;
             continue;
         }
         // Revalidate immutable Lab and public local genesis before each unit of RPC work.
