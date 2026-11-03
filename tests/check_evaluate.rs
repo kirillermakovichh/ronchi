@@ -85,7 +85,7 @@ impl History {
                     arguments: Arguments {
                         snapshot_seq: Some(snapshot),
                         evaluation: Some(Selection {
-                            check_id: "state".into(),
+                            check_id: self.definition.check_id.clone(),
                             definition_version: 1,
                             definition_digest: None,
                             scope: Scope {
@@ -247,4 +247,104 @@ async fn operational_limits_and_cancellation_remain_query_errors() {
             .as_ref(),
         "analysis_incomplete"
     );
+}
+
+fn reference_observation(h: &mut History, intent: Value, observed_at: &str) -> u64 {
+    let invocation = format!("I{}", h.seq);
+    let scope = json!({"intent_ids":["W1"]});
+    let request = json!({"contract_version":1,"invocation_id":invocation,"check_id":h.definition.check_id,"lab_id":"L1","snapshot_seq":h.seq,"scope":scope,"facts":["intent"],"deadline":"2026-11-03T00:00:05Z"});
+    let start = h.event(
+        "check.invocation_started",
+        "ronchi",
+        json!({"definition":h.definition.public_definition(),"source_request":request}),
+    );
+    h.event("check.observation","application",json!({"check_id":h.definition.check_id,"version":1,"request_id":invocation,"scope":scope,"cause_refs":[{"lab_id":"L1","event_seq":start}],"retention":"complete_validated_selection","payload":{"contract_version":1,"invocation_id":invocation,"source":"reference-relayer","schema_version":1,"observed_at":observed_at,"revision":"1","facts":{"intent":{"availability":"available","value":intent}}}}))
+}
+fn reference_intent() -> Value {
+    json!({"intent_id":"W1","state":"prepared","original_signature":{"availability":"available","value":"A"},"prepared_identities":{"availability":"available","value":[{"signature":"A"}]},"accepted_at_ms":1000,"deadline_ms":61000,"terminal_at_ms":{"availability":"unavailable"},"time_basis":"application_unix_ms","prepared_set_complete":true,"interval_closed":false})
+}
+#[tokio::test]
+async fn reference_rules_require_full_identity_history_terminal_evidence_and_declared_time_basis() {
+    for scenario in [
+        "early",
+        "two",
+        "same",
+        "succeeded",
+        "unresolved_late",
+        "unresolved_early",
+        "partial",
+        "wrong_intent",
+        "redacted",
+        "wrong_time",
+    ] {
+        let mut h = History::new();
+        h.definition = ronchi::checks::reference::definition("http://127.0.0.1:1/unused".into());
+        let mut intent = reference_intent();
+        let mut at = "1970-01-01T00:00:02Z";
+        match scenario {
+            "two" => {
+                intent["prepared_identities"]["value"] =
+                    json!([{"signature":"A"},{"signature":"B"}])
+            }
+            "same" => {
+                intent["state"] = json!("unresolved");
+                intent["prepared_identities"]["value"] =
+                    json!([{"signature":"A"},{"signature":"A"}]);
+                intent["interval_closed"] = json!(true);
+            }
+            "succeeded" => {
+                intent["state"] = json!("succeeded");
+                intent["interval_closed"] = json!(true);
+                intent["terminal_at_ms"] = json!({"availability":"available","value":2000});
+            }
+            "unresolved_late" => {
+                intent["state"] = json!("unresolved");
+                intent["interval_closed"] = json!(true);
+                intent["terminal_at_ms"] = json!({"availability":"available","value":62000});
+                at = "1970-01-01T00:01:02Z";
+            }
+            "unresolved_early" => {
+                intent["state"] = json!("unresolved");
+                intent["interval_closed"] = json!(true);
+                intent["terminal_at_ms"] = json!({"availability":"available","value":2000});
+            }
+            "partial" => {
+                intent["interval_closed"] = json!(true);
+                intent["prepared_set_complete"] = json!(false);
+            }
+            "wrong_intent" => {
+                intent["intent_id"] = json!("W2");
+                intent["prepared_identities"]["value"] =
+                    json!([{"signature":"A"},{"signature":"B"}]);
+            }
+            "redacted" => {
+                intent["interval_closed"] = json!(true);
+                intent["prepared_identities"] = json!({"availability":"redacted"});
+            }
+            "wrong_time" => {
+                intent["accepted_at_ms"] = json!(100000);
+                intent["state"] = json!("unresolved");
+                intent["interval_closed"] = json!(true);
+                at = "1970-01-01T00:01:02Z";
+            }
+            _ => (),
+        }
+        let snapshot = reference_observation(&mut h, intent, at);
+        let result = h.evaluate(snapshot).await.result;
+        match scenario {
+            "two" => assert_eq!(result["requirements"][0]["verdict"], "fail", "{result}"),
+            "same" => assert_eq!(result["requirements"][0]["verdict"], "pass", "{result}"),
+            "unresolved_late" => {
+                assert_eq!(result["requirements"][2]["verdict"], "fail", "{result}")
+            }
+            "succeeded" => {
+                assert_eq!(
+                    result["requirements"][1]["verdict"], "inconclusive",
+                    "{result}"
+                );
+                assert_eq!(result["requirements"][2]["verdict"], "pass", "{result}");
+            }
+            _ => assert_eq!(result["verdict"], "inconclusive", "{scenario}: {result}"),
+        }
+    }
 }

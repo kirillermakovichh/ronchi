@@ -294,6 +294,19 @@ impl Db {
             }
             value[field] = available(json!(rows));
         }
+        let closed = matches!(
+            value["state"].as_str(),
+            Some("succeeded" | "failed" | "unresolved")
+        );
+        let terminal_at: Option<i64> = if closed {
+            tx.query_row("SELECT observed_at_ms FROM observations WHERE intent_id=?1 ORDER BY observation_id DESC LIMIT 1",[id],|r|r.get(0)).optional()?
+        } else {
+            None
+        };
+        value["prepared_set_complete"] = json!(true);
+        value["interval_closed"] = json!(closed);
+        value["terminal_at_ms"] = optional(terminal_at.map(|at| json!(at)));
+        value["time_basis"] = json!("application_unix_ms");
         value["availability"] = json!("available");
         tx.commit()?;
         Ok(value)

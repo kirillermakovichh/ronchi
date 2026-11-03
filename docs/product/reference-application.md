@@ -294,6 +294,15 @@ The Check response identifies `original_signature`, `tracked_signature`, prepare
 It reports these as application-source facts, not trusted simulator transitions or SDK Application Checkpoints.
 The optional SDK is unnecessary for this path.
 
+The implemented source additionally reports `prepared_set_complete`, `interval_closed`, `terminal_at_ms`, and `time_basis:application_unix_ms`.
+The prepared set is the full committed inventory from the same SQLite snapshot.
+A terminal interval remains closed after recovery because terminal intents do not resume submission.
+`terminal_at_ms` comes from the retained terminal observation; it is unavailable before terminal commit.
+Acceptance, deadline, terminal time, and source `observed_at` use the declared application UTC clock.
+The evaluator does not infer a global causal order from this coordinate.
+The maintained [reference Check definition](../../src/checks/reference.rs) expresses these requirements through the generic typed mechanism.
+The native acceptance test collects both profiles through `check.observe` and replays evaluation after the source and Lab stop.
+
 The Demo configures three versioned requirements: at most one prepared identity per intent, terminal success tied to original-signature finality, and resolution within the declared horizon.
 The unsafe profile must fail the identity requirement after its second committed preparation.
 The resilient profile can pass only when observed intent success and committed simulator evidence establish finality for its original signature, with required complete evidence.

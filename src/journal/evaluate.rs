@@ -328,16 +328,29 @@ impl JournalReader {
                         }
                     }
                 };
-                let pass = requirement
-                    .pass
-                    .evaluate(&definition.facts, &response.facts, &join);
-                let fail = requirement
-                    .fail
-                    .evaluate(&definition.facts, &response.facts, &join);
+                let observed_at_ms = time::OffsetDateTime::parse(
+                    &response.observed_at,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .ok()
+                .and_then(|at| i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok());
+                let context = crate::checks::rules::Context {
+                    finality: &join,
+                    scope: Some(&selection.scope),
+                    observed_at_ms,
+                };
+                let pass =
+                    requirement
+                        .pass
+                        .evaluate_in(&definition.facts, &response.facts, &context);
+                let fail =
+                    requirement
+                        .fail
+                        .evaluate_in(&definition.facts, &response.facts, &context);
                 let complete =
                     requirement
                         .complete
-                        .evaluate(&definition.facts, &response.facts, &join);
+                        .evaluate_in(&definition.facts, &response.facts, &context);
                 if let Some(error) = join_error.into_inner() {
                     return Err(error);
                 }

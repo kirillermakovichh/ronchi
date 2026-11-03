@@ -1,6 +1,6 @@
 # Checks and Verdicts
 
-Status: generic HTTP Check collection is implemented (task 11). Typed requirements and the retained evaluation core are implemented (tasks 12a–12b). Reference requirements and the public evaluation operation remain task 12 work.
+Status: generic HTTP Check collection is implemented (task 11). Typed requirements and the retained evaluation core are implemented (tasks 12a–12b). Reference requirements are implemented (task 12c). The dedicated public evaluation operation remains task 12d work.
 These are reversible defaults for the first implementation.
 The [evidence contract](evidence-and-findings.md) owns Journal facts and Findings.
 This document owns external application observations and their bounded outcome evaluation.
@@ -134,7 +134,7 @@ This example requires declared decimal `balance` and boolean `terminal` facts.
 Predicates use externally tagged objects to preserve arbitrary-precision JSON literals through serde.
 Supported forms are `compare`, `compare_fields`, `in`, `count`, `all`, `any`, and a retained `journal_finality` join predicate.
 The finality predicate consumes a supplied retained-fact resolver; it never performs RPC itself.
-The Journal resolver and public Verdict operation are not implemented at this slice boundary.
+The retained resolver is implemented. The public CLI operation remains task 12d at this checkpoint.
 Relations are `eq`, `ne`, `lt`, `le`, `gt`, and `ge`.
 Ordering requires integer or decimal fields.
 `compare_fields` requires identical declared types, units, and enum schemas.
@@ -164,6 +164,8 @@ HTTP-only collection and the effective 32 KiB response ceiling remain unchanged.
 
 The shared query reader supports read-only `check.evaluate` requests with `arguments.evaluation`.
 The selection supplies `check_id`, `definition_version`, optional `definition_digest`, and exact normalized Check scope.
+The initial evaluator accepts exactly one intent or one signature per selection.
+It rejects multi-identity scopes instead of passing a scope from only one observed member.
 `arguments.snapshot_seq` is mandatory.
 The core resolves a public source definition from a committed invocation start through that watermark.
 It does not read current runtime configuration or require its Authorization value.
@@ -200,6 +202,39 @@ Serialized retained consistency values and keys are additionally bounded to 256 
 Exceeding a budget returns `analysis_incomplete`, with no success-shaped partial Verdict.
 No HTTP, writer admission, or source process is part of this core.
 Legacy Journals without the indexed Check contract return an explicit unsupported capability.
+
+## Implemented reference requirements (task 12c)
+
+The pure [reference definition](../../src/checks/reference.rs) uses the generic predicates and selected source schema.
+It has Check definition version 1, rule versions 1, source schema version 1, and evaluation version 1.
+No rule reads a profile label or treats its `check_id` as evidence.
+All three requirements use `scope_intent` to require the reported intent mapping to match the single selected intent.
+
+| Requirement | Positive proof and limitations |
+| --- | --- |
+| `one-prepared-identity` | Distinct `prepared_identities.signature` count at most one, a complete prepared set, and a closed terminal interval establish pass. Two distinct positively reported identities establish fail before closure. Repeated identities do not increase the count. |
+| `original-finality` | Reported succeeded state, immutable original mapping, closed terminal interval, and authoritative same-Lab finalized transition establish pass. A reported failed state is a declared failure. Missing original finality remains unknown. |
+| `resolution-horizon` | A succeeded/failed terminal record within the original accepted deadline establishes pass. Authoritative unresolved state observed after that deadline, or a terminal record after it, establishes fail. Unknown temporal basis remains inconclusive. |
+
+`scope_intent` is typed membership in the selected intent scope.
+`compare_observed_at` compares retained source `observed_at` with a declared `unix_ms` integer path.
+It uses no evaluator clock.
+The source declares `time_basis:application_unix_ms` for acceptance, deadline, and terminal time.
+`journal_finality` defaults to `expected:true`; `expected:false` still requires a positively established negative result, never absent traffic.
+The current resolver treats absent finalized evidence as unknown, so this negative branch cannot turn absence into fail.
+The source's `prepared_set_complete` describes its complete committed prepared inventory at that consistent source snapshot.
+It does not mean that an open business interval has ended.
+`interval_closed` must agree with the selected terminal state before it supplies completeness.
+The source exposes a retained `terminal_at_ms` from the atomic terminal observation.
+Unavailable terminal time cannot become zero or a substituted deadline.
+
+Source schema 1 receives additive selected record fields for these requirements.
+Older records without them cannot satisfy the new definition and do not receive inferred values.
+The generic collector collects these fields through the same public HTTP endpoint.
+The stored selected schema, requirements, and definition digest pin their meaning.
+The relayer's canonical-base64 `wire_digest` is not selected or compared with a Lab raw-wire digest.
+An identity violation does not establish two transfers.
+Original simulated finality does not establish execution or balance changes.
 
 ## No-SDK HTTP observation adapter
 

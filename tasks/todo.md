@@ -358,7 +358,9 @@ Checkpoints record results and do not require another approval interview.
 
 #### 12c. Reference requirements
 
-- [ ] Express identity, original finality, and resolution requirements through maintained generic predicates; expose only the additional public completeness/timing facts needed by these rules.
+- [x] Express identity, original finality, and resolution requirements through maintained generic predicates; expose only the additional public completeness/timing facts needed by these rules.
+
+- **Verified 12c:** All four locked checks passed (159 tests). A native two-profile history uses the real relayer, public collector, and simulated RPC finality; resilient passes and unsafe fails the distinct-identity requirement. Re-evaluation survives source and Lab stop. Independent retained histories cover early/open intervals, two distinct versus repeated identities, succeeded without finality, authoritative unresolved before/after the original deadline, incomplete/redacted prepared sets, wrong intent mapping, and invalid temporal ordering. Scoped review keeps the source additive, read-only, and snapshot-consistent; its terminal time comes from the committed terminal observation. Generic scope and retained source-time predicates use no evaluator clock or profile name. Public CLI/control acceptance remains 12d.
 
 #### 12d. Public evaluation and histories
 

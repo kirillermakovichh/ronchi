@@ -8,6 +8,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 pub const EVALUATION_VERSION: u32 = 1;
+fn positive() -> bool {
+    true
+}
+pub struct Context<'a> {
+    pub finality: &'a dyn Fn(&str) -> PredicateResult,
+    pub scope: Option<&'a super::Scope>,
+    pub observed_at_ms: Option<i64>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Requirement {
@@ -74,6 +82,15 @@ pub enum Predicate {
     },
     JournalFinality {
         signature_path: String,
+        #[serde(default = "positive")]
+        expected: bool,
+    },
+    ScopeIntent {
+        path: String,
+    },
+    CompareObservedAt {
+        path: String,
+        relation: Relation,
     },
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -232,6 +249,14 @@ impl Predicate {
                     }
                 }
             }
+            Self::CompareObservedAt { path, .. } => {
+                if !matches!(path_type(fields,path)?,ValueType::Integer{unit:Some(unit)} if unit=="unix_ms")
+                {
+                    return Err(
+                        "Source timestamp comparison requires declared unix_ms integer".into(),
+                    );
+                }
+            }
             Self::All { predicates } | Self::Any { predicates } => {
                 if predicates.is_empty() || predicates.len() > 32 {
                     return Err("Composition requires 1..32 predicates".into());
@@ -240,7 +265,10 @@ impl Predicate {
                     p.check(fields, depth + 1, nodes)?;
                 }
             }
-            Self::JournalFinality { signature_path } => {
+            Self::JournalFinality { signature_path, .. }
+            | Self::ScopeIntent {
+                path: signature_path,
+            } => {
                 if !matches!(path_type(fields, signature_path)?, ValueType::String { .. }) {
                     return Err("Finality join requires a declared signature string".into());
                 }
@@ -255,6 +283,22 @@ impl Predicate {
         fields: &BTreeMap<String, ValueType>,
         facts: &BTreeMap<String, Value>,
         finality: &impl Fn(&str) -> PredicateResult,
+    ) -> PredicateResult {
+        self.evaluate_in(
+            fields,
+            facts,
+            &Context {
+                finality,
+                scope: None,
+                observed_at_ms: None,
+            },
+        )
+    }
+    pub fn evaluate_in(
+        &self,
+        fields: &BTreeMap<String, ValueType>,
+        facts: &BTreeMap<String, Value>,
+        context: &Context<'_>,
     ) -> PredicateResult {
         match self {
             Self::Compare {
@@ -323,7 +367,7 @@ impl Predicate {
                 let mut negative = false;
                 let mut missing = false;
                 for p in predicates {
-                    let r = p.evaluate(fields, facts, finality);
+                    let r = p.evaluate_in(fields, facts, context);
                     gaps.extend(r.gaps);
                     match r.truth {
                         Truth::True => positive = true,
@@ -344,9 +388,40 @@ impl Predicate {
                 };
                 PredicateResult { truth, gaps }
             }
-            Self::JournalFinality { signature_path } => logical(fields, facts, signature_path)
-                .and_then(Value::as_str)
-                .map_or_else(|| unknown(signature_path), finality),
+            Self::JournalFinality {
+                signature_path,
+                expected,
+            } => {
+                let mut r = logical(fields, facts, signature_path)
+                    .and_then(Value::as_str)
+                    .map_or_else(|| unknown(signature_path), context.finality);
+                if !expected {
+                    r.truth = match r.truth {
+                        Truth::True => Truth::False,
+                        Truth::False => Truth::True,
+                        Truth::Unknown => Truth::Unknown,
+                    };
+                }
+                r
+            }
+            Self::ScopeIntent { path } => match (
+                logical(fields, facts, path).and_then(Value::as_str),
+                context.scope,
+            ) {
+                (Some(id), Some(scope)) if scope.intent_ids.len() == 1 => {
+                    result(scope.intent_ids[0] == id)
+                }
+                _ => unknown("intent_scope_mapping"),
+            },
+            Self::CompareObservedAt { path, relation } => {
+                match (context.observed_at_ms, logical(fields, facts, path)) {
+                    (Some(at), Some(value)) => {
+                        compare(path_type(fields, path).ok(), &json_number(at), value)
+                            .map_or_else(|| unknown(path), |order| result(relation.accepts(order)))
+                    }
+                    _ => unknown("source_time_basis"),
+                }
+            }
         }
     }
 }
@@ -414,4 +489,8 @@ pub(crate) fn same_value(
         Ok(schema) if scalar(schema, false) => compare(Some(schema), a, b) == Some(Ordering::Equal),
         _ => a == b,
     }
+}
+
+fn json_number(value: i64) -> Value {
+    Value::from(value)
 }

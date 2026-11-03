@@ -19,6 +19,11 @@ impl Selection {
         self.scope
             .normalize()
             .map_err(|_| crate::query::Error::invalid("Invalid Check scope"))?;
+        if self.scope.intent_ids.len() + self.scope.signatures.len() != 1 {
+            return Err(crate::query::Error::capability(
+                "Initial Check evaluation requires exactly one intent or signature scope",
+            ));
+        }
         if !crate::workspace::identifier(&self.check_id)
             || self.definition_version == 0
             || self
