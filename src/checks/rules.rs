@@ -15,6 +15,14 @@ pub struct Context<'a> {
     pub finality: &'a dyn Fn(&str) -> PredicateResult,
     pub scope: Option<&'a super::Scope>,
     pub observed_at_ms: Option<i64>,
+    pub operational: Option<&'a dyn Fn() -> bool>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CumulativeSet {
+    pub path: String,
+    pub key: String,
+    pub complete_path: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +36,8 @@ pub struct Requirement {
     pub immutable_paths: Vec<String>,
     #[serde(default)]
     pub revision_paths: Vec<String>,
+    #[serde(default)]
+    pub cumulative_sets: Vec<CumulativeSet>,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -169,11 +179,25 @@ pub fn validate(
         {
             return Err("Invalid or unsupported requirement identity/version".into());
         }
-        if rule.immutable_paths.len() + rule.revision_paths.len() > 16 {
+        if rule.immutable_paths.len() + rule.revision_paths.len() + rule.cumulative_sets.len() > 16
+        {
             return Err("At most 16 consistency paths are supported per requirement".into());
         }
         for path in rule.immutable_paths.iter().chain(&rule.revision_paths) {
             path_type(fields, path)?;
+        }
+        for set in &rule.cumulative_sets {
+            let ValueType::Array { items, .. } = path_type(fields, &set.path)? else {
+                return Err("Cumulative inventory requires an array".into());
+            };
+            let ValueType::Record { fields: inner, .. } = unwrapped(items) else {
+                return Err("Cumulative inventory requires record items".into());
+            };
+            if !scalar(path_type(inner, &set.key)?, false)
+                || !matches!(path_type(fields, &set.complete_path)?, ValueType::Boolean)
+            {
+                return Err("Invalid cumulative inventory key/completeness schema".into());
+            }
         }
         for predicate in [&rule.pass, &rule.fail, &rule.complete] {
             predicate.check(fields, 0, &mut nodes)?;
@@ -291,6 +315,7 @@ impl Predicate {
                 finality,
                 scope: None,
                 observed_at_ms: None,
+                operational: None,
             },
         )
     }
@@ -300,6 +325,9 @@ impl Predicate {
         facts: &BTreeMap<String, Value>,
         context: &Context<'_>,
     ) -> PredicateResult {
+        if context.operational.is_some_and(|check| !check()) {
+            return unknown("analysis_interrupted");
+        }
         match self {
             Self::Compare {
                 path,
@@ -493,4 +521,45 @@ pub(crate) fn same_value(
 
 fn json_number(value: i64) -> Value {
     Value::from(value)
+}
+
+pub(crate) fn cumulative_contains(
+    fields: &BTreeMap<String, ValueType>,
+    set: &CumulativeSet,
+    old: &Value,
+    new: &Value,
+) -> Option<bool> {
+    let ValueType::Array { items, .. } = path_type(fields, &set.path).ok()? else {
+        return None;
+    };
+    let ValueType::Record { fields: inner, .. } = unwrapped(items) else {
+        return None;
+    };
+    let schema = path_type(inner, &set.key).ok()?;
+    let sorted = |value: &Value| -> Option<Vec<Value>> {
+        let mut keys = value
+            .as_array()?
+            .iter()
+            .map(|item| record_value(items, item, &set.key).cloned())
+            .collect::<Option<Vec<_>>>()?;
+        keys.sort_unstable_by(|a, b| compare(Some(schema), a, b).unwrap_or(Ordering::Equal));
+        keys.dedup_by(|a, b| compare(Some(schema), a, b) == Some(Ordering::Equal));
+        Some(keys)
+    };
+    let old = sorted(old)?;
+    let new = sorted(new)?;
+    let mut position = 0;
+    for value in &old {
+        while position < new.len()
+            && compare(Some(schema), &new[position], value) == Some(Ordering::Less)
+        {
+            position += 1;
+        }
+        if position == new.len()
+            || compare(Some(schema), &new[position], value) != Some(Ordering::Equal)
+        {
+            return Some(false);
+        }
+    }
+    Some(true)
 }

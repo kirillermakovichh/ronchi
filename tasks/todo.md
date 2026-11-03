@@ -339,7 +339,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 12. Deterministic Check evaluation
 
-- [ ] **Accept:** Implement public `check.evaluate` over a pinned retained snapshot with bounded Verdicts, supporting facts, source authority, and gaps.
+- [x] **Accept:** Implement public `check.evaluate` over a pinned retained snapshot with bounded Verdicts, supporting facts, source authority, and gaps.
 - **Verify:** Success, correlated identity violation, authoritative unresolved state at deadline, incomplete intervals, and conflicting facts; repeat without contacting the source.
 - **Dependencies:** 9, 11. **Scope:** Medium. **Likely files:** `src/checks/evaluate.rs`, `src/checks/rules.rs`, `src/checks/verdict.rs`, `tests/check_evaluate.rs`.
 - **Source:** [Verdict rules](../docs/product/checks-and-verdicts.md#verdict-rules).
@@ -364,7 +364,10 @@ Checkpoints record results and do not require another approval interview.
 
 #### 12d. Public evaluation and histories
 
-- [ ] Expose CLI/control/offline schema for live and retained evaluation; verify reference/public histories, replay, resource bounds, and no HTTP; document limits and run locked checks.
+- [x] Expose CLI/control/offline schema for live and retained evaluation; verify reference/public histories, replay, resource bounds, and no HTTP; document limits and run locked checks.
+
+- **Verified 12d:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (162 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Native CLI/control parity uses an unrelated HTTP source and complete Unicode facts larger than the query preview. A live listener proves evaluation makes no source calls. Retained replay works after invalidating current configuration, stopping the source, clean Lab stop, and actual Lab process death; interrupted completeness remains visible. Version/digest errors, startup definitions without observations, mandatory snapshot selection, wrong Lab selection, aggregate context isolation, and empty aggregate semantics are covered. Process tests wait for an observable reader snapshot before Ctrl-C, broken pipe, or deadline; they verify snapshot release while RPC remains available.
+- **Scoped review:** Evaluation reuses the bounded query reader and performs no Journal mutation. Supporting references remain decisive after later observations. Declared cumulative inventories prevent a late shrinking inventory from manufacturing a pass; ordinary growth remains valid. The maintained reference definition is now version 2, while rule/source-schema/evaluation versions stay independently identified. Single-intent/signature scope, 512 selected records, 4 MiB evidence, and 256 KiB serialized consistency state remain explicit evaluation limits. HTTP-only collection and its effective 32 KiB source response cap are unchanged. No Demo, SDK, dashboard, or automatic Verdict for RPC-only Investigations was added. Next task: 13.
 
 ### 13. Self-contained public-path Demo
 

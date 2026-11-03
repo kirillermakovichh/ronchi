@@ -244,9 +244,13 @@ The first offset is zero; keep the same pinned snapshot for subsequent chunks.
 If collection uses polling, each HTTP invocation has its own ID and timeout within the declared bounded horizon.
 Cancellation stops the remaining polls.
 The ordinary query deadline does not replace the explicit Check invocation and horizon limits.
-`check.evaluate` remains planned for task 12.
-It requires `snapshot_seq` and evaluates only retained facts through that watermark.
-It returns the rule version, bounded Verdict, supporting references, and Evidence Gaps without appending observations or calling external sources.
+`check.evaluate` is implemented as `ronchi check evaluate <check-id> --definition-version N --snapshot-seq N`.
+It requires one explicit intent/signature scope and `snapshot_seq` and evaluates only retained facts through that watermark.
+It returns the pinned definition version/digest, evaluation version, source authority, bounded Verdict, supporting references, and Evidence Gaps without appending observations or calling external sources.
+Its authenticated control path is `POST /v1/labs/{id}/checks/evaluate`.
+The JSON request uses `arguments.evaluation` for Check identity/version/digest and exact normalized source scope.
+An empty requirement set has no Verdict.
+Exit 0 means completed evaluation, including a fail or inconclusive result.
 Re-evaluation is available for stopped or interrupted Journals and preserves their completeness limits.
 The [Check contract](checks-and-verdicts.md) owns adapter limits, rules, and Verdict meanings.
 

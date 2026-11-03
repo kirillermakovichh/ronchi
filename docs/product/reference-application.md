@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection/evaluation and Demo orchestration remain tasks 11–13.
+Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. Demo orchestration remains task 13.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -68,8 +68,8 @@ The worker reserves terminal headroom within 128 observations per intent and end
 State transitions and their supporting observations share one SQLite transaction.
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
-The generic HTTP Check collector is implemented separately from the relayer source.
-Verdict evaluation and Demo remain tasks 12–13.
+The generic HTTP Check collector and deterministic evaluator are implemented separately from the relayer source.
+Demo orchestration remains task 13.
 
 ### Read-only observation source
 
@@ -301,6 +301,9 @@ A terminal interval remains closed after recovery because terminal intents do no
 Acceptance, deadline, terminal time, and source `observed_at` use the declared application UTC clock.
 The evaluator does not infer a global causal order from this coordinate.
 The maintained [reference Check definition](../../src/checks/reference.rs) expresses these requirements through the generic typed mechanism.
+Its current definition version is 2 and its rule versions are 1.
+Evaluate it with `ronchi check evaluate reference-intent --definition-version 2 --intent-id W1 --snapshot-seq N`.
+The offline `ronchi schema check.evaluate` result includes this definition.
 The native acceptance test collects both profiles through `check.observe` and replays evaluation after the source and Lab stop.
 
 The Demo configures three versioned requirements: at most one prepared identity per intent, terminal success tied to original-signature finality, and resolution within the declared horizon.
@@ -353,4 +356,4 @@ Private seed loss, unsupported schema, or storage failure requires explicit reco
 The fixture is one legacy inert signed message; it does not execute a SOL/SPL transfer.
 Process-crash histories do not establish power-loss guarantees beyond SQLite FULL and the local filesystem contract.
 Linux/Windows process behavior has not been verified by this slice.
-The full Demo must later use the generic adapter and evaluator from tasks 11–12 through their public interfaces.
+The task-13 Demo must use the implemented generic adapter and evaluator through these public interfaces.

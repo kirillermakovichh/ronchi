@@ -137,6 +137,12 @@ pub fn router(control: Control) -> Router {
         .route("/v1/labs/{id}/cases", get(case_list))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
         .route(
+            "/v1/labs/{id}/checks/evaluate",
+            post(evaluate).layer(axum::extract::DefaultBodyLimit::max(
+                crate::query::MAX_REQUEST_BYTES,
+            )),
+        )
+        .route(
             "/v1/labs/{id}/investigate",
             post(investigate).layer(axum::extract::DefaultBodyLimit::max(
                 crate::query::MAX_REQUEST_BYTES,
@@ -480,8 +486,13 @@ pub async fn query_request(
     let request = hyper::Request::builder()
         .method("POST")
         .uri(format!(
-            "http://{address}/v1/labs/{}/investigate",
-            manifest.lab_id
+            "http://{address}/v1/labs/{}/{}",
+            manifest.lab_id,
+            if request.operation == crate::query::Operation::Evaluate {
+                "checks/evaluate"
+            } else {
+                "investigate"
+            }
         ))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
@@ -741,4 +752,24 @@ pub async fn check_request(
     })
     .await
     .map_err(|_| Error::new("lab_unavailable", "unknown"))?
+}
+
+async fn evaluate(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    args: Result<Json<crate::query::Request>, axum::extract::rejection::JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    if args
+        .as_ref()
+        .is_ok_and(|Json(request)| request.operation != crate::query::Operation::Evaluate)
+    {
+        return Ok(query_failure(
+            &id,
+            "unparsed",
+            crate::query::Error::invalid("This route requires check.evaluate"),
+        ));
+    }
+    investigate(State(control), Path(id), headers, args).await
 }

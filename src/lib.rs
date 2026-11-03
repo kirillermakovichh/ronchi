@@ -90,13 +90,15 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
         operation: String,
     },
 }
 #[derive(Subcommand)]
 enum CheckCommand {
     Observe(checks::cli::Selection),
+    /// Evaluate a pinned retained snapshot without contacting its source
+    Evaluate(checks::cli::Evaluate),
 }
 #[derive(Subcommand)]
 enum ReferenceCommand {
@@ -236,13 +238,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             let request = match operation.as_str() {
                 op if op.starts_with("investigate.") => schemars::schema_for!(query::Request),
                 "check.observe" => schemars::schema_for!(checks::Request),
+                "check.evaluate" => schemars::schema_for!(query::Request),
                 "lab.up" => schemars::schema_for!(UpRequest),
                 "lab.status" => schemars::schema_for!(StatusRequest),
                 "lab.down" => schemars::schema_for!(DownRequest),
                 "case.arm" => schemars::schema_for!(CaseRequest),
                 _ => schemars::schema_for!(StatusRequest),
             };
-            let response = if operation.starts_with("investigate.") {
+            let response = if operation.starts_with("investigate.") || operation == "check.evaluate"
+            {
                 schemars::schema_for!(query::Envelope)
             } else if operation == "check.observe" {
                 schemars::schema_for!(checks::Envelope)
@@ -252,6 +256,18 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 schemars::schema_for!(LabEnvelope)
             };
             let mut value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":response});
+            if operation == "check.evaluate" {
+                value["evaluation_schema"] =
+                    serde_json::to_value(schemars::schema_for!(checks::evaluate::Result))
+                        .expect("typed schema serializes");
+                value["rule_schema"] =
+                    serde_json::to_value(schemars::schema_for!(checks::rules::Requirement))
+                        .expect("typed schema serializes");
+                value["reference_definition"] = serde_json::to_value(
+                    checks::reference::definition("http://127.0.0.1:9001/checks/observe".into()),
+                )
+                .expect("typed fixture serializes");
+            }
             if operation.starts_with("investigate.") {
                 value["finding_schema"] =
                     serde_json::to_value(schemars::schema_for!(findings::Finding))
@@ -298,6 +314,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Ok(()) => 0,
                 Err(error) => render_lab_error(cli.json, error),
             }
+        }
+        Command::Check {
+            operation: CheckCommand::Evaluate(args),
+        } => {
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            checks::cli::evaluate(cli.json, root, name, cli.lab_id.as_deref(), args)
         }
         Command::Check {
             operation: CheckCommand::Observe(selection),

@@ -72,6 +72,7 @@ pub struct Arguments {
     pub fields: Vec<String>,
     pub include_payload: bool,
     pub payload_offset: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub evaluation: Option<crate::checks::evaluate::Selection>,
     pub snapshot_seq: Option<u64>,
 }
@@ -372,7 +373,8 @@ impl Request {
             return Err(Error::invalid("Invalid snapshot watermark"));
         }
         if self.operation == Operation::Evaluate {
-            if a.snapshot_seq.is_none()
+            if a.limit != 50
+                || a.snapshot_seq.is_none()
                 || a.cursor.is_some()
                 || a.include_payload
                 || a.payload_offset != 0

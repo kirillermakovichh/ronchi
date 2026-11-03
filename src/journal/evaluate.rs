@@ -81,6 +81,11 @@ impl JournalReader {
             ));
         }
         let text:Option<String>=self.connection.query_row("SELECT json_extract(event_json,'$.data.definition') FROM events JOIN query_events USING(event_seq) WHERE event_seq<=?1 AND kind='check.invocation_started' AND json_extract(event_json,'$.data.definition.check_id')=?2 AND json_extract(event_json,'$.data.definition.version')=?3 ORDER BY event_seq LIMIT 1",params![snapshot as i64,selection.check_id,selection.definition_version],|r|r.get(0)).optional().map_err(|_|Error::storage())?;
+        let text = if text.is_some() {
+            text
+        } else {
+            self.connection.query_row("SELECT source.value FROM events e JOIN json_each(json_extract(e.event_json,'$.data.configuration.checks.sources')) source WHERE e.event_seq<=?1 AND json_extract(e.event_json,'$.kind')='lab.starting' AND json_extract(source.value,'$.check_id')=?2 AND json_extract(source.value,'$.version')=?3 ORDER BY e.event_seq LIMIT 1",params![snapshot as i64,selection.check_id,selection.definition_version],|row|row.get::<_,String>(0)).optional().map_err(|_|Error::storage())?
+        };
         let (digest, definition) = definition(
             serde_json::from_str(&text.ok_or_else(|| {
                 Error::new(
@@ -127,6 +132,8 @@ impl JournalReader {
         let mut conflicts = BTreeSet::new();
         let mut conflict_refs: BTreeMap<usize, Vec<EventRef>> = BTreeMap::new();
         let mut state_bytes = 0usize;
+        let mut inventories: BTreeMap<(usize, String, String, String), (Value, u64)> =
+            BTreeMap::new();
         while let Some(row) = rows.next().map_err(|_| Error::storage())? {
             query::check(cancel, deadline)?;
             count += 1;
@@ -188,7 +195,8 @@ impl JournalReader {
             let request: SourceRequest =
                 serde_json::from_value(start_event.data["source_request"].clone())
                     .map_err(|_| Error::storage())?;
-            if request.lab_id != lab_id
+            if request.contract_version != 1
+                || request.lab_id != lab_id
                 || request.scope != scope
                 || request.snapshot_seq >= start
                 || request.facts != definition.facts.keys().cloned().collect::<Vec<_>>()
@@ -301,9 +309,80 @@ impl JournalReader {
                         }
                     }
                 }
+                for set in &requirement.cumulative_sets {
+                    match crate::checks::rules::logical(
+                        &definition.facts,
+                        &response.facts,
+                        &set.complete_path,
+                    )
+                    .and_then(Value::as_bool)
+                    {
+                        Some(false) => continue,
+                        None => {
+                            consistency_gaps.insert(format!("unavailable:{}", set.complete_path));
+                            continue;
+                        }
+                        Some(true) => (),
+                    }
+                    let Some(current) = crate::checks::rules::logical(
+                        &definition.facts,
+                        &response.facts,
+                        &set.path,
+                    ) else {
+                        consistency_gaps.insert(format!("unavailable:{}", set.path));
+                        continue;
+                    };
+                    let key = (
+                        index,
+                        set.path.clone(),
+                        set.key.clone(),
+                        set.complete_path.clone(),
+                    );
+                    let key_bytes = set.path.len() + set.key.len() + set.complete_path.len();
+                    if let Some((old, old_seq)) = inventories.get(&key) {
+                        match crate::checks::rules::cumulative_contains(
+                            &definition.facts,
+                            set,
+                            old,
+                            current,
+                        ) {
+                            Some(true) => (),
+                            Some(false) => {
+                                conflicts.insert(index);
+                                conflict_refs.entry(index).or_insert_with(|| {
+                                    vec![
+                                        EventRef {
+                                            lab_id: lab_id.into(),
+                                            event_seq: *old_seq,
+                                        },
+                                        EventRef {
+                                            lab_id: lab_id.into(),
+                                            event_seq: seq,
+                                        },
+                                    ]
+                                });
+                            }
+                            None => {
+                                consistency_gaps.insert(format!("unavailable:{}", set.key));
+                            }
+                        }
+                        state_bytes = state_bytes.saturating_sub(old.to_string().len() + key_bytes);
+                    }
+                    state_bytes += current.to_string().len() + key_bytes;
+                    if state_bytes > 256 * 1024 {
+                        return Err(incomplete());
+                    }
+                    inventories.insert(key, (current.clone(), seq));
+                }
                 let supports = RefCell::new(Vec::new());
                 let join_error = RefCell::new(None);
                 let join = |signature: &str| {
+                    if event.execution_mode != crate::config::Mode::Simulator {
+                        return PredicateResult {
+                            truth: Truth::Unknown,
+                            gaps: BTreeSet::from(["unsupported_finality_mode".into()]),
+                        };
+                    }
                     let found=self.connection.query_row("SELECT q.event_seq FROM query_signatures s JOIN query_events q ON q.event_seq=s.event_seq JOIN events e ON e.event_seq=q.event_seq WHERE s.signature=?1 AND q.event_seq<=?2 AND q.kind='transaction.transition' AND json_extract(e.event_json,'$.source')='rpc_simulator' AND json_extract(e.event_json,'$.execution_mode')='simulator' AND json_extract(e.event_json,'$.data.stage')='finalized' ORDER BY q.event_seq LIMIT 1",params![signature,snapshot as i64],|r|r.get::<_,i64>(0)).optional();
                     let found = match found {
                         Ok(value) => value,
@@ -334,10 +413,12 @@ impl JournalReader {
                 )
                 .ok()
                 .and_then(|at| i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok());
+                let operational = || query::check(cancel, deadline).is_ok();
                 let context = crate::checks::rules::Context {
                     finality: &join,
                     scope: Some(&selection.scope),
                     observed_at_ms,
+                    operational: Some(&operational),
                 };
                 let pass =
                     requirement
@@ -418,6 +499,10 @@ impl JournalReader {
                     }
                 }
             }
+        }
+        for rule in &mut report.requirements {
+            rule.gaps.sort();
+            rule.gaps.dedup();
         }
         report.aggregate();
         Ok(report)

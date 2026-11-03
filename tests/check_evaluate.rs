@@ -86,7 +86,7 @@ impl History {
                         snapshot_seq: Some(snapshot),
                         evaluation: Some(Selection {
                             check_id: self.definition.check_id.clone(),
-                            definition_version: 1,
+                            definition_version: self.definition.version,
                             definition_digest: None,
                             scope: Scope {
                                 intent_ids: vec!["W1".into()],
@@ -258,7 +258,7 @@ fn reference_observation(h: &mut History, intent: Value, observed_at: &str) -> u
         "ronchi",
         json!({"definition":h.definition.public_definition(),"source_request":request}),
     );
-    h.event("check.observation","application",json!({"check_id":h.definition.check_id,"version":1,"request_id":invocation,"scope":scope,"cause_refs":[{"lab_id":"L1","event_seq":start}],"retention":"complete_validated_selection","payload":{"contract_version":1,"invocation_id":invocation,"source":"reference-relayer","schema_version":1,"observed_at":observed_at,"revision":"1","facts":{"intent":{"availability":"available","value":intent}}}}))
+    h.event("check.observation","application",json!({"check_id":h.definition.check_id,"version":h.definition.version,"request_id":invocation,"scope":scope,"cause_refs":[{"lab_id":"L1","event_seq":start}],"retention":"complete_validated_selection","payload":{"contract_version":1,"invocation_id":invocation,"source":"reference-relayer","schema_version":1,"observed_at":observed_at,"revision":"1","facts":{"intent":{"availability":"available","value":intent}}}}))
 }
 fn reference_intent() -> Value {
     json!({"intent_id":"W1","state":"prepared","original_signature":{"availability":"available","value":"A"},"prepared_identities":{"availability":"available","value":[{"signature":"A"}]},"accepted_at_ms":1000,"deadline_ms":61000,"terminal_at_ms":{"availability":"unavailable"},"time_basis":"application_unix_ms","prepared_set_complete":true,"interval_closed":false})
@@ -271,6 +271,7 @@ async fn reference_rules_require_full_identity_history_terminal_evidence_and_dec
         "same",
         "succeeded",
         "unresolved_late",
+        "active_late",
         "unresolved_early",
         "partial",
         "wrong_intent",
@@ -301,6 +302,9 @@ async fn reference_rules_require_full_identity_history_terminal_evidence_and_dec
                 intent["state"] = json!("unresolved");
                 intent["interval_closed"] = json!(true);
                 intent["terminal_at_ms"] = json!({"availability":"available","value":62000});
+                at = "1970-01-01T00:01:02Z";
+            }
+            "active_late" => {
                 at = "1970-01-01T00:01:02Z";
             }
             "unresolved_early" => {
@@ -334,7 +338,7 @@ async fn reference_rules_require_full_identity_history_terminal_evidence_and_dec
         match scenario {
             "two" => assert_eq!(result["requirements"][0]["verdict"], "fail", "{result}"),
             "same" => assert_eq!(result["requirements"][0]["verdict"], "pass", "{result}"),
-            "unresolved_late" => {
+            "unresolved_late" | "active_late" => {
                 assert_eq!(result["requirements"][2]["verdict"], "fail", "{result}")
             }
             "succeeded" => {
@@ -345,6 +349,73 @@ async fn reference_rules_require_full_identity_history_terminal_evidence_and_dec
                 assert_eq!(result["requirements"][2]["verdict"], "pass", "{result}");
             }
             _ => assert_eq!(result["verdict"], "inconclusive", "{scenario}: {result}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn aggregate_checks_keep_gaps_and_empty_selection_has_no_verdict() {
+    use ronchi::checks::evaluate::{Result as Evaluation, Verdict, aggregate};
+    let mut h = History::new();
+    let open = h.observe("1", false, false, false, "A");
+    let mut a: Evaluation = serde_json::from_value(h.evaluate(open).await.result).unwrap();
+    let terminal = h.observe("2", false, true, true, "A");
+    let mut b: Evaluation = serde_json::from_value(h.evaluate(terminal).await.result).unwrap();
+    b.check_id = "other-check".into();
+    a.snapshot_seq = b.snapshot_seq;
+    let mut wrong_lab = b.clone();
+    wrong_lab.lab_id = "L2".into();
+    assert!(aggregate(vec![a.clone(), wrong_lab]).is_err());
+    let result = aggregate(vec![a, b]).unwrap();
+    assert_eq!(result.verdict, Some(Verdict::Fail));
+    assert!(!result.checks[0].requirements[0].gaps.is_empty());
+    assert!(aggregate(vec![]).unwrap().verdict.is_none());
+}
+
+#[tokio::test]
+async fn cumulative_inventory_accepts_growth_and_preserves_contradicting_histories() {
+    for contradictory in [false, true] {
+        let mut h = History::new();
+        h.definition = ronchi::checks::reference::definition("http://127.0.0.1:1/unused".into());
+        let mut first = reference_intent();
+        reference_observation(&mut h, first.clone(), "1970-01-01T00:00:02Z");
+        first["prepared_identities"]["value"] = if contradictory {
+            json!([{"signature":"B"}])
+        } else {
+            json!([{"signature":"A"},{"signature":"B"}])
+        };
+        let invocation = format!("I{}", h.seq);
+        let scope = json!({"intent_ids":["W1"]});
+        let request = json!({"contract_version":1,"invocation_id":invocation,"check_id":h.definition.check_id,"lab_id":"L1","snapshot_seq":h.seq,"scope":scope,"facts":["intent"],"deadline":"2026-11-03T00:00:05Z"});
+        let start = h.event(
+            "check.invocation_started",
+            "ronchi",
+            json!({"definition":h.definition.public_definition(),"source_request":request}),
+        );
+        let end=h.event("check.observation","application",json!({"check_id":h.definition.check_id,"version":h.definition.version,"request_id":invocation,"scope":scope,"cause_refs":[{"lab_id":"L1","event_seq":start}],"retention":"complete_validated_selection","payload":{"contract_version":1,"invocation_id":invocation,"source":"reference-relayer","schema_version":1,"observed_at":"1970-01-01T00:00:03Z","revision":"2","facts":{"intent":{"availability":"available","value":first}}}}));
+        let report = h.evaluate(end).await.result;
+        assert_eq!(
+            report["requirements"][0]["verdict"],
+            if contradictory {
+                "inconclusive"
+            } else {
+                "fail"
+            },
+            "{report}"
+        );
+        if contradictory {
+            assert!(
+                report["requirements"][0]["gaps"]
+                    .to_string()
+                    .contains("source_contradiction")
+            );
+            assert_eq!(
+                report["requirements"][0]["supporting"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
         }
     }
 }

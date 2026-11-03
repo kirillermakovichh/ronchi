@@ -64,6 +64,7 @@ pub struct Result {
     pub snapshot_seq: u64,
     pub scope: Scope,
     pub source: String,
+    pub source_authority: String,
     pub source_schema_version: u32,
     pub verdict: Option<Verdict>,
     pub requirements: Vec<RuleResult>,
@@ -88,6 +89,7 @@ impl Result {
             snapshot_seq: snapshot,
             scope: selection.scope.clone(),
             source,
+            source_authority: "application".into(),
             source_schema_version: schema,
             verdict: None,
             requirements: requirements
@@ -123,4 +125,36 @@ impl Result {
             Some(Verdict::Pass)
         };
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Aggregate {
+    pub verdict: Option<Verdict>,
+    pub checks: Vec<Result>,
+}
+/// Aggregate only the caller's declared required Checks; retain every gap/result.
+pub fn aggregate(checks: Vec<Result>) -> std::result::Result<Aggregate, crate::query::Error> {
+    if let Some(first) = checks.first() {
+        let mut ids = std::collections::BTreeSet::new();
+        if checks.iter().any(|check| {
+            check.lab_id != first.lab_id
+                || check.snapshot_seq != first.snapshot_seq
+                || check.scope != first.scope
+                || !ids.insert(&check.check_id)
+        }) {
+            return Err(crate::query::Error::invalid(
+                "Aggregate requires unique Checks from the same Lab, scope, and snapshot",
+            ));
+        }
+    }
+    let verdict = if checks.is_empty() {
+        None
+    } else if checks.iter().any(|c| c.verdict == Some(Verdict::Fail)) {
+        Some(Verdict::Fail)
+    } else if checks.iter().any(|c| c.verdict != Some(Verdict::Pass)) {
+        Some(Verdict::Inconclusive)
+    } else {
+        Some(Verdict::Pass)
+    };
+    Ok(Aggregate { verdict, checks })
 }

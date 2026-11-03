@@ -73,7 +73,7 @@ fn evaluate(lab: &Lab, snapshot: u64) -> Value {
                         snapshot_seq: Some(snapshot),
                         evaluation: Some(Selection {
                             check_id: "reference-intent".into(),
-                            definition_version: 1,
+                            definition_version: ronchi::checks::reference::DEFINITION_VERSION,
                             definition_digest: None,
                             scope: Scope {
                                 intent_ids: vec!["W1".into()],
@@ -109,6 +109,19 @@ fn real_reference_profiles_produce_evidence_backed_identity_and_finality_results
         );
         let snapshot = observations["result"]["snapshot_seq"].as_u64().unwrap();
         let result = evaluate(&lab, snapshot);
+        let args = [
+            "check",
+            "evaluate",
+            "reference-intent",
+            "--definition-version",
+            "2",
+            "--snapshot-seq",
+            &snapshot.to_string(),
+            "--intent-id",
+            "W1",
+        ];
+        let cli = lab.command(&args);
+        assert_eq!(cli["result"], result);
         if profile == "resilient" {
             assert_eq!(result["verdict"], "pass", "{result}");
         } else {
@@ -120,14 +133,39 @@ fn real_reference_profiles_produce_evidence_backed_identity_and_finality_results
         assert_eq!(terminal["prepared_set_complete"], true);
         relayer.stop();
         assert_eq!(evaluate(&lab, snapshot), result);
-        assert!(
-            base(lab.path())
-                .args(["down"])
-                .output()
-                .unwrap()
-                .status
-                .success()
-        );
+        assert_eq!(lab.command(&args)["result"], result);
+        if profile == "unsafe" {
+            let status = lab.command(&["status"]);
+            let identity: ronchi::process::ProcessIdentity =
+                serde_json::from_value(status["result"]["process"].clone()).unwrap();
+            assert_eq!(
+                ronchi::process::identity(identity.pid).unwrap().as_ref(),
+                Some(&identity)
+            );
+            assert_eq!(unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) }, 0);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while ronchi::process::identity(identity.pid).unwrap().is_some() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let retained = lab.command(&args);
+            assert_eq!(retained["view"]["journal_state"], "interrupted");
+            assert!(
+                retained["view"]["evidence_gaps"]
+                    .to_string()
+                    .contains("journal_interrupted")
+            );
+        } else {
+            assert!(
+                base(lab.path())
+                    .args(["down"])
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+        }
         assert_eq!(evaluate(&lab, snapshot), result);
+        assert_eq!(lab.command(&args)["result"], result);
     }
 }

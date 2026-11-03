@@ -1,6 +1,6 @@
 # Checks and Verdicts
 
-Status: generic HTTP Check collection is implemented (task 11). Typed requirements and the retained evaluation core are implemented (tasks 12a–12b). Reference requirements are implemented (task 12c). The dedicated public evaluation operation remains task 12d work.
+Status: generic HTTP Check collection and read-only deterministic evaluation are implemented (tasks 11–12). The bundled reference source uses the same public collector and evaluator.
 These are reversible defaults for the first implementation.
 The [evidence contract](evidence-and-findings.md) owns Journal facts and Findings.
 This document owns external application observations and their bounded outcome evaluation.
@@ -134,7 +134,7 @@ This example requires declared decimal `balance` and boolean `terminal` facts.
 Predicates use externally tagged objects to preserve arbitrary-precision JSON literals through serde.
 Supported forms are `compare`, `compare_fields`, `in`, `count`, `all`, `any`, and a retained `journal_finality` join predicate.
 The finality predicate consumes a supplied retained-fact resolver; it never performs RPC itself.
-The retained resolver is implemented. The public CLI operation remains task 12d at this checkpoint.
+The retained resolver and public CLI operation are implemented.
 Relations are `eq`, `ne`, `lt`, `le`, `gt`, and `ge`.
 Ordering requires integer or decimal fields.
 `compare_fields` requires identical declared types, units, and enum schemas.
@@ -168,10 +168,12 @@ The initial evaluator accepts exactly one intent or one signature per selection.
 It rejects multi-identity scopes instead of passing a scope from only one observed member.
 `arguments.snapshot_seq` is mandatory.
 The core resolves a public source definition from a committed invocation start through that watermark.
+Before the first invocation, it can resolve the public definition retained in `lab.starting`.
+A configured Check without observations is inconclusive; an empty requirement set has no Verdict.
 It does not read current runtime configuration or require its Authorization value.
 A missing definition, mismatched digest, or conflicting reuse of one version returns `definition_unavailable`.
 The caller must give a new definition version when its schema or requirements change.
-The public CLI and dedicated control operation remain task 12d at this checkpoint.
+CLI and dedicated control use this same reader path.
 
 Evaluation reads full validated selection payloads and correlates them with their committed invocation starts.
 The selected scope must exactly match the retained normalized invocation scope.
@@ -183,11 +185,16 @@ Without a positive bounded proof, the result remains inconclusive.
 An empty requirement set has no Verdict.
 The aggregate preserves every requirement's gaps even when another requirement fails.
 
-Requirements may declare up to 16 combined `immutable_paths` and `revision_paths`.
+Requirements may declare up to 16 combined `immutable_paths`, `revision_paths`, and `cumulative_sets`.
 Immutable paths must agree across observations.
 Revision paths must agree when the same source revision repeats.
 Different source revisions do not impose a global order or make ordinary state transitions contradictory.
 Declared scalar consistency comparisons preserve numeric meaning, including equivalent decimal representations.
+A cumulative set declares an array path, a distinct scalar key, and a boolean completeness path.
+Only a positively complete inventory updates its retained membership claim.
+Growth is valid; disappearance of a previously reported member is a source contradiction under this declared authority.
+A partial inventory cannot justify a complete-history pass.
+Membership checks sort typed keys and use a linear merge, without generating all event or item pairs.
 Contradictions retain both supporting event references and make that requirement inconclusive.
 These declarations specify source authority; they do not establish completeness of unselected application state.
 
@@ -206,7 +213,10 @@ Legacy Journals without the indexed Check contract return an explicit unsupporte
 ## Implemented reference requirements (task 12c)
 
 The pure [reference definition](../../src/checks/reference.rs) uses the generic predicates and selected source schema.
-It has Check definition version 1, rule versions 1, source schema version 1, and evaluation version 1.
+The current reference definition is version 2.
+It adds declared cumulative prepared-inventory authority to definition 1.
+Rule versions remain 1; source schema version remains 1; evaluation version remains 1.
+Retained definition 1 keeps its own digest and declarations.
 No rule reads a profile label or treats its `check_id` as evidence.
 All three requirements use `scope_intent` to require the reported intent mapping to match the single selected intent.
 
@@ -235,6 +245,46 @@ The stored selected schema, requirements, and definition digest pin their meanin
 The relayer's canonical-base64 `wire_digest` is not selected or compared with a Lab raw-wire digest.
 An identity violation does not establish two transfers.
 Original simulated finality does not establish execution or balance changes.
+
+## Public evaluation operation
+
+```bash
+ronchi check evaluate reference-intent --definition-version 2 --intent-id W1 --snapshot-seq 42 --json
+ronchi check evaluate intent-state --definition-version 1 --definition-digest '<retained digest>' --intent-id W1 --snapshot-seq 42 --json
+ronchi schema check.evaluate --json
+```
+
+`--snapshot-seq` is mandatory.
+`--definition-version` defaults to 1; the current reference definition requires 2 explicitly.
+Optional `--definition-digest` verifies the retained public definition exactly.
+Scope accepts one `--intent-id` or one `--signature`, plus source scope `--since`/`--until` when supported by that source.
+The authenticated control operation is `POST /v1/labs/{id}/checks/evaluate`.
+It accepts the shared query request envelope with `operation:check.evaluate` and `arguments.evaluation`.
+It rejects another operation or a different immutable Lab ID.
+The offline schema includes the typed result, requirement schema, and current pure reference definition.
+No source, credential configuration, or project access is required for schema discovery.
+
+Successful evaluation exits 0 for pass, fail, inconclusive, or an empty requirement set.
+This status reports evaluation completion.
+Invalid input exits 2; an unavailable pinned definition exits 3; unsupported capability exits 4.
+An operational capacity/analysis limit exits 5; storage failure exits 6; deadline exits 124; Ctrl-C exits 130.
+These errors have `effects:none` and never become a backend Verdict.
+A closed output pipe cancels the reader and exits 0.
+The shared reader path supports live, finalized, and interrupted Journals.
+Journal interruption remains visible in `view.journal_state` and `view.evidence_gaps`.
+A closed authoritative business interval can still support its bounded conclusion; interruption does not prove missing business failure or success.
+
+The result pins source authority as `application` and identifies the source schema, Check definition version/digest, rule versions, evaluation version, scope, Lab, and watermark.
+Its requirements preserve concrete reasons, supporting references, gaps, and limitations.
+The pure aggregate helper requires unique Checks from the same Lab, scope, and snapshot.
+It preserves all required Check results and gaps, even after a decisive fail.
+No CLI operation implicitly evaluates all configured Checks.
+RPC-only Investigations retain Findings without an automatic Verdict.
+
+Acceptance uses independent file-backed histories, an unrelated native HTTP source, and both real relayer profiles.
+Tests verify full facts larger than a query preview, no HTTP calls during evaluation, replay with unavailable source/current configuration, and unchanged Journal watermark.
+A process test observes the SQLite snapshot before Ctrl-C, pipe closure, or deadline and verifies reader release while RPC continues.
+The HTTP-only adapter and effective 32 KiB source cap remain unchanged.
 
 ## No-SDK HTTP observation adapter
 

@@ -185,3 +185,42 @@ pub fn run(
         Err(_) => 6,
     }
 }
+
+#[derive(Args)]
+pub struct Evaluate {
+    check_id: String,
+    #[arg(long)]
+    snapshot_seq: u64,
+    #[arg(long, default_value_t = 1)]
+    definition_version: u32,
+    #[arg(long)]
+    definition_digest: Option<String>,
+    #[arg(long = "intent-id")]
+    intent_ids: Vec<String>,
+    #[arg(long = "signature")]
+    signatures: Vec<String>,
+    #[arg(long)]
+    since: Option<String>,
+    #[arg(long)]
+    until: Option<String>,
+}
+pub fn evaluate(json: bool, project: PathBuf, name: &str, id: Option<&str>, args: Evaluate) -> i32 {
+    let selection = super::evaluate::Selection {
+        check_id: args.check_id,
+        definition_version: args.definition_version,
+        definition_digest: args.definition_digest,
+        scope: Scope {
+            intent_ids: args.intent_ids,
+            signatures: args.signatures,
+            since: args.since,
+            until: args.until,
+        },
+    };
+    crate::query::cli::run(
+        json,
+        project,
+        name,
+        id,
+        crate::query::cli::Selection::check(selection, args.snapshot_seq),
+    )
+}
