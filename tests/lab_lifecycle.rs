@@ -1038,6 +1038,16 @@ fn investigation_cli_queries_live_and_retained_identity_without_new_capture() {
         "1",
     ]);
     assert_eq!(retained["result"], historical["result"]);
+    p.ok(&["down", "--force"]);
+    let interrupted = p.ok(&["investigate", "summary"]);
+    assert_eq!(interrupted["view"]["journal_state"], "interrupted");
+    assert!(
+        interrupted["view"]["evidence_gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| g["code"] == "journal_interrupted")
+    );
 }
 
 #[test]
@@ -1073,9 +1083,151 @@ fn investigation_control_auth_and_scoped_cli_result_agree() {
     assert_eq!(response["request_id"], "http-query");
     let malformed = raw(address, request(token.trim(), "{"));
     assert!(malformed.contains("invalid_argument"));
-    let oversized = raw(address, request(token.trim(), &" ".repeat(65537)));
+    let exact_body = format!("{}{}", body, " ".repeat(65536 - body.len()));
+    let exact = raw(address, request(token.trim(), &exact_body));
+    assert!(exact.starts_with("HTTP/1.1 200"), "{exact}");
+    let oversized = raw(address, request(token.trim(), &format!("{exact_body} ")));
     assert!(oversized.contains("invalid_argument"));
     let schema = p.ok(&["schema", "investigate.evidence"]);
     assert_eq!(schema["implemented"], true);
     assert!(schema["request"].to_string().contains("include_payload"));
+}
+
+#[test]
+fn investigation_ctrl_c_and_broken_pipe_release_readers_while_rpc_keeps_working() {
+    let p = Project::new();
+    p.up();
+    let manifest = p.manifest();
+    let path = Workspace::new(p.path())
+        .lab(&manifest.lab_id)
+        .unwrap()
+        .join("journal.sqlite");
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection.busy_timeout(Duration::ZERO).unwrap();
+    connection.execute_batch("ALTER TABLE query_events RENAME TO retained_navigation; CREATE VIEW query_events AS WITH RECURSIVE work(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM work WHERE x<100000000) SELECT retained_navigation.* FROM retained_navigation CROSS JOIN work;").unwrap();
+    let address = manifest.rpc_address.unwrap();
+    let health = || {
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"getHealth"}"#;
+        let reply = raw(
+            address,
+            format!(
+                "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(reply.contains("\"result\":\"ok\""), "{reply}");
+    };
+    for mode in ["signal", "pipe", "deadline"] {
+        let broken_pipe = mode == "pipe";
+        let mut child = p
+            .command(&["investigate", "summary"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            health(); // A real RPC appends evidence while the query runs.
+            let (_, frames, done): (i64, i64, i64) = connection
+                .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .unwrap();
+            if done < frames {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "query never acquired a page snapshot"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if broken_pipe {
+            drop(child.stdout.take());
+        } else if mode == "signal" {
+            assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+        }
+        let deadline =
+            Instant::now() + Duration::from_secs(if mode == "deadline" { 12 } else { 2 });
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "query did not stop after cancellation (broken_pipe={broken_pipe}): {output:?}"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if broken_pipe {
+                0
+            } else if mode == "deadline" {
+                124
+            } else {
+                130
+            }),
+            "{output:?}"
+        );
+        if !broken_pipe {
+            let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                error["error"]["code"],
+                if mode == "deadline" {
+                    "deadline_exceeded"
+                } else {
+                    "cancelled"
+                }
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let (busy, _, _): (i64, i64, i64) = connection
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .unwrap();
+            if busy == 0 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "cancelled query retained a reader snapshot"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        health();
+        assert_eq!(p.ok(&["status"])["lab_id"], manifest.lab_id);
+    }
+    connection
+        .execute_batch(
+            "DROP VIEW query_events; ALTER TABLE retained_navigation RENAME TO query_events;",
+        )
+        .unwrap();
+    p.ok(&["investigate", "summary"]);
+}
+
+#[test]
+fn investigation_text_escapes_untrusted_terminal_controls() {
+    let p = Project::new();
+    p.up();
+    let out = Command::new(env!("CARGO_BIN_EXE_ronchi"))
+        .arg("--project")
+        .arg(p.path())
+        .args([
+            "investigate",
+            "timeline",
+            "--signature",
+            "\u{1b}[31m\u{85}\u{202e}",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains(['\u{1b}', '\u{85}', '\u{202e}']));
+    assert!(text.contains("\\u001b"));
+    assert!(text.contains("\\u{202e}"));
+    assert!(out.stderr.is_empty());
 }

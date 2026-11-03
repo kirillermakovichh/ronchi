@@ -313,6 +313,7 @@ const EVENT_FIELDS: &[&str] = &[
 ];
 pub(crate) const REQUIRED: &[&str] = &[
     "schema_version",
+    "execution_mode",
     "transaction_signature",
     "transaction_signatures",
     "request_id",
@@ -405,11 +406,6 @@ impl Request {
                 "Payload selection requires investigate.evidence",
             ));
         }
-        if a.include_payload {
-            return Err(Error::capability(
-                "Payload preview is not implemented in this query slice",
-            ));
-        }
         let defaults = if self.operation == Operation::Summary {
             vec!["counts", "traffic_state"]
         } else {
@@ -429,7 +425,14 @@ impl Request {
         }
         for field in &a.fields {
             let allowed = if self.operation == Operation::Summary {
-                ["counts", "traffic_state", "analysis", "findings"].contains(&field.as_str())
+                [
+                    "counts",
+                    "traffic_state",
+                    "analysis",
+                    "findings",
+                    "lab_context",
+                ]
+                .contains(&field.as_str())
             } else {
                 EVENT_FIELDS.contains(&field.as_str())
             };

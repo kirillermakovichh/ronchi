@@ -1631,3 +1631,94 @@ async fn response_loss_silence_retains_identity_and_autonomous_status() {
 
 #[path = "cases/response_loss.rs"]
 mod response_loss_cases;
+
+#[tokio::test]
+async fn investigation_correlates_http_signature_lookups_and_exposes_signed_bytes_only_explicitly()
+{
+    use ronchi::query::{Arguments, Engine as QueryEngine, Operation, Request, Scope};
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    let hash = server.hash().await;
+    let (signature, wire) = signed(&hash, 81, false);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    server
+        .call("getSignatureStatuses", json!([[signature]]))
+        .await;
+    let engine = QueryEngine::default();
+    let path = server.directory.path().join("journal.sqlite");
+    let req = Request {
+        contract_version: 1,
+        request_id: "q-http".into(),
+        lab_id: "L-transactions".into(),
+        operation: Operation::Timeline,
+        arguments: Arguments {
+            scope: Scope {
+                signature: vec![signature.clone()],
+                rpc_method: vec!["getSignatureStatuses".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    };
+    let response = engine
+        .execute(
+            path.clone(),
+            true,
+            "explicit",
+            req,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let items = response.result["items"].as_array().unwrap();
+    assert!(items.iter().any(|i| i["kind"] == "rpc.registered"));
+    assert!(
+        items
+            .iter()
+            .all(|i| i["rpc_method"] == "getSignatureStatuses")
+    );
+    assert!(
+        !serde_json::to_string(&response)
+            .unwrap()
+            .contains(&STANDARD.encode(&wire))
+    );
+    let req = Request {
+        contract_version: 1,
+        request_id: "q-wire".into(),
+        lab_id: "L-transactions".into(),
+        operation: Operation::Evidence,
+        arguments: Arguments {
+            scope: Scope {
+                signature: vec![signature],
+                kind: vec!["transaction.accepted".into()],
+                ..Default::default()
+            },
+            include_payload: true,
+            ..Default::default()
+        },
+    };
+    let response = engine
+        .execute(path, true, "explicit", req, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.result["items"][0]["payload"]["preview"],
+        STANDARD.encode(&wire)
+    );
+    assert_eq!(
+        response.result["items"][0]["payload"]["payload_truncated"],
+        false
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server
+        .phase(
+            response.result["items"][0]["transaction_signature"]
+                .as_str()
+                .unwrap(),
+            Phase::Finalized,
+        )
+        .await;
+    assert!(server.stop(false).await);
+}

@@ -184,7 +184,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 8. Bounded Investigation queries
 
-- [ ] **Accept:** Expose summary, Timeline, and Evidence Slice through CLI/control API with storage-level filtering/projection, snapshot pagination, byte caps, and completeness metadata.
+- [x] **Accept:** Expose summary, Timeline, and Evidence Slice through CLI/control API with storage-level filtering/projection, snapshot pagination, byte caps, and completeness metadata.
 - **Verify:** Paging during appends, empty/no-match results, invalid cursors, payload previews, pipe closure, and retained links after stop.
 - **Dependencies:** 7. **Scope:** Medium. **Likely files:** `src/query.rs`, `src/journal/query.rs`, `src/api.rs`, `src/cli/investigate.rs`, `tests/investigation.rs`.
 - **Source:** [Investigation interfaces](../docs/product/investigation-interfaces.md).
@@ -206,7 +206,13 @@ Checkpoints record results and do not require another approval interview.
 
 #### 8d. Payloads, byte budgets, and completeness
 
-- [ ] Verify exact envelope bounds, payload previews, completeness states, reader cancellation/timeout, pipe closure, and concurrent writes.
+- [x] Verify exact envelope bounds, payload previews, completeness states, reader cancellation/timeout, pipe closure, and concurrent writes.
+
+- **Observed:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (95 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Focused commands also passed: `cargo test --locked --test investigation`, `cargo test --locked --test lab_lifecycle investigation_ctrl_c -- --nocapture`, `cargo test --locked --test lab_lifecycle investigation_control_auth -- --nocapture`, `cargo test --locked --test lab_lifecycle investigation_text -- --nocapture`, and `cargo test --locked --test transaction_history investigation_correlates -- --nocapture`.
+- **Covered:** Exact UTF-8 envelope boundaries with escaping; valid HTTP requests at 64 KiB and rejection at one extra byte; 200/201 filter values; bounded payload previews and JSON literals without numeric coercion; byte-page and payload truncation independently; normalized and changed cursor bindings; no-match and unperformed Findings; immutable references across finalized/interrupted history and name reuse; all snapshot pages during concurrent appends; SQL payload fault injection; read-only legacy queries; mode/Case context at the watermark.
+- **Cancellation:** Real SQLite VM work holds a page snapshot while concurrent writes continue. Cancellation releases it and permits `wal_checkpoint(TRUNCATE)`. Native CLI/control tests verify Ctrl-C (130), default 10-second timeout (124), broken pipe (0), released reader snapshots, unchanged Lab identity, and continuing HTTP `getHealth`/Journal writes. The macOS pipe check requests `POLLOUT` to observe closed readers.
+- **Review:** The scoped `ronchi-code-review` checked filters, atomic projection, immutable correlations, SQL-before-payload selection, reader/task ownership, exact encoded bounds, cursor continuation, redaction, and absence of invented Findings. Preview backoff accounts for cursor and truncation overhead. No confirmed blocking defect remains in this slice.
+- **Boundary:** This is bounded Investigation over retained Journal evidence. Findings analysis is explicitly `not_performed`; `finding_id` returns a capability error. Legacy correlation gaps remain explicit. Preview fragments do not constitute full export. Dashboard, MCP, export, and follow streams remain separate. Native checks ran on macOS; no Linux process-behavior claim follows. Task 8 is complete; task 9 is next.
 
 ### 9. Evidence-backed Findings
 

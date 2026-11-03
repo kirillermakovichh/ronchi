@@ -6,7 +6,7 @@ The [evidence contract](evidence-and-findings.md) owns facts, correlation, Findi
 The [Lab lifecycle](lab-lifecycle.md) owns workspace resolution, process ownership, readiness, and mutation effects.
 All three interfaces call the same core operations against one Lab Journal.
 
-## Implementation status: task 8 in progress
+## Implemented Investigation surface
 
 The Rust query core supports finite summary, Timeline, and Evidence Slice metadata queries.
 Schema 6 stores indexed navigation metadata in the same transaction as each Journal event.
@@ -22,7 +22,20 @@ Live CLI queries use authenticated `POST /v1/labs/{id}/investigate` with the typ
 Retained CLI queries open the exact Journal read-only without starting a Lab.
 `schema investigate.summary|investigate.timeline|investigate.evidence` exposes shared request and success/error models offline.
 JSON mode emits one envelope; text mode escapes terminal controls in untrusted values.
-Explicit payload previews and cancellation/pipe acceptance checks remain unfinished in task 8.
+Evidence accepts `--include-payload` and returns a SQL-bounded preview of the selected retained payload.
+The preview ceiling is 4096 UTF-8 bytes before JSON escaping; the core can reduce it further to fit the full envelope.
+It never cuts a UTF-8 character or substitutes replacement characters.
+`payload.retained_bytes` is the UTF-8 length of the retained representation; base64 counts encoded text bytes.
+`payload.encoding` is `base64`, `text`, or `json`; a truncated JSON/base64 preview is a fragment, not a complete decoded value.
+`payload.payload_truncated` describes the preview independently of item pagination.
+Mandatory `payload_status` distinguishes `available`, `absent`, `redacted`, `omitted_by_policy`, and `lost` when the retained facts declare that state.
+The query never reverses redaction or invents missing content.
+Normal views omit signed bytes, raw bodies, and transaction payloads.
+Ctrl-C cancels the query with exit 130 and keeps the Lab running.
+The query deadline returns exit 124; stdout pipe closure cancels further reading and exits 0.
+Native process checks verify these paths on macOS, including reader release and continued RPC writes.
+Findings remain assigned to task 9; `finding_id` returns `unsupported_capability`.
+Dashboard, MCP, follow streams, and export remain separate tasks.
 The sections below retain the full accepted contract.
 
 ## Operations and identity
@@ -133,6 +146,20 @@ Projection always retains identity, kind, source, necessary correlation referenc
 If a payload cannot fit, return its bounded preview, retained byte length, and `payload_truncated:true`; never imply that preview is complete.
 If one projected item still cannot fit, return `result_too_large` with a smaller projection or interval as the recovery step.
 Exhaustive evidence retrieval is an explicit client traversal of bounded pages, not an unbounded response.
+
+### Implemented projection paths
+
+Summary accepts `counts`, `traffic_state`, `lab_context`, `analysis`, and `findings`.
+`lab_context` preserves the Lab execution mode and Case binding at the watermark, independent of the record filters.
+It reports unknown legacy Case context explicitly.
+It always retains `lab_context`, the explicit unperformed Findings-analysis marker, and `findings:null`.
+Event queries accept `event_ref`, `kind`, `schema_version`, `source`, `recorded_at`, `elapsed_ns`, `execution_mode`, `rpc_method`, `transaction_signature`, `transaction_signatures`, `request_id`, `batch_id`, `registration_seq`, `policy_ref`, `cause_refs`, `data`, `simulated_time_ns`, `slot`, `block_height`, `payload_status`, and `payload`.
+`data` means the payload-free typed event facts, not the original event body.
+`payload` requires Evidence Slice and explicit `include_payload:true`.
+An explicit payload request returns the preview even when `fields` omits `payload`.
+Projection always retains event identity, kind, source, schema, execution mode, correlation references, and payload status.
+The response always retains the selected scope, watermark, Journal state, gaps, and pagination metadata.
+Unknown paths return `invalid_field`.
 
 ## Responses and completeness
 

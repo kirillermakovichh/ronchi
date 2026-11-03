@@ -19,6 +19,11 @@ pub(super) fn functions(connection: &Connection) -> rusqlite::Result<()> {
             .map(|time| time.nanosecond()))
     })
 }
+pub(super) fn payload_value(event: &str, path: &str) -> String {
+    format!(
+        "(CASE WHEN {path} IS NULL THEN NULL WHEN json_type({event},{path})='text' THEN json_extract({event},{path}) ELSE {event} -> {path} END)"
+    )
+}
 /// The legacy adapter also projects in SQL; no original event body is deserialized by the reader.
 pub(super) fn projection(input: &str, resolve: bool) -> String {
     let tx_ref = if resolve {
@@ -64,12 +69,13 @@ pub(super) fn projection(input: &str, resolve: bool) -> String {
         'policy_ref',json(coalesce(policy,{prior_policy},'null')),'cause_refs',json(coalesce(json_extract(event_json,'$.data.cause_refs'),'[]')),
         'simulated_time_ns',json_extract(event_json,'$.data.simulated_time_ns'),'slot',coalesce(json_extract(event_json,'$.data.slot'),json_extract(event_json,'$.data.processed_slot')),
         'block_height',coalesce(json_extract(event_json,'$.data.block_height'),json_extract(event_json,'$.data.processed_height')),
-        'payload_status',CASE WHEN json_extract(event_json,'$.data.payload_redacted')=1 THEN 'redacted' WHEN payload_path IS NULL THEN 'absent' ELSE 'available' END,
+        'payload_status',CASE WHEN json_extract(event_json,'$.data.payload_status') IN ('redacted','omitted_by_policy','lost') THEN json_extract(event_json,'$.data.payload_status') WHEN json_extract(event_json,'$.data.payload_redacted')=1 THEN 'redacted' WHEN payload_path IS NULL THEN 'absent' ELSE 'available' END,
         'data',json_extract(json_remove(event_json,'$.data.wire_base64','$.data.payload','$.data.raw_body','$.data.body','$.data.attachment',
           '$.data.result.transaction','$.data.source_result.transaction','$.data.request','$.data.admission_request','$.data.signature','$.data.signatures','$.data.cause_refs'),'$.data')) metadata_json,
-      payload_path,length(CAST(json_extract(event_json,payload_path) AS BLOB)) payload_bytes,
-      CASE WHEN payload_path='$.data.wire_base64' THEN 'base64' WHEN json_type(event_json,payload_path) IN ('array','object') THEN 'json' ELSE 'text' END payload_encoding
+      payload_path,length(CAST({payload_value} AS BLOB)) payload_bytes,
+      CASE WHEN payload_path='$.data.wire_base64' THEN 'base64' WHEN json_type(event_json,payload_path)!='text' THEN 'json' ELSE 'text' END payload_encoding
     FROM signatures"#,
+        payload_value = payload_value("event_json", "payload_path"),
         prior_method = prior("rpc_method"),
         prior_signatures = prior("transaction_signatures"),
         prior_activation = prior("policy_ref.revision"),

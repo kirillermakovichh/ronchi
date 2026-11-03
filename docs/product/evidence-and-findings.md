@@ -153,6 +153,12 @@ Transition events update the projection atomically.
 Acceptance also retains resolved lookup addresses; historical JSON projection does not query mutable upstream state.
 A bounded `protocol.fixture` event records explicit simulator startup state.
 A failed projection write rolls back the submission attempt and acceptance together.
+Schema 6 adds payload-free navigation and signature indexes in the same Journal event transaction.
+It keeps original payloads in event storage and creates no additional capture lifecycle.
+Investigation readers filter and project in SQL at a committed watermark.
+Each page closes its read-only snapshot before returning.
+The [implemented Investigation surface](investigation-interfaces.md#implemented-investigation-surface) owns query fields, payload previews, cursors, and completeness behavior.
+
 Schema 5 adds a singleton current Case projection updated atomically by `case.changed`.
 Status reads that projection after process exit without scanning event history.
 

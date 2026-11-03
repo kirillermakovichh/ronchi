@@ -67,12 +67,14 @@ async fn execute(
     id: Option<&str>,
     selection: Selection,
     cancel: CancellationToken,
+    resolved: &mut Option<String>,
 ) -> Result<Response, Error> {
     let selected = crate::lab::status(project.clone(), name, id)
         .await
         .map_err(lab_error)?;
     let manifest = selected.manifest;
     let lab_id = manifest.lab_id.clone();
+    *resolved = Some(lab_id.clone());
     let mut refs = selection.references;
     refs.extend(selection.events.into_iter().map(|event_seq| EventRef {
         lab_id: lab_id.clone(),
@@ -131,11 +133,83 @@ fn safe_text(value: &str) -> String {
         })
         .collect()
 }
+fn render(response: &Response) -> String {
+    let mut lines = vec![format!(
+        "Lab {} | snapshot {} | {:?} | {}",
+        response.lab_id,
+        response.view.snapshot_seq,
+        response.view.journal_state,
+        response.selection_basis
+    )];
+    if response.view.scope != Scope::default() {
+        lines.push(format!(
+            "Scope: {}",
+            serde_json::to_string(&response.view.scope).expect("typed scope serializes")
+        ));
+    }
+    if let Some(items) = response
+        .result
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+    {
+        lines.push(format!("{} retained records", items.len()));
+        lines.extend(
+            items
+                .iter()
+                .map(|item| serde_json::to_string(item).expect("typed item serializes")),
+        );
+    } else {
+        let context = &response.result["lab_context"];
+        lines.push(format!(
+            "Mode: {} | Case: {} {}",
+            context["execution_mode"].as_str().unwrap_or("unknown"),
+            context["case_state"].as_str().unwrap_or("unknown"),
+            context["case_binding"]["policy"]["case_id"]
+                .as_str()
+                .unwrap_or("")
+        ));
+        if let Some(counts) = response.result.get("counts") {
+            lines.push(format!("Counts: {counts}"));
+        }
+        if let Some(traffic) = response
+            .result
+            .get("traffic_state")
+            .and_then(serde_json::Value::as_str)
+        {
+            lines.push(format!("Traffic: {traffic}"));
+        }
+        lines.push("Findings: analysis not performed".into());
+        lines.push(format!(
+            "Inspect: investigate timeline/evidence --lab-id {}",
+            response.lab_id
+        ));
+    }
+    lines.push(format!(
+        "Selection complete: {} (retained records only)",
+        response.view.selection_complete
+    ));
+    for gap in &response.view.evidence_gaps {
+        lines.push(format!("Evidence gap [{}]: {}", gap.code, gap.message));
+    }
+    if let Some(cursor) = &response.page.next_cursor {
+        lines.push(format!(
+            "Continue the same selection with --cursor {cursor}"
+        ));
+    }
+    if response.page.truncated {
+        lines.push("Page stopped at the encoded response byte budget".into());
+    }
+    lines
+        .into_iter()
+        .map(|line| safe_text(&line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 async fn stdout_closed() {
     loop {
         let mut descriptor = libc::pollfd {
             fd: 1,
-            events: 0,
+            events: libc::POLLOUT,
             revents: 0,
         };
         // poll does not consume or write stdout. ERR signals a pipe without readers.
@@ -162,9 +236,10 @@ pub fn run(
         Ok(r) => r,
         Err(_) => return 6,
     };
+    let mut resolved = id.map(String::from);
     let result = runtime.block_on(async {
         let cancel = CancellationToken::new();
-        let future = execute(project, name, id, selection, cancel.clone());
+        let future = execute(project, name, id, selection, cancel.clone(), &mut resolved);
         tokio::pin!(future);
         tokio::select! {
             result=&mut future => result,
@@ -192,13 +267,7 @@ pub fn run(
             if json {
                 serde_json::to_vec(&response)
             } else {
-                serde_json::to_string_pretty(&response).map(|s| {
-                    s.lines()
-                        .map(safe_text)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        .into_bytes()
-                })
+                Ok(render(&response).into_bytes())
             },
         ),
         Err(error) => {
@@ -215,7 +284,7 @@ pub fn run(
                 serde_json::to_vec(&Failure {
                     contract_version: 1,
                     request_id: format!("cli-{}", std::process::id()),
-                    lab_id: id.map(String::from),
+                    lab_id: resolved,
                     error,
                 }),
             )

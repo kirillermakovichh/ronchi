@@ -214,7 +214,20 @@ impl JournalReader {
                     |row| row.get(0),
                 )
                 .map_err(|_| Error::storage())?;
-            let mut result = json!({"analysis":{"findings":"not_performed","reason":"Findings engine is not implemented"},"findings":null});
+            let context: String = self.connection.query_row(
+                &format!("{cte} SELECT json_object('execution_mode',(SELECT json_extract(metadata_json,'$.execution_mode') FROM q WHERE event_seq<=?1 ORDER BY event_seq LIMIT 1),'case_binding',json((SELECT json_extract(metadata_json,'$.data.binding') FROM q WHERE kind='case.changed' AND event_seq<=?1 ORDER BY event_seq DESC LIMIT 1)))"),
+                [cursor.snapshot as i64],|row|row.get(0)
+            ).map_err(|_|Error::storage())?;
+            let mut context: Value =
+                serde_json::from_str(&context).map_err(|_| Error::storage())?;
+            context["case_state"] = json!(if self.version < 5 {
+                "unknown"
+            } else if context["case_binding"]["policy"].is_null() {
+                "not_armed"
+            } else {
+                "armed"
+            });
+            let mut result = json!({"lab_context":context,"analysis":{"findings":"not_performed","reason":"Findings engine is not implemented"},"findings":null});
             if request
                 .arguments
                 .fields
@@ -284,7 +297,7 @@ impl JournalReader {
                 .prepare(&sql)
                 .map_err(|_| Error::storage())?;
             let mut items = Vec::new();
-            for (index, id) in ids
+            'records: for (index, id) in ids
                 .iter()
                 .take(usize::from(request.arguments.limit))
                 .enumerate()
@@ -299,7 +312,29 @@ impl JournalReader {
                         "Projected record exceeds the bounded item envelope",
                     ));
                 }
-                let item: Value = serde_json::from_str(&text).map_err(|_| Error::storage())?;
+                let mut item: Value = serde_json::from_str(&text).map_err(|_| Error::storage())?;
+                if request.arguments.include_payload {
+                    let sql = format!(
+                        "{cte} SELECT q.payload_bytes,q.payload_encoding,CASE WHEN json_extract(q.metadata_json,'$.payload_status')='available' THEN substr(CAST({payload_value} AS BLOB),1,?2) ELSE NULL END FROM q JOIN events e ON e.event_seq=q.event_seq WHERE q.event_seq=?1",
+                        payload_value =
+                            query_index::payload_value("e.event_json", "q.payload_path")
+                    );
+                    let (length, encoding, bytes): (Option<i64>, Option<String>, Option<Vec<u8>>) =
+                        self.connection
+                            .query_row(
+                                &sql,
+                                rusqlite::params![id, limits.preview_bytes as i64],
+                                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                            )
+                            .map_err(|_| Error::storage())?;
+                    item["payload"] = if let Some(bytes) = bytes {
+                        let valid = std::str::from_utf8(&bytes)
+                            .map_or_else(|e| e.valid_up_to(), |s| s.len());
+                        json!({"preview":std::str::from_utf8(&bytes[..valid]).map_err(|_|Error::storage())?,"retained_bytes":length,"encoding":encoding,"payload_truncated":length.is_some_and(|n|n>valid as i64)})
+                    } else {
+                        Value::Null
+                    };
+                }
                 items.push(item);
                 response.result = json!({"items":items});
                 let more = index + 1 < ids.len();
@@ -321,6 +356,15 @@ impl JournalReader {
                     response.page.truncated = true;
                     response.page.reason = Some("response_bytes".into());
                     response.view.selection_complete = false;
+                    if items.len() == 1 {
+                        // The first item can reduce its preview before failing its envelope.
+                        response.page.truncated = false;
+                        response.page.reason = None;
+                        response.view.selection_complete = !more;
+                        if fit_preview(&mut items, &mut response, limits.response_bytes) {
+                            continue 'records;
+                        }
+                    }
                     loop {
                         items.pop();
                         let Some(last) = items.last() else {
@@ -342,7 +386,7 @@ impl JournalReader {
                             .encode(),
                         );
                         response.result = json!({"items":items});
-                        if query::encoded_len(&response, limits.response_bytes).is_ok() {
+                        if fit_preview(&mut items, &mut response, limits.response_bytes) {
                             break;
                         }
                     }
@@ -362,3 +406,28 @@ impl JournalReader {
     }
 }
 const MAX_PROJECTED_ITEM: usize = 256 * 1024;
+
+fn fit_preview(items: &mut [Value], response: &mut Response, budget: usize) -> bool {
+    loop {
+        response.result = json!({"items":items});
+        if query::encoded_len(response, budget).is_ok() {
+            return true;
+        }
+        let Some(item) = items.last_mut() else {
+            return false;
+        };
+        let Some(preview) = item["payload"]["preview"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+        else {
+            return false;
+        };
+        let mut length = preview.len() / 2;
+        while !preview.is_char_boundary(length) {
+            length -= 1;
+        }
+        let preview = preview[..length].to_string();
+        item["payload"]["preview"] = json!(preview);
+        item["payload"]["payload_truncated"] = json!(true);
+    }
+}
