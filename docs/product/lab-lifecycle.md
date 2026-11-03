@@ -286,6 +286,8 @@ Rotate control credentials on every new Lab.
 
 Retain stopped Labs until explicit cleanup under the [evidence retention contract](evidence-and-findings.md).
 Cleanup and deletion reject live Labs and operate only on selected workspace-owned paths.
+Use `ronchi --lab-id ID lab delete` for explicit whole-Lab deletion.
+Retained viewers and finite CLI evidence reads hold a shared maintenance lease; deletion requires exclusive ownership.
 Archiving preserves immutable IDs and evidence references; it does not preserve a running chain.
 Workspace removal requires stopping its live Labs first.
 Never delete user backend data, native Surfpool project sources, or files outside the Project Workspace.

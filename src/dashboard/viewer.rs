@@ -161,6 +161,8 @@ pub async fn serve(
             "Retained viewer requires a stopped or interrupted Lab; use ronchi dashboard for a live Lab",
         ));
     }
+    let _evidence_lease =
+        crate::maintenance::read_lock(&Workspace::new(&project), &manifest.lab_id)?;
     let path = Workspace::new(&project)
         .lab(&manifest.lab_id)?
         .join("journal.sqlite");

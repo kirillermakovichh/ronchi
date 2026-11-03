@@ -128,6 +128,7 @@ async fn execute(
     };
     request.normalize()?;
     let ws = crate::workspace::Workspace::new(&project);
+    let _evidence_lease = crate::maintenance::read_lock(&ws, &lab_id).map_err(lab_error)?;
     if matches!(
         manifest.state,
         crate::lab::Lifecycle::Ready | crate::lab::Lifecycle::Stopping

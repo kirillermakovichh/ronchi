@@ -313,3 +313,45 @@ An export records the Lab, snapshot, scope, versions, redaction policy, omitted 
 Export streams bounded pages with an explicit output-byte limit; it does not hold a long SQLite snapshot or implicitly include the entire Journal.
 Raw content requires explicit selection and a byte budget; export never removes existing redaction.
 A portable replayable Chaincase format remains deferred; an evidence export does not promise reproduction of an external backend or live upstream.
+
+### Explicit maintenance commands
+
+`ronchi --lab-id ID lab delete` deletes that entire stopped or interrupted Lab.
+It requires the exact immutable ID.
+It never stops or signals a process.
+It rejects active owners, live recorded children, ongoing maintenance, and retained viewers.
+It also rejects symlinks and artifacts outside its bounded inventory of 4096 entries and 16 directory levels.
+If another Lab reuses the old name, deletion preserves the new name binding.
+Saved files under `ronchi/exports/` remain independent of Lab deletion.
+
+`ronchi --lab-id ID lab export NAME` creates `ronchi/exports/NAME.ndjson` without replacing an existing file.
+`NAME` must be a bounded identifier.
+The command supports live, stopped, and interrupted Journals.
+It pins one committed watermark before streaming selected Evidence pages.
+Use `--kind`, `--signature`, `--rpc-method`, `--event-seq`, `--from-seq`, `--to-seq`, `--snapshot-seq`, and `--fields` to select evidence.
+`--max-bytes` bounds the complete output, including header and footer.
+The default is 8 MiB; the permitted range is 16 KiB to 64 MiB.
+Export stops after at most 512 pages or a 30-second loop deadline.
+An in-flight page retains the ordinary 10-second query deadline.
+Each page releases its SQLite reader before the next page.
+
+The NDJSON format is `ronchi-evidence-ndjson-v1`.
+It contains one header, bounded query response records, and one completeness footer.
+The header records the immutable Lab ID, watermark, scope, fields, retained schema and component versions, redaction policy, omitted payload classes, and output-byte limit.
+Pages preserve the ordinary immutable event references and Evidence Gaps.
+The footer separates selection completeness from payload completeness.
+A partial selection records its reason and available query continuation cursor.
+The byte budget can leave no room for an individual record; that export explicitly contains no selected records.
+
+Normal export omits retained signed bytes, payloads, and raw attachments.
+`--include-payload` explicitly selects the query core's bounded retained chunks within the output-byte budget.
+Each chunk retains its encoding, byte offset, and continuation metadata.
+`--payload-offset` requires one `--event-seq` and starts at a valid UTF-8 continuation boundary.
+Large selected payloads remain explicitly incomplete; raw attachments remain omitted.
+Existing redaction remains effective with payload selection.
+Cancellation removes only the new incomplete export file.
+Read-only schema adapters never migrate the original Journal.
+Unknown schema versions fail without replacing original database or committed WAL content.
+SQLite may create or update its ordinary reader sidecars.
+No offline schema migration command is exposed in this build.
+Every export records `replayable:false`.

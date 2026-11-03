@@ -211,6 +211,11 @@ impl JournalStore {
 }
 
 impl JournalReader {
+    /// Version of the retained schema; reading never upgrades the original file.
+    pub fn schema_version(&self) -> u32 {
+        self.version
+    }
+
     pub fn open(path: &Path) -> Result<Self, JournalError> {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;

@@ -4,10 +4,12 @@ pub mod config;
 mod control;
 mod dashboard;
 pub mod demo;
+pub mod export;
 mod files;
 pub mod findings;
 pub mod journal;
 pub mod lab;
+pub mod maintenance;
 mod network;
 pub mod process;
 pub mod protocol;
@@ -39,7 +41,7 @@ pub struct Cli {
     /// Select a project-local Lab name (default: default)
     #[arg(long, global = true, conflicts_with = "lab_id")]
     lab: Option<String>,
-    /// Select an exact Lab ID; mutations require the current live target
+    /// Select an exact retained or live Lab ID
     #[arg(long, global = true)]
     lab_id: Option<String>,
     #[command(subcommand)]
@@ -47,6 +49,11 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Maintain explicitly selected project-local evidence
+    Lab {
+        #[command(subcommand)]
+        operation: MaintenanceCommand,
+    },
     /// Print a single-use browser launch URL for a ready Lab
     Dashboard {
         /// Serve a retained Journal read-only in the foreground until Ctrl-C
@@ -103,9 +110,16 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
         operation: String,
     },
+}
+#[derive(Subcommand)]
+enum MaintenanceCommand {
+    /// Delete one stopped Lab and its artifacts; requires --lab-id
+    Delete,
+    /// Export a bounded selected evidence stream; requires --lab-id
+    Export(Box<maintenance::cli::ExportArgs>),
 }
 #[derive(Subcommand)]
 enum CheckCommand {
@@ -247,6 +261,80 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
         return render_lab_error(cli.json, lab::LabError::invalid("Invalid Lab name"));
     }
     match cli.command {
+        Command::Lab {
+            operation: MaintenanceCommand::Delete,
+        } => {
+            let Some(id) = cli.lab_id.as_deref() else {
+                return render_lab_error(
+                    cli.json,
+                    lab::LabError::invalid("Lab deletion requires an exact --lab-id"),
+                );
+            };
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            match run_async(maintenance::delete(root, id)) {
+                Err(error) => render_lab_error(cli.json, error),
+                Ok(result) => {
+                    let text = format!(
+                        "Deleted Lab {} and its owned artifacts; evidence references are invalid",
+                        result.deleted_lab_id
+                    );
+                    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("cli-{}",std::process::id()),"lab_id":id,"result":result});
+                    match write_output(cli.json, &envelope, &text, false) {
+                        Ok(()) => 0,
+                        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
+                        Err(_) => 6,
+                    }
+                }
+            }
+        }
+        Command::Lab {
+            operation: MaintenanceCommand::Export(args),
+        } => {
+            let Some(id) = cli.lab_id.as_deref() else {
+                return render_lab_error(
+                    cli.json,
+                    lab::LabError::invalid("Evidence export requires an exact --lab-id"),
+                );
+            };
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            let token = tokio_util::sync::CancellationToken::new();
+            let result = run_async(async {
+                let mut signal =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+                let cancelled = token.clone();
+                let export = maintenance::export(root, id, args.options(id), token);
+                tokio::pin!(export);
+                tokio::select! {
+                    result = &mut export => result,
+                    _ = signal.recv() => { cancelled.cancel(); export.await }
+                }
+            });
+            match result {
+                Err(error) => render_lab_error(cli.json, error),
+                Ok(result) => {
+                    let text = format!(
+                        "Exported Lab {} at {} to {} ({} bytes; complete: {}; replayable: false)",
+                        result.lab_id,
+                        result.snapshot_seq,
+                        result.path.display(),
+                        result.bytes,
+                        result.selection_complete
+                    );
+                    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("cli-{}",std::process::id()),"lab_id":id,"result":result});
+                    match write_output(cli.json, &envelope, &text, false) {
+                        Ok(()) => 0,
+                        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
+                        Err(_) => 6,
+                    }
+                }
+            }
+        }
         Command::Demo(args) => {
             if cli.lab.is_some() || cli.lab_id.is_some() {
                 return render_lab_error(
@@ -270,6 +358,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 "lab.up" => schemars::schema_for!(UpRequest),
                 "lab.status" => schemars::schema_for!(StatusRequest),
                 "lab.down" => schemars::schema_for!(DownRequest),
+                "lab.delete" => schemars::schema_for!(maintenance::DeleteRequest),
+                "lab.export" => schemars::schema_for!(maintenance::ExportRequest),
                 "case.arm" => schemars::schema_for!(CaseRequest),
                 _ => schemars::schema_for!(StatusRequest),
             };
@@ -278,6 +368,10 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 schemars::schema_for!(query::Envelope)
             } else if operation == "check.observe" {
                 schemars::schema_for!(checks::Envelope)
+            } else if operation == "lab.delete" {
+                schemars::schema_for!(maintenance::Envelope<maintenance::DeleteResult>)
+            } else if operation == "lab.export" {
+                schemars::schema_for!(maintenance::Envelope<maintenance::ExportResult>)
             } else if operation == "case.list" {
                 schemars::schema_for!(CatalogReply)
             } else {
