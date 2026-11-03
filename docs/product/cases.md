@@ -589,3 +589,68 @@ Account effects and status require actual later backend evidence.
 Ronchi records no invented simulated processing or commitment transitions in this mode.
 The current response-loss Findings remain simulator-specific and report their source/mode limitation for Surfpool evidence.
 A core source response does not establish a Client Outcome.
+
+## Verified recent-blockhash reuse claim
+
+`tx-blockhash-expired` is available in simulator and managed Surfpool modes.
+Its optional `blockhash.commitment` selects `processed`, `confirmed`, or `finalized`.
+The default is `finalized`, including omitted request commitment.
+CLI exposes the same setting as `case arm tx-blockhash-expired --blockhash-commitment processed|confirmed|finalized`.
+It caches one genuine `getLatestBlockhash` response per activation.
+The cache retains that response, its context slot, source identity, commitment, validity bound, and originating request.
+It does not invent or shorten a validity period.
+
+Every matching successful blockhash read observes a separate `getBlockHeight` result from the same authority and normalized commitment.
+The probe retains supported `minContextSlot` constraints.
+The Journal marks the probe as internal source work under the original request.
+It does not register that probe as application traffic.
+An ordinary matching application `getBlockHeight` also supplies explicit height evidence.
+At `height == lastValidBlockHeight`, the tuple remains unexpired under this comparison.
+A returned tuple needs a strictly greater source height for an expired-submission Finding.
+
+If a genuine source tuple is unavailable or exceeds the 16 KiB cache budget, the boundary preserves normal source handling and records a skipped selection.
+If the cached context violates `minContextSlot`, the boundary uses the genuine constrained result and records the exclusion.
+A missing source-height result cannot establish expiry.
+The cache starts its ten-second expiry window only after an actual matching height observation crosses the bound.
+The first eligible valid recent-hash submission releases that cache before dispatch, including when Surfpool then returns a source RPC error.
+Otherwise the elapsed window records that no matching expired submission was observed.
+A ten-second real-time recovery interval returns fresh source results before another capture cycle.
+The activation state survives with registered requests after Case replacement.
+Disarming removes it from newly registered requests.
+
+Signed submission evidence distinguishes recent-blockhash, durable-nonce, and unresolved lifetimes.
+Simulator classification uses its actual resolved nonce state.
+Surfpool classification never uses simulator account fixtures.
+Its conservative syntactic nonce check excludes an initial System Program `AdvanceNonceAccount` instruction and unresolved program identity from this recent-hash claim.
+Known backend identities are not reclassified as new expired-hash incidents on retry.
+Already processed simulator identities keep their authoritative lifecycle.
+
+A simulator submission that is expired at admission retains signed identity and RPC signature acceptance.
+Its record is terminal `expired`, with no future transition liability.
+Unassigned processing, confirmation, and finalization deadlines serialize as `null`.
+The typed internal record represents each unassigned deadline as zero.
+`transaction.processing_prevented` records the source height and expiry reason.
+The simulator returns no processed status or transaction for that identity.
+It does not advertise a successful 2/4/6-second schedule for the submission.
+Older retained numeric deadlines remain readable.
+
+The version-1 `recent-blockhash.expired-submission` Finding requires the selected genuine tuple, same-authority and same-commitment height evidence, stale read boundary, signed submission, actual admission result, processing/status evidence, and submission boundary.
+Simulator support additionally requires actual signature acceptance and processing-prevented evidence.
+Surfpool support uses the actual source RPC result and a collected `getSignatureStatuses` source observation.
+A backend error or null status alone does not prove non-execution.
+A rejected backend submission uses a request-scoped Finding with its signature; it does not invent an accepted request.
+All support stays within the selected Lab, scope, and snapshot.
+The rule's definition participates in cursor fingerprints and schema discovery.
+
+A default or sufficiently broad Investigation can resolve these linked facts and its `f1` evidence bookmark.
+A narrow signature or method filter can exclude earlier blockhash-read and height prerequisites because those reads predate signature knowledge.
+That selection reports an Evidence Gap instead of expanding its scope or rewriting old index associations.
+Remove the narrow filter to inspect the complete supporting slice.
+An expired cached view without an eligible observed submission produces no expired-submission incident.
+
+Controlled-clock HTTP histories verify below/equal/above-bound comparison, query constraints, replacement, signature retention, processed duplicate exclusion, and durable-nonce exclusion across legacy, v0, and v1.
+A fake backend HTTP history verifies exact height boundaries, nonce exclusion, and recovery after an authoritative rejection.
+A separate native Surfpool v1.7.0 history observes its naturally advancing block height without Case-driven time acceleration.
+On macOS arm64, the recorded native tuple had bound 181 and later same-view height 183.
+Surfpool returned `-32002` with `BlockhashNotFound`; its later status was null.
+Those are scoped observations of the native offline profile, not promises about every backend or safehash behavior.

@@ -1,4 +1,5 @@
 //! Bounded JSON-RPC. RPC IDs remain wire values; Journal identities are independent.
+mod blockhash;
 pub(crate) mod methods;
 use crate::{
     journal::{Event, WriterHandle, WriterHealth},
@@ -350,6 +351,19 @@ impl Rpc {
                 }
                 if kind.starts_with("rpc.backend") {
                     event.source = "surfpool".into();
+                }
+                if [
+                    "rpc.blockhash_source",
+                    "rpc.blockhash_height",
+                    "rpc.blockhash_status",
+                ]
+                .contains(&kind)
+                {
+                    event.source = if self.0.backend.is_some() {
+                        "surfpool".into()
+                    } else {
+                        "rpc_simulator".into()
+                    };
                 }
                 if kind.starts_with("rpc.upstream") {
                     event.source = "read_upstream".into();
@@ -736,7 +750,7 @@ impl Exchange {
                     item.get("params").unwrap_or(&Value::Null),
                 )
             };
-            let result = if matches!(method, "getSignatureStatuses" | "getTransaction")
+            let mut result = if matches!(method, "getSignatureStatuses" | "getTransaction")
                 && crate::cases::status::selected(&binding)
             {
                 match (result, activation.clone()) {
@@ -759,6 +773,30 @@ impl Exchange {
             } else {
                 result
             };
+            if !notification
+                && let Some(active) = &activation
+                && let Some(policy) = &binding.policy
+                && policy.settings.case_id == "tx-blockhash-expired"
+            {
+                match self
+                    .blockhash_source(
+                        active,
+                        &binding,
+                        &reference,
+                        method,
+                        item.get("params").unwrap_or(&Value::Null),
+                        &result,
+                    )
+                    .await
+                {
+                    Ok(Some(boundary)) => result = Ok(boundary),
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.rpc.0.writer.fail_fatal();
+                        result = Err(error);
+                    }
+                }
+            }
             let mut fact = reference.clone();
             if self.rpc.0.backend.is_none() {
                 let view = self

@@ -23,8 +23,11 @@ pub struct TransactionRecord {
     pub accepted_ns: u64,
     pub admission_slot: u64,
     pub admission_height: u64,
+    #[serde(with = "optional_deadline")]
     pub process_at_ns: u64,
+    #[serde(with = "optional_deadline")]
     pub confirmed_at_ns: u64,
+    #[serde(with = "optional_deadline")]
     pub finalized_at_ns: u64,
     pub hash_height: Option<u64>,
     pub last_valid_height: Option<u64>,
@@ -98,5 +101,20 @@ impl JournalReader {
             .query_row("SELECT EXISTS(SELECT 1 FROM transactions)", [], |r| {
                 r.get(0)
             })?)
+    }
+}
+
+// A terminal admission without a lifecycle schedule uses zero internally and null on the wire.
+mod optional_deadline {
+    use serde::{Deserialize, Serialize};
+    pub fn serialize<S: serde::Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+        if *value == 0 {
+            Option::<u64>::None.serialize(serializer)
+        } else {
+            Some(*value).serialize(serializer)
+        }
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+        Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(0))
     }
 }

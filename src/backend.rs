@@ -67,6 +67,13 @@ impl Client {
     pub(crate) fn cancel(&self) {
         self.0.cancelled.cancel();
     }
+    pub(crate) fn redact(&self, value: &Value) -> (Value, bool) {
+        self.0
+            .redactor
+            .as_ref()
+            .map(|redactor| redactor.redact(value))
+            .unwrap_or_else(|| (value.clone(), false))
+    }
     pub fn authority(&self) -> &str {
         &self.0.authority
     }
@@ -148,13 +155,6 @@ impl Client {
                 json!({"code":"backend_rpc_error","authority":self.0.authority,"backend_data":safe.get("data")}),
             ),
         })
-    }
-    pub(crate) fn redact(&self, value: &Value) -> (Value, bool) {
-        self.0
-            .redactor
-            .as_ref()
-            .map(|redactor| redactor.redact(value))
-            .unwrap_or_else(|| (value.clone(), false))
     }
     pub(crate) fn source_facts(
         &self,

@@ -745,3 +745,41 @@ fn status_cli_limits_share_core_validation_and_leave_previous_policy_armed() {
     assert_eq!(status["result"]["active_case"]["status"]["max_keys"], 1);
     p.ok(&["down"]);
 }
+
+#[path = "cases/blockhash_native.rs"]
+mod blockhash_cases;
+
+#[test]
+fn blockhash_cli_setting_selects_the_shared_commitment_policy() {
+    let p = Project::new();
+    p.ok(&[
+        "up",
+        "--rpc-listen",
+        "127.0.0.1:0",
+        "--control-listen",
+        "127.0.0.1:0",
+    ]);
+    let result = p.ok(&[
+        "case",
+        "arm",
+        "tx-blockhash-expired",
+        "--blockhash-commitment",
+        "processed",
+    ]);
+    assert_eq!(
+        result["result"]["active_case"]["blockhash"]["commitment"],
+        "processed"
+    );
+    let invalid = p.run(&[
+        "case",
+        "arm",
+        "tx-response-lost",
+        "--blockhash-commitment",
+        "processed",
+    ]);
+    assert_eq!(invalid.status.code(), Some(2), "{invalid:?}");
+    assert_eq!(
+        p.ok(&["status"])["result"]["active_case"]["case_id"],
+        "tx-blockhash-expired"
+    );
+}

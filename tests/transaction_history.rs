@@ -1726,6 +1726,8 @@ async fn investigation_correlates_http_signature_lookups_and_exposes_signed_byte
     assert!(server.stop(false).await);
 }
 
+#[path = "cases/blockhash.rs"]
+mod blockhash_cases;
 #[path = "cases/status.rs"]
 mod status_cases;
 #[path = "cases/timeout.rs"]

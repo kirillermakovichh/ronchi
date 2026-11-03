@@ -192,6 +192,9 @@ enum CaseCommand {
         outage_ms: Option<u64>,
         #[arg(long)]
         recovery_ms: Option<u64>,
+        /// Select the blockhash Case's source commitment (default: finalized)
+        #[arg(long)]
+        blockhash_commitment: Option<simulator::clock::Commitment>,
     },
     /// Disarm for later registrations; held requests retain their deadlines
     Disarm,
@@ -498,7 +501,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 value["maintained_case_rules"] = serde_json::json!([
                     cases::confirmation::finding_definition(),
                     cases::status::finding_definition(),
-                    cases::timeout::finding_definition()
+                    cases::timeout::finding_definition(),
+                    cases::blockhash::finding_definition()
                 ]);
             }
             match write_output(true, &value, "", false) {
@@ -677,6 +681,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     methods,
                     outage_ms,
                     recovery_ms,
+                    blockhash_commitment,
                 } => Some(cases::Arm {
                     case_id: case,
                     hold_ms,
@@ -698,6 +703,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                             recovery_ms: recovery_ms.unwrap_or(10000),
                         })
                     },
+                    blockhash: blockhash_commitment
+                        .map(|commitment| cases::blockhash::Settings { commitment }),
                 }),
                 _ => None,
             };

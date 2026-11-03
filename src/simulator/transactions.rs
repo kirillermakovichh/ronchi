@@ -413,6 +413,46 @@ impl Owner {
         receipt.committed().await?;
         Ok(())
     }
+    async fn blockhash_attempt(
+        &mut self,
+        signed: &SignedTransaction,
+        reference: &Value,
+        lifetime: &str,
+        eligible: bool,
+        source: &str,
+        activation: Option<&std::sync::Arc<crate::cases::Activation>>,
+    ) -> Result<(), RpcError> {
+        let binding: crate::cases::Binding = serde_json::from_value(reference["binding"].clone())
+            .map_err(|_| RpcError::internal())?;
+        let filtered = binding.policy.as_ref().is_none_or(|policy| {
+            policy.settings.signatures.is_empty()
+                || policy.settings.signatures.contains(&signed.signature)
+        });
+        let eligible = eligible && filtered;
+        let mut facts = vec![crate::lab::event(
+            "transaction.signed_attempt",
+            self.started,
+            json!({"request":reference,"signature":signed.signature,"blockhash":signed.blockhash,"lifetime":lifetime,"expiry_claim_eligible":eligible,"source_identity":source}),
+        )];
+        if let Some(active) = activation {
+            let selected = active
+                .blockhash
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .submission(
+                    &signed.signature,
+                    &signed.blockhash,
+                    lifetime,
+                    eligible && reference["responds"].as_bool().unwrap_or(false),
+                    self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
+                );
+            for (kind, mut data) in selected {
+                data["request"] = reference.clone();
+                facts.push(crate::lab::event(kind, self.started, data));
+            }
+        }
+        self.append(facts).await.map_err(|_| RpcError::internal())
+    }
     async fn submit(
         &mut self,
         signed: SignedTransaction,
@@ -432,12 +472,35 @@ impl Owner {
                     "Signed identity conflicts with previously retained content",
                 ));
             }
+            let source = format!("rpc-simulator:{}", self.clock.genesis_hash());
+            self.blockhash_attempt(
+                &signed,
+                &reference,
+                if existing.nonce_context.is_some() {
+                    "durable_nonce"
+                } else {
+                    "recent_blockhash"
+                },
+                !matches!(
+                    existing.stage,
+                    Phase::Processed | Phase::Confirmed | Phase::Finalized
+                ),
+                &source,
+                activation.as_ref(),
+            )
+            .await?;
             let attempt = crate::lab::event(
                 "transaction.submission",
                 self.started,
                 json!({"signature":signature,"digest":signed.digest,"admission":"duplicate","request":reference,"acceptance_ns":existing.accepted_ns}),
             );
-            self.append(vec![attempt])
+            let mut admission = crate::lab::event(
+                "rpc.admission_result",
+                self.started,
+                json!({"request":reference,"signature":signature,"blockhash":signed.blockhash,"source_identity":source,"admission":"signature_returned","processing":"retained_unchanged"}),
+            );
+            admission.source = "rpc_simulator".into();
+            self.append(vec![attempt, admission])
                 .await
                 .map_err(|_| RpcError::internal())?;
             return Ok(json!(signature));
@@ -537,6 +600,13 @@ impl Owner {
         let admission_view = self
             .clock
             .view_at(Duration::from_nanos(accepted), Commitment::Processed);
+        let pre_expired =
+            last_valid_height.is_some_and(|height| admission_view.block_height > height);
+        let (process_at_ns, confirmed_at_ns, finalized_at_ns) = if pre_expired {
+            (0, 0, 0)
+        } else {
+            (process_at_ns, confirmed_at_ns, finalized_at_ns)
+        };
         let record = TransactionRecord {
             signature: signature.clone(),
             wire_base64: signed.wire_base64,
@@ -552,8 +622,12 @@ impl Owner {
             finalized_at_ns,
             last_valid_height,
             expiry_at_ns,
-            next_due_ns: Some(next_due_ns),
-            stage: Phase::Pending,
+            next_due_ns: if pre_expired { None } else { Some(next_due_ns) },
+            stage: if pre_expired {
+                Phase::Expired
+            } else {
+                Phase::Pending
+            },
             processed_slot: None,
             processed_height: None,
             loaded_addresses,
@@ -561,6 +635,27 @@ impl Owner {
             admission_request: reference.clone(),
         };
         let status_stale = self.status_admit(&activation, &signature, &reference, accepted)?;
+        let source = format!("rpc-simulator:{}", self.clock.genesis_hash());
+        let signed_for_attempt = crate::protocol::SignedTransaction {
+            signature: signature.clone(),
+            wire_base64: record.wire_base64.clone(),
+            digest: record.digest.clone(),
+            version: record.version,
+            blockhash: record.blockhash.clone(),
+        };
+        self.blockhash_attempt(
+            &signed_for_attempt,
+            &reference,
+            if record.nonce_context.is_some() {
+                "durable_nonce"
+            } else {
+                "recent_blockhash"
+            },
+            true,
+            &source,
+            activation.as_ref(),
+        )
+        .await?;
         let mut data = serde_json::to_value(&record).map_err(|_| RpcError::internal())?;
         data["preflight"] = json!("skipped");
         data["execution"] = json!("not_performed");
@@ -571,19 +666,36 @@ impl Owner {
             self.started,
             json!({"signature":signature,"digest":signed.digest,"admission":"accepted","request":reference}),
         );
-        let mut facts = vec![attempt, accepted_fact];
-        if let Some(delay) = delay {
+        let mut admission = crate::lab::event(
+            "rpc.admission_result",
+            self.started,
+            json!({"request":reference,"signature":signature,"blockhash":record.blockhash,"source_identity":source,"admission":"signature_returned","processing":if pre_expired{"prevented_by_expiry"}else{"schedule_assigned"}}),
+        );
+        admission.source = "rpc_simulator".into();
+        let mut facts = vec![attempt, accepted_fact, admission];
+        if pre_expired {
+            let mut prevented = crate::lab::event(
+                "transaction.processing_prevented",
+                self.started,
+                json!({"signature":signature,"request":reference,"reason":"recent_blockhash_expired","blockhash":record.blockhash,"last_valid_height":last_valid_height,"observed_block_height":admission_view.block_height,"authority":"rpc_simulator"}),
+            );
+            prevented.source = "rpc_simulator".into();
+            facts.push(prevented);
+        }
+        if let Some(delay) = delay.filter(|_| !pre_expired) {
             facts.push(crate::lab::event("fault.confirmation_schedule_assigned", self.started, json!({"signature":signature,"request":reference,"policy":binding.policy,"schedule":delay,"process_at_ns":process_at_ns,"confirmed_at_ns":confirmed_at_ns,"finalized_at_ns":finalized_at_ns,"authority":"rpc_simulator"})));
         }
         if selected {
             facts.push(crate::lab::event("fault.response_loss_selected",self.started,json!({"signature":signature,"request":reference,"policy":binding.policy,"consumed":true})));
         }
         self.append(facts).await.map_err(|_| RpcError::internal())?;
-        if status_stale && let Some(activation) = activation {
-            self.status_activations
-                .insert(signature.clone(), std::sync::Arc::downgrade(&activation));
+        if !pre_expired {
+            if status_stale && let Some(activation) = activation {
+                self.status_activations
+                    .insert(signature.clone(), std::sync::Arc::downgrade(&activation));
+            }
+            self.credits.insert(signature.clone(), credits);
         }
-        self.credits.insert(signature.clone(), credits);
         if selected && hold.deadline().is_none() {
             let hold_ms = binding
                 .policy
@@ -652,6 +764,16 @@ impl Owner {
         } else {
             false
         };
+        let lifetime = crate::protocol::nonce::backend_lifetime(&signed)?;
+        self.blockhash_attempt(
+            &signed,
+            &reference,
+            lifetime,
+            existing.is_none(),
+            client.authority(),
+            activation.as_ref(),
+        )
+        .await?;
         let mut dispatch = crate::lab::event(
             "rpc.backend_started",
             self.started,
@@ -671,6 +793,15 @@ impl Owner {
             source.push(event);
         }
         self.append(source)
+            .await
+            .map_err(|_| RpcError::internal())?;
+        let mut admission = crate::lab::event(
+            "rpc.admission_result",
+            self.started,
+            json!({"request":reference,"signature":signature,"blockhash":signed.blockhash,"source_identity":client.authority(),"admission":if result.as_ref().is_ok_and(|value|value==&signature){"signature_returned"}else if result.is_ok(){"invalid_signature_result"}else if result.as_ref().err().and_then(|error|error.data.as_ref()).and_then(|data|data.get("code")).and_then(Value::as_str)==Some("backend_rpc_error"){"backend_rpc_error"}else{"outcome_unknown"},"processing":"backend_status_required","error_code":result.as_ref().err().map(|error|error.code)}),
+        );
+        admission.source = "surfpool".into();
+        self.append(vec![admission])
             .await
             .map_err(|_| RpcError::internal())?;
         let result = match result {

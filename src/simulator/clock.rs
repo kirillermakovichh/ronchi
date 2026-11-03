@@ -9,7 +9,18 @@ use std::{
 };
 use tokio::sync::Notify;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    schemars::JsonSchema,
+    clap::ValueEnum,
+    PartialEq,
+    Eq,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Commitment {
     Processed,

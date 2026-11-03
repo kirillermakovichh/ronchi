@@ -86,3 +86,29 @@ pub(crate) fn next_value(blockhash: &str) -> Result<String, RpcError> {
     ))
     .into_string())
 }
+
+/// Conservative lifetime classification without resolving backend accounts through simulator fixtures.
+pub(crate) fn backend_lifetime(
+    signed: &super::SignedTransaction,
+) -> Result<&'static str, RpcError> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&signed.wire_base64)
+        .map_err(|_| RpcError::internal())?;
+    let transaction = super::decode_wire(&bytes)?;
+    let message = &transaction.message;
+    let Some(first) = message.instructions().first() else {
+        return Ok("recent_blockhash");
+    };
+    let Some(program) = message
+        .static_account_keys()
+        .get(usize::from(first.program_id_index))
+    else {
+        return Ok("unresolved");
+    };
+    if program == &solana_sdk_ids::system_program::id() && first.data == 4u32.to_le_bytes() {
+        Ok("durable_nonce")
+    } else {
+        Ok("recent_blockhash")
+    }
+}

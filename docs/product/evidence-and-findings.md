@@ -369,3 +369,16 @@ Unknown schema versions fail without replacing original database or committed WA
 SQLite may create or update its ordinary reader sidecars.
 No offline schema migration command is exposed in this build.
 Every export records `replayable:false`.
+
+### Recent-blockhash source and result facts
+
+`rpc.blockhash_source` retains the genuine blockhash, validity bound, context slot, normalized commitment, and immutable source identity.
+`rpc.blockhash_height_started` and `rpc.blockhash_height` identify an internal probe separately from application RPC registrations.
+`fault.blockhash_captured`, `fault.blockhash_expired`, and `fault.blockhash_returned` retain the activation's cached view and its observed expiry basis.
+Skipped selections, elapsed windows without a matching expired submission, and recovery retain explicit diagnostics.
+`transaction.signed_attempt` records the validated signature, hash, lifetime classification, source identity, and eligibility limits before dispatch.
+`rpc.admission_result` keeps the mode's actual admission observation separate from a Client Outcome.
+`transaction.processing_prevented` supplies simulator expiry evidence.
+`rpc.blockhash_status` supplies bounded actual backend status observations for this Case.
+The maintained [Case claim](cases.md#verified-recent-blockhash-reuse-claim) owns its rule requirements and mode limits.
+Request-scoped Findings can carry an optional signature without claiming transaction acceptance.

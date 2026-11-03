@@ -9,6 +9,7 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+pub mod blockhash;
 pub mod confirmation;
 pub mod status;
 pub mod timeout;
@@ -29,6 +30,8 @@ pub struct Arm {
     pub status: Option<status::Settings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<timeout::Settings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blockhash: Option<blockhash::Settings>,
 }
 fn default_hold() -> u64 {
     20_000
@@ -46,6 +49,7 @@ impl Default for Arm {
             confirmation: None,
             status: None,
             timeout: None,
+            blockhash: None,
         }
     }
 }
@@ -58,6 +62,7 @@ impl Arm {
             "finality-delayed",
             "signature-status-null",
             "stale-transaction-read-after-submission",
+            "tx-blockhash-expired",
         ]
         .contains(&self.case_id.as_str())
         {
@@ -81,6 +86,11 @@ impl Arm {
                 ));
             }
             timeout.validate()?;
+        }
+        if self.blockhash.is_some() && self.case_id != "tx-blockhash-expired" {
+            return Err(RpcError::params(
+                "Blockhash settings require tx-blockhash-expired",
+            ));
         }
         if let Some(delay) = &self.confirmation {
             if !self.is_confirmation() {
@@ -127,6 +137,7 @@ pub struct Binding {
 #[derive(Debug, Default)]
 pub(crate) struct Activation {
     pub status: Mutex<status::Cache>,
+    pub blockhash: Mutex<blockhash::Cache>,
 }
 pub(crate) struct Registration {
     pub binding: Binding,
@@ -422,6 +433,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
         "signature-status-null",
         "stale-transaction-read-after-submission",
         "provider-timeout-burst",
+        "tx-blockhash-expired",
     ]
     .into_iter()
     .map(|case_id| CatalogEntry {
@@ -429,6 +441,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
         modes: if matches!(
             case_id,
             "tx-response-lost"
+                | "tx-blockhash-expired"
                 | "provider-timeout-burst"
                 | "signature-status-null"
                 | "stale-transaction-read-after-submission"
