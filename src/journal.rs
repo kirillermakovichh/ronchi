@@ -2,6 +2,7 @@
 //! This module does not infer application outcomes or restore a running Lab.
 mod budget;
 mod cases;
+mod checks;
 pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
 mod findings;
 mod nonces;

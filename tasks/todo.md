@@ -313,7 +313,10 @@ Checkpoints record results and do not require another approval interview.
 
 #### 11b. Durable bounded HTTP invocation
 
-- [ ] Reserve terminal evidence and commit start before HTTP; stream a deadline-bounded response, validate/redact selected facts, and commit completion/gap through the existing writer.
+- [x] Reserve terminal evidence and commit start before HTTP; stream a deadline-bounded response, validate/redact selected facts, and commit completion/gap through the existing writer.
+
+- **Verified 11b:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (138 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Four file-backed HTTP histories prove committed start before external POST, application authority and source time/revision preservation, malformed JSON as a gap without partial payload, real start/completion commit failures, active cancellation, and same-scope exclusion. The existing reservation budget also covers bounded Check terminal events; global Journal limits and schema remain unchanged.
+- **Ownership review:** A bounded supervisor owns finite collection tasks and their cancellation tokens. A Lab-wide semaphore bounds invocations; no worker queues missed polls. Transport tasks abort/join before completion; writer receipts, not admission, authorize HTTP. Existing navigation indexes provide read-only completed-collection lookup. Public transport and Lab shutdown integration remain in 11c/11d.
 
 #### 11c. Public collection operation
 

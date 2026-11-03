@@ -158,6 +158,16 @@ impl Definition {
         }) {
             return Err("Invalid runtime authorization variable name".into());
         }
+        if let Some(name) = &self.authorization_env {
+            let value =
+                std::env::var(name).map_err(|_| "Check runtime Authorization is unavailable")?;
+            if value.is_empty()
+                || value.len() > 4096
+                || hyper::header::HeaderValue::from_str(&value).is_err()
+            {
+                return Err("Invalid Check runtime Authorization".into());
+            }
+        }
         let l = &self.limits;
         if !(1..=30000).contains(&l.timeout_ms)
             || l.poll_interval_ms < 1000
@@ -258,16 +268,17 @@ impl Scope {
         self.intent_ids.dedup();
         self.signatures.sort();
         self.signatures.dedup();
-        for bound in [&self.since, &self.until].into_iter().flatten() {
-            if bound.len() > 64
-                || time::OffsetDateTime::parse(
-                    bound,
-                    &time::format_description::well_known::Rfc3339,
-                )
-                .is_err()
-            {
+        for bound in [&mut self.since, &mut self.until].into_iter().flatten() {
+            if bound.len() > 64 {
                 return Err("Invalid Check scope time bound".into());
             }
+            let parsed =
+                time::OffsetDateTime::parse(bound, &time::format_description::well_known::Rfc3339)
+                    .map_err(|_| "Invalid Check scope time bound")?
+                    .to_offset(time::UtcOffset::UTC);
+            *bound = parsed
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|_| "Invalid Check scope time bound")?;
         }
         if self
             .since
@@ -292,3 +303,61 @@ pub struct SourceRequest {
     pub facts: Vec<String>,
     pub deadline: String,
 }
+
+mod invocation;
+mod transport;
+pub use invocation::{Context, InvocationOutcome, InvocationResult, collect_once};
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, thiserror::Error)]
+#[error("{message}")]
+pub struct Error {
+    pub code: Box<str>,
+    pub message: Box<str>,
+    pub phase: Box<str>,
+    pub retryable: bool,
+    pub effects: Box<str>,
+    pub recovery: Box<str>,
+}
+impl Error {
+    pub fn new(code: &str, effects: &str) -> Self {
+        Self {
+            code: code.into(),
+            message: match code {
+                "invalid_argument" => "Invalid Check request or runtime configuration",
+                "state_conflict" => {
+                    "Check/scope is occupied or collection conflicts with retained state"
+                }
+                "capacity_exceeded" => "Check collection capacity is occupied",
+                "cancelled" => {
+                    "Check collection was cancelled; retained observations remain available"
+                }
+                "lab_unavailable" => "Check collection requires an authenticated live Lab",
+                _ => "Check Journal admission or commit failed; collection stopped",
+            }
+            .into(),
+            phase: "check.observe".into(),
+            retryable: false,
+            effects: effects.into(),
+            recovery:
+                "Inspect the collection identity and retained Check events before another mutation"
+                    .into(),
+        }
+    }
+    pub fn invalid() -> Self {
+        Self::new("invalid_argument", "none")
+    }
+    pub fn journal() -> Self {
+        Self::new("internal_error", "unknown")
+    }
+    pub fn exit(&self) -> i32 {
+        match self.code.as_ref() {
+            "invalid_argument" => 2,
+            "lab_unavailable" | "collection_unavailable" => 3,
+            "state_conflict" | "capacity_exceeded" => 5,
+            "cancelled" => 130,
+            _ => 6,
+        }
+    }
+}
+
+mod collection;
+pub use collection::{Arguments, Client, Envelope, Failure, Owner, Reply, Report, Request, spawn};

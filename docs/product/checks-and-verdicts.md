@@ -77,7 +77,15 @@ Limits default to `timeout_ms=5000`, `poll_interval_ms=1000`, `horizon_seconds=6
 Hard limits follow the invocation contract below.
 The effective source response ceiling is additionally 32 KiB so one complete validated result and its metadata fit the unchanged 64 KiB Journal event limit.
 Oversized source JSON must become a gap, never a complete truncated observation.
-Collection transport and commands remain later task-11 slices at this checkpoint.
+The internal collector commits start before HTTP and reserves bounded terminal evidence first.
+It streams the complete body under one fixed invocation deadline and never follows redirects.
+Validation failures retain a gap and no partial source JSON.
+Validated selected facts use application authority; supplied values never become trusted Journal events or causal links.
+Known runtime Authorization values echoed in source facts are redacted before persistence.
+Only metadata and evidence references enter collection status; full selected facts remain in the observation payload.
+An internal supervisor bounds active collections to 16 and retained status cache entries to 128.
+Older completed metadata resolves through the existing indexed Journal projection.
+Public commands and daemon shutdown integration remain later task-11 slices at this checkpoint.
 
 ## No-SDK HTTP observation adapter
 
