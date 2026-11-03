@@ -231,13 +231,17 @@ Checkpoints record results and do not require another approval interview.
 
 #### 9b. Bounded Journal evaluation
 
-- [ ] Adapt saved metadata through the existing query core without reading payloads or simulator state; preserve scope, watermark, deadline, cancellation, and reader limits.
+- [x] Adapt saved metadata through the existing query core without reading payloads or simulator state; preserve scope, watermark, deadline, cancellation, and reader limits.
 - **Verify:** Legacy correlation gaps, bounded processing, polling deduplication, batch boundary effects, concurrent appends, finalized/interrupted Journals.
 
 #### 9c. Findings query and supporting Evidence Slice
 
-- [ ] Expose CLI/control/schema/help, shared live/retained evaluation, five-Finding summary, pinned versioned pagination, and snapshot-preserving Finding references.
+- [x] Expose CLI/control/schema/help, shared live/retained evaluation, five-Finding summary, pinned versioned pagination, and snapshot-preserving Finding references.
 - **Verify:** Real CLI/HTTP references, page/projection stability, no hidden scope expansion, and read-only retained queries.
+
+- **Verified implementation slice 9b/9c:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (104 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Five independent file-backed histories verify both rules, fixed-snapshot references, page/projection independence, required-fact removal through exact scope, wrong Lab/signature/order, polling deduplication, independent valid Findings with gaps, the 256-incident limit, deadline, and cancellation. Existing CLI/control tests cover operation transport and retained selection; positive real Findings transport and legacy/batch acceptance remain in 9d.
+- **Review:** Scope filters apply to every support join. Presentation does not constrain evaluation. Each page releases its read transaction. Cursor fingerprints include rule definitions; Finding IDs exclude watermark and presentation. No writer, background service, schema migration, payload read, or simulator-state dependency was added.
+- **Environment:** Running the suite inside a multi-command shell caused sandbox loopback-bind errors. The focused lifecycle test and standalone `cargo test --locked` passed without code changes. Verification commands are run individually below.
 
 #### 9d. Public histories and completion review
 

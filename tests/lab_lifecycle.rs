@@ -1027,7 +1027,7 @@ fn investigation_cli_queries_live_and_retained_identity_without_new_capture() {
     );
     let latest = p.ok(&["investigate", "summary"]);
     assert_eq!(latest["selection_basis"], "latest");
-    assert_eq!(latest["result"]["analysis"]["findings"], "not_performed");
+    assert_eq!(latest["result"]["analysis"]["findings"], "performed");
     p.up();
     let retained = p.ok(&[
         "investigate",

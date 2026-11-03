@@ -154,12 +154,23 @@ impl JournalReader {
         } else {
             Cursor {
                 v: 1,
-                snapshot: latest.snapshot_seq,
+                snapshot: request
+                    .arguments
+                    .snapshot_seq
+                    .unwrap_or(latest.snapshot_seq),
                 position: 0,
                 fingerprint,
                 state: latest.state,
             }
         };
+        if cursor.snapshot > latest.snapshot_seq
+            || request
+                .arguments
+                .snapshot_seq
+                .is_some_and(|n| n != cursor.snapshot)
+        {
+            return Err(Error::cursor());
+        }
         if request.operation == Operation::Summary && request.arguments.cursor.is_some() {
             return Err(Error::cursor());
         }
@@ -196,13 +207,136 @@ impl JournalReader {
                 reason: None,
             },
         };
+        let mut effective_request = request.clone();
+        let mut analysis = None;
+        if matches!(request.operation, Operation::Summary | Operation::Findings)
+            || request.arguments.scope.finding_id.is_some()
+        {
+            let selection = Selection::new(&request, cursor.snapshot, 0, self.version >= 6);
+            let selected_cte = format!(
+                "{cte}, selected AS NOT MATERIALIZED (SELECT * FROM q WHERE {})",
+                selection.sql
+            );
+            let report = self.findings(
+                &selected_cte,
+                &selection.values,
+                &request.lab_id,
+                cursor.snapshot,
+                deadline,
+                cancel,
+            )?;
+            response
+                .view
+                .evidence_gaps
+                .extend(report.gaps.iter().map(|message| Gap {
+                    code: "finding_evidence_gap".into(),
+                    message: message.clone(),
+                }));
+            if !report.complete {
+                response.view.selection_complete = false;
+            }
+            if let Some(id) = &request.arguments.scope.finding_id {
+                let finding=report.findings.iter().find(|f|&f.finding_id==id).ok_or_else(||Error::new(if report.complete {"finding_unavailable"} else {"analysis_incomplete"},"Finding cannot be resolved inside the selected Lab, scope, snapshot, and rule versions"))?;
+                // Keep all caller bounds. Add only the supporting reference intersection.
+                let supports: Vec<_> = finding
+                    .supporting_events
+                    .iter()
+                    .map(|s| s.event_ref.clone())
+                    .collect();
+                if effective_request.arguments.scope.event_refs.is_empty() {
+                    effective_request.arguments.scope.event_refs = supports;
+                } else {
+                    effective_request
+                        .arguments
+                        .scope
+                        .event_refs
+                        .retain(|r| supports.contains(r));
+                    if effective_request.arguments.scope.event_refs.is_empty() {
+                        return Err(Error::invalid(
+                            "Selected references exclude the Finding support",
+                        ));
+                    }
+                }
+            }
+            analysis = Some(report);
+        }
         let selected = Selection::new(
-            &request,
+            &effective_request,
             cursor.snapshot,
             cursor.position,
             self.version >= 6,
         );
-        if request.operation == Operation::Summary {
+        if request.operation == Operation::Findings {
+            let report = analysis.as_ref().expect("Findings was evaluated");
+            response.result = json!({"items":[],"analysis":{"findings":if report.complete{"performed"}else{"operational_limit"},"rules":report.rules}});
+            let start = usize::try_from(cursor.position).map_err(|_| Error::cursor())?;
+            if start > report.findings.len() {
+                return Err(Error::cursor());
+            }
+            let mut items = Vec::new();
+            for (index, finding) in report
+                .findings
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(usize::from(request.arguments.limit))
+            {
+                query::check(cancel, deadline)?;
+                let mut item = finding_item(finding, &request, cursor.snapshot);
+                let object = item.as_object_mut().expect("Finding object");
+                object.retain(|key, _| {
+                    [
+                        "finding_id",
+                        "rule_id",
+                        "version",
+                        "lab_id",
+                        "scope",
+                        "supporting_events",
+                        "evidence_arguments",
+                    ]
+                    .contains(&key.as_str())
+                        || request.arguments.fields.contains(key)
+                });
+                items.push(item);
+                let more = index + 1 < report.findings.len();
+                response.page.next_cursor = more.then(|| {
+                    Cursor {
+                        v: cursor.v,
+                        snapshot: cursor.snapshot,
+                        position: (index + 1) as u64,
+                        fingerprint: cursor.fingerprint.clone(),
+                        state: cursor.state,
+                    }
+                    .encode()
+                });
+                response.view.selection_complete = report.complete && !more;
+                response.result["items"] = json!(items);
+                if query::encoded_len(&response, limits.response_bytes).is_err() {
+                    items.pop();
+                    if items.is_empty() {
+                        return Err(Error::new(
+                            "result_too_large",
+                            "A Finding does not fit the response budget",
+                        ));
+                    }
+                    response.page.next_cursor = Some(
+                        Cursor {
+                            v: cursor.v,
+                            snapshot: cursor.snapshot,
+                            position: index as u64,
+                            fingerprint: cursor.fingerprint.clone(),
+                            state: cursor.state,
+                        }
+                        .encode(),
+                    );
+                    response.page.truncated = true;
+                    response.page.reason = Some("response_bytes".into());
+                    response.view.selection_complete = false;
+                    response.result["items"] = json!(items);
+                    break;
+                }
+            }
+        } else if request.operation == Operation::Summary {
             let counts:(i64,i64,i64,i64,i64)=self.connection.query_row(&format!("{cte} SELECT count(*),coalesce(sum(q.kind='rpc.registered'),0),coalesce(sum(q.kind='transaction.accepted'),0),coalesce(sum(q.kind='fault.response_loss_selected'),0),coalesce(sum(q.kind='rpc.boundary'),0) FROM q WHERE {}",selected.sql),params_from_iter(selected.values.iter()),|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).map_err(|_|Error::storage())?;
             let total_rpc: i64 = self
                 .connection
@@ -227,7 +361,14 @@ impl JournalReader {
             } else {
                 "armed"
             });
-            let mut result = json!({"lab_context":context,"analysis":{"findings":"not_performed","reason":"Findings engine is not implemented"},"findings":null});
+            let report = analysis.as_ref().expect("Summary was evaluated");
+            let findings: Vec<_> = report
+                .findings
+                .iter()
+                .take(5)
+                .map(|f| finding_item(f, &request, cursor.snapshot))
+                .collect();
+            let mut result = json!({"lab_context":context,"analysis":{"findings":if report.complete{"performed"}else{"operational_limit"},"rules":report.rules},"findings":findings,"findings_more":report.findings.len()>5});
             if request
                 .arguments
                 .fields
@@ -394,6 +535,9 @@ impl JournalReader {
                 }
             }
         }
+        if analysis.as_ref().is_some_and(|report| !report.complete) {
+            response.view.selection_complete = false;
+        }
         query::check(cancel, deadline)?;
         if query::encoded_len(&response, limits.response_bytes).is_err() {
             return Err(Error::new(
@@ -430,4 +574,17 @@ fn fit_preview(items: &mut [Value], response: &mut Response, budget: usize) -> b
         item["payload"]["preview"] = json!(preview);
         item["payload"]["payload_truncated"] = json!(true);
     }
+}
+
+fn finding_item(finding: &crate::findings::Finding, request: &Request, snapshot: u64) -> Value {
+    let mut value = serde_json::to_value(finding).expect("typed Finding serializes");
+    let mut scope = request.arguments.scope.clone();
+    scope.finding_id = Some(finding.finding_id.clone());
+    value["evidence_arguments"] = serde_json::to_value(query::Arguments {
+        scope,
+        snapshot_seq: Some(snapshot),
+        ..Default::default()
+    })
+    .expect("typed evidence selection serializes");
+    value
 }

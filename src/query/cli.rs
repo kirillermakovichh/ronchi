@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Args)]
 pub struct Selection {
-    #[arg(value_parser=["summary","timeline","evidence"])]
+    #[arg(value_parser=["summary","timeline","evidence","findings"])]
     operation: String,
     #[arg(long = "signature")]
     signatures: Vec<String>,
@@ -45,9 +45,12 @@ pub struct Selection {
     /// Include a bounded retained payload preview in evidence only
     #[arg(long)]
     include_payload: bool,
-    /// Requires the future Findings capability
+    /// Resolve the supporting facts at --snapshot-seq
     #[arg(long)]
     finding_id: Option<String>,
+    /// Pin an existing committed watermark
+    #[arg(long)]
+    snapshot_seq: Option<u64>,
 }
 fn parse_ref(value: &str) -> Result<EventRef, String> {
     let (lab, seq) = value.rsplit_once(':').ok_or("Expected LAB_ID:EVENT_SEQ")?;
@@ -102,6 +105,7 @@ async fn execute(
             cursor: selection.cursor,
             fields: selection.fields,
             include_payload: selection.include_payload,
+            snapshot_seq: selection.snapshot_seq,
         },
     };
     request.normalize()?;
@@ -178,7 +182,18 @@ fn render(response: &Response) -> String {
         {
             lines.push(format!("Traffic: {traffic}"));
         }
-        lines.push("Findings: analysis not performed".into());
+        lines.push(format!(
+            "Findings analysis: {}",
+            response.result["analysis"]
+        ));
+        if let Some(findings) = response.result["findings"].as_array() {
+            for finding in findings {
+                lines.push(format!(
+                    "{}: {}",
+                    finding["finding_id"], finding["statement"]
+                ));
+            }
+        }
         lines.push(format!(
             "Inspect: investigate timeline/evidence --lab-id {}",
             response.lab_id

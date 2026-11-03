@@ -20,6 +20,8 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub enum Operation {
     #[serde(rename = "investigate.summary")]
     Summary,
+    #[serde(rename = "investigate.findings")]
+    Findings,
     #[serde(rename = "investigate.timeline")]
     Timeline,
     #[serde(rename = "investigate.evidence")]
@@ -29,6 +31,7 @@ impl Operation {
     pub fn parse(value: &str) -> Result<Self, Error> {
         match value {
             "summary" | "investigate.summary" => Ok(Self::Summary),
+            "findings" | "investigate.findings" => Ok(Self::Findings),
             "timeline" | "investigate.timeline" => Ok(Self::Timeline),
             "evidence" | "investigate.evidence" => Ok(Self::Evidence),
             _ => Err(Error::capability(
@@ -65,6 +68,7 @@ pub struct Arguments {
     pub cursor: Option<String>,
     pub fields: Vec<String>,
     pub include_payload: bool,
+    pub snapshot_seq: Option<u64>,
 }
 impl Default for Arguments {
     fn default() -> Self {
@@ -74,6 +78,7 @@ impl Default for Arguments {
             cursor: None,
             fields: vec![],
             include_payload: false,
+            snapshot_seq: None,
         }
     }
 }
@@ -339,10 +344,22 @@ impl Request {
                 "Invalid version, identity, page size, or projection size",
             ));
         }
-        if s.finding_id.is_some() {
-            return Err(Error::capability(
-                "finding_id requires the unimplemented Findings engine",
+        if s.finding_id.as_ref().is_some_and(|id| {
+            id.len() != 67
+                || !id.starts_with("f1-")
+                || !id[3..].bytes().all(|c| c.is_ascii_hexdigit())
+        }) {
+            return Err(Error::invalid("Expected a stable f1- Finding ID"));
+        }
+        if s.finding_id.is_some()
+            && (self.operation != Operation::Evidence || a.snapshot_seq.is_none())
+        {
+            return Err(Error::invalid(
+                "Finding evidence requires investigate.evidence and explicit snapshot_seq",
             ));
+        }
+        if a.snapshot_seq.is_some_and(|n| n > i64::MAX as u64) {
+            return Err(Error::invalid("Invalid snapshot watermark"));
         }
         let count = s.signature.len()
             + s.rpc_method.len()
@@ -406,7 +423,9 @@ impl Request {
                 "Payload selection requires investigate.evidence",
             ));
         }
-        let defaults = if self.operation == Operation::Summary {
+        let defaults = if self.operation == Operation::Findings {
+            vec!["statement", "guidance", "limitations"]
+        } else if self.operation == Operation::Summary {
             vec!["counts", "traffic_state"]
         } else {
             vec![
@@ -424,7 +443,20 @@ impl Request {
             a.fields = defaults.into_iter().map(String::from).collect();
         }
         for field in &a.fields {
-            let allowed = if self.operation == Operation::Summary {
+            let allowed = if self.operation == Operation::Findings {
+                [
+                    "finding_id",
+                    "rule_id",
+                    "version",
+                    "lab_id",
+                    "scope",
+                    "supporting_events",
+                    "statement",
+                    "guidance",
+                    "limitations",
+                ]
+                .contains(&field.as_str())
+            } else if self.operation == Operation::Summary {
                 [
                     "counts",
                     "traffic_state",
@@ -456,7 +488,16 @@ impl Request {
         let mut copy = self.clone();
         copy.request_id.clear();
         copy.arguments.cursor = None;
-        digest(&serde_json::to_vec(&copy).expect("typed request serializes"))
+        digest(
+            &serde_json::to_vec(&(
+                copy,
+                [
+                    crate::findings::Rule::LookupAfterWithholding.definition(),
+                    crate::findings::Rule::SubmissionAfterWithholding.definition(),
+                ],
+            ))
+            .expect("typed request serializes"),
+        )
     }
 }
 pub(crate) fn time_value(value: &str) -> (i64, u32) {

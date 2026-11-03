@@ -3,6 +3,7 @@
 mod budget;
 mod cases;
 pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
+mod findings;
 mod nonces;
 mod query;
 mod query_index;

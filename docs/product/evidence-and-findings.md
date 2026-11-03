@@ -95,12 +95,12 @@ Configured Checks and sufficient bounded evidence are required for `pass`, `fail
 An injected failure, a capability error, and an internal Ronchi failure have different classifications.
 A Ronchi storage failure cannot establish a System Under Test defect.
 
-### Implemented rule core (task 9a)
+### Implemented version-1 rules
 
 `findings::evaluate` is a pure evaluator over one typed candidate incident.
 It reads no simulator state, network source, clock, or payload.
-Query integration and deterministic candidate selection remain task 9b/9c work.
-Summary therefore still declares `not_performed` until it calls this evaluator.
+Investigation queries select candidates from the saved metadata through the shared query core.
+Summary, Findings, and Finding Evidence Slice use the same evaluator.
 
 | Rule ID | Version | Supported later fact |
 | --- | --- | --- |
@@ -113,7 +113,9 @@ Acceptance must come from `rpc_simulator`; the other facts must come from `ronch
 The original facts have strict sequence order: submission, acceptance, selection, withholding.
 The later request has a different internal request ID, a greater registration sequence, and a sequence after observed withholding.
 This establishes observation order; it does not establish application causality.
-A caller must choose the earliest eligible later event for each incident and rule.
+The query core chooses the earliest later event that has the same signature, a different internal request ID, and a greater registration sequence.
+The evaluator then checks its source, schema, mode, and all supporting facts.
+If that candidate is unsupported or lacks required evidence, the rule reports that state rather than skipping the gap.
 Repeated polling and retries do not create all combinations of supporting facts.
 The incident key is Lab, signature, accepted request ID, and acceptance event.
 
@@ -132,7 +134,16 @@ Guidance is a separate field and is not an observed application fact.
 Missing prerequisites return `insufficient_evidence`; incompatible sources or correlation cannot be repaired by inference.
 Complete candidates without a later eligible fact return `no_match`.
 Unsupported mode/schema returns `unsupported`.
-The query adapter must report operational limits separately and preserve independently confirmed Findings.
+Analysis considers at most 256 incident requests in ascending first-incident-event order.
+An incident candidate has acceptance, selection, or withholding metadata inside the explicit scope.
+Each candidate uses four bounded original-fact lookups and one earliest-action lookup per rule.
+The adapter reads no signed payload and creates no persistent derived index.
+It uses the existing kind, request, and signature navigation indexes and the shared read-only query transaction.
+At the candidate limit, it retains confirmed Findings and reports `operational_limit` with `selection_complete:false`.
+The caller can narrow the explicit scope to finish the remaining analysis.
+Deadline and cancellation return their operation errors; neither becomes `no_match`.
+Rule reports preserve counts of matched, unmatched, insufficient, and unsupported candidates.
+An independently valid Finding survives gaps in another candidate or rule.
 
 ## Completeness and payload policy
 

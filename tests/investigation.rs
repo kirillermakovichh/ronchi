@@ -171,7 +171,7 @@ async fn filters_use_or_within_and_between_and_exact_time_and_sequence_bounds() 
 }
 
 #[tokio::test]
-async fn empty_summary_discloses_unperformed_analysis_and_projection_keeps_identity() {
+async fn empty_summary_discloses_performed_analysis_and_projection_keeps_identity() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("journal.sqlite");
     let mut store = JournalStore::create(&path, "L1").unwrap();
@@ -186,8 +186,8 @@ async fn empty_summary_discloses_unperformed_analysis_and_projection_keeps_ident
         )
         .await
         .unwrap();
-    assert_eq!(response.result["analysis"]["findings"], "not_performed");
-    assert_eq!(response.result["findings"], serde_json::Value::Null);
+    assert_eq!(response.result["analysis"]["findings"], "performed");
+    assert_eq!(response.result["findings"], json!([]));
     assert_eq!(response.result["traffic_state"], "no_rpc_traffic");
     assert_eq!(
         serde_json::to_value(response.view.journal_state).unwrap(),
@@ -234,7 +234,7 @@ async fn empty_summary_discloses_unperformed_analysis_and_projection_keeps_ident
             .unwrap_err()
             .code
             .as_ref(),
-        "unsupported_capability"
+        "invalid_argument"
     );
 }
 

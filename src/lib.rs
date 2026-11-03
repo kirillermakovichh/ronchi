@@ -78,7 +78,7 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings"])]
         operation: String,
     },
 }
@@ -227,7 +227,15 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             } else {
                 schemars::schema_for!(LabEnvelope)
             };
-            let value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":response});
+            let mut value = serde_json::json!({"contract_version":1,"operation":operation,"implemented":true,"request":request,"response":response});
+            if operation.starts_with("investigate.") {
+                value["finding_schema"] =
+                    serde_json::to_value(schemars::schema_for!(findings::Finding))
+                        .expect("typed schema serializes");
+                value["rule_schema"] =
+                    serde_json::to_value(schemars::schema_for!(findings::Definition))
+                        .expect("typed schema serializes");
+            }
             match write_output(true, &value, "", false) {
                 Ok(()) => 0,
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,

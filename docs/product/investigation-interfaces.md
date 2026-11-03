@@ -34,7 +34,22 @@ Normal views omit signed bytes, raw bodies, and transaction payloads.
 Ctrl-C cancels the query with exit 130 and keeps the Lab running.
 The query deadline returns exit 124; stdout pipe closure cancels further reading and exits 0.
 Native process checks verify these paths on macOS, including reader release and continued RPC writes.
-Findings remain assigned to task 9; `finding_id` returns `unsupported_capability`.
+`investigate findings` evaluates the full selected scope and returns a finite page of versioned Findings.
+Summary evaluates the same scope and returns at most five Findings plus `findings_more`.
+`analysis.findings` is `performed` or `operational_limit`; per-rule reports distinguish match, no match, insufficient evidence, unsupported evidence, and operational limits.
+The [rule contract](evidence-and-findings.md#implemented-version-1-rules) defines requirements and resource limits.
+`limit`, `cursor`, and `fields` change presentation, not the analyzed facts.
+Findings always retain identity, semantic scope, supporting roles, and `evidence_arguments`.
+`fields` additionally selects `statement`, `guidance`, and `limitations`.
+Each `evidence_arguments` object selects the same scope, stable `finding_id`, and `snapshot_seq`.
+Supply those arguments to `investigate.evidence` to resolve the five supporting records.
+The CLI equivalent uses `--finding-id <id> --snapshot-seq <seq>` with the original scope filters.
+An unknown or out-of-scope ID returns `finding_unavailable`; incomplete analysis that cannot resolve it returns `analysis_incomplete`.
+Finding evidence requires an explicit watermark and never silently selects a newer snapshot.
+All operations accept optional `snapshot_seq` (`--snapshot-seq`) to pin an existing committed watermark.
+Findings cursors additionally bind the maintained rule definitions and versions.
+The authenticated control operation uses the existing `POST /v1/labs/{id}/investigate` route.
+`schema investigate.findings` works offline and includes the Finding and rule-definition schemas.
 Dashboard, MCP, follow streams, and export remain separate tasks.
 The sections below retain the full accepted contract.
 
@@ -152,7 +167,7 @@ Exhaustive evidence retrieval is an explicit client traversal of bounded pages, 
 Summary accepts `counts`, `traffic_state`, `lab_context`, `analysis`, and `findings`.
 `lab_context` preserves the Lab execution mode and Case binding at the watermark, independent of the record filters.
 It reports unknown legacy Case context explicitly.
-It always retains `lab_context`, the explicit unperformed Findings-analysis marker, and `findings:null`.
+It always retains `lab_context`, Findings analysis, and the bounded Findings list.
 Event queries accept `event_ref`, `kind`, `schema_version`, `source`, `recorded_at`, `elapsed_ns`, `execution_mode`, `rpc_method`, `transaction_signature`, `transaction_signatures`, `request_id`, `batch_id`, `registration_seq`, `policy_ref`, `cause_refs`, `data`, `simulated_time_ns`, `slot`, `block_height`, `payload_status`, and `payload`.
 `data` means the payload-free typed event facts, not the original event body.
 `payload` requires Evidence Slice and explicit `include_payload:true`.
