@@ -1,6 +1,6 @@
 # Checks and Verdicts
 
-Status: generic Check collection and Verdict evaluation remain implementation work (tasks 11–12). The Reference Application implements the read-only HTTP source endpoint described below; that does not implement the generic adapter.
+Status: generic HTTP Check collection is implemented (task 11). Typed requirement definitions are implemented (task 12a). Retained Verdict evaluation and its public operation remain task 12 work.
 These are reversible defaults for the first implementation.
 The [evidence contract](evidence-and-findings.md) owns Journal facts and Findings.
 This document owns external application observations and their bounded outcome evaluation.
@@ -109,6 +109,56 @@ Lab stop stops admission and cancels active collection work before writer shutdo
 Collection cleanup uses the existing five-second cleanup budget, not the polling horizon.
 The source application keeps running.
 Stopped and retained Journals reject new collection; CLI never falls back to historical mutation.
+
+## Implemented requirement definitions (task 12a)
+
+Each configured source can contain `requirements` in the existing Check configuration.
+The source's `version` pins the Check definition.
+`schema_version` pins source facts independently.
+Each requirement declares `rule_id`, `version:1`, `pass`, `fail`, and `complete`.
+Evaluation version is independently fixed at 1.
+The three predicates report true, false, or unknown; they do not themselves return a Verdict.
+An evaluator must combine these results with evidence sufficiency before assigning a Verdict.
+A true pass predicate alone cannot establish interval completeness.
+
+```toml
+[[checks.sources.requirements]]
+rule_id = "positive-balance"
+version = 1
+pass = { compare = { path = "balance", relation = "gt", value = "0" } }
+fail = { compare = { path = "balance", relation = "lt", value = "0" } }
+complete = { compare = { path = "terminal", relation = "eq", value = true } }
+```
+
+This example requires declared decimal `balance` and boolean `terminal` facts.
+Predicates use externally tagged objects to preserve arbitrary-precision JSON literals through serde.
+Supported forms are `compare`, `compare_fields`, `in`, `count`, `all`, `any`, and a retained `journal_finality` join predicate.
+The finality predicate consumes a supplied retained-fact resolver; it never performs RPC itself.
+The Journal resolver and public Verdict operation are not implemented at this slice boundary.
+Relations are `eq`, `ne`, `lt`, `le`, `gt`, and `ge`.
+Ordering requires integer or decimal fields.
+`compare_fields` requires identical declared types, units, and enum schemas.
+A comparison literal inherits its selected field schema and unit.
+JSON integer literals retain arbitrary precision; TOML integer literals remain subject to the TOML parser's supported range.
+Field-to-field comparisons retain arbitrary-precision source integers.
+Decimal strings compare exactly, including large exponents, without floating point or exponent expansion.
+
+Logical paths traverse selected record fields and declared availability wrappers.
+A missing, redacted, or unavailable value produces unknown with a gap.
+A declared nullable value can compare equal to null.
+`in` contains at most 32 typed literals.
+`count` counts array elements; optional `distinct_by` counts distinct scalar keys in declared record items.
+Repeated attempts or repeated polling do not create new identity keys.
+Distinct counting uses sorting, without generating every pair.
+`all` and `any` preserve unknown values and retain gaps even when another branch decides the truth value.
+An empty composition is invalid.
+At most 16 requirements fit one source.
+All predicates together are bounded to 128 nodes and depth 8 per source.
+Paths are at most 512 bytes.
+These definitions also fit the existing 16 KiB total Check configuration budget.
+Invalid paths, types, versions, units, and budgets are configuration errors before collection.
+The collector persists the public requirement definitions with its source definition.
+HTTP-only collection and the effective 32 KiB response ceiling remain unchanged.
 
 ## No-SDK HTTP observation adapter
 

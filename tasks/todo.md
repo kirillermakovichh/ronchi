@@ -344,6 +344,24 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 9, 11. **Scope:** Medium. **Likely files:** `src/checks/evaluate.rs`, `src/checks/rules.rs`, `src/checks/verdict.rs`, `tests/check_evaluate.rs`.
 - **Source:** [Verdict rules](../docs/product/checks-and-verdicts.md#verdict-rules).
 
+#### 12a. Versioned typed definitions
+
+- [x] Add bounded requirement definitions to existing Check configuration; validate logical field paths and exact typed comparisons; preserve unknown predicate results.
+
+- **Verified 12a:** All four locked checks passed (151 tests). Five predicate histories cover exact arbitrary-precision integers and decimal exponents; positive and negative comparisons; distinct identity keys; typed membership; all/any with unavailable/redacted facts; nullable values; schema-aware logical paths; mismatched units; invalid fields; and definition budgets. Scoped review changed distinct counting to sorting and tied availability traversal to declared schemas. Predicate truth is separate from Verdict sufficiency. Retained snapshot evaluation, reference requirements, and public evaluation remain unchecked.
+
+#### 12b. Retained snapshot evaluation
+
+- [ ] Resolve pinned retained definitions and complete selected facts; preserve source authority, contradictions, snapshot bounds, and operational limits without writes or HTTP.
+
+#### 12c. Reference requirements
+
+- [ ] Express identity, original finality, and resolution requirements through maintained generic predicates; expose only the additional public completeness/timing facts needed by these rules.
+
+#### 12d. Public evaluation and histories
+
+- [ ] Expose CLI/control/offline schema for live and retained evaluation; verify reference/public histories, replay, resource bounds, and no HTTP; document limits and run locked checks.
+
 ### 13. Self-contained public-path Demo
 
 - [ ] **Accept:** Orchestrate fresh Demo-owned Lab/relayer state and public RPC/Checks; return bounded results and retain the Lab unless `--stop-after-demo` is explicit.

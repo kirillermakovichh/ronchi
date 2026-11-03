@@ -32,6 +32,8 @@ pub struct Definition {
     pub authorization_env: Option<String>,
     pub facts: BTreeMap<String, ValueType>,
     #[serde(default)]
+    pub requirements: Vec<rules::Requirement>,
+    #[serde(default)]
     pub limits: Limits,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -118,6 +120,7 @@ impl Definition {
         {
             return Err("Invalid Check identity or requested facts".into());
         }
+        rules::validate(&self.requirements, &self.facts)?;
         let url = url::Url::parse(&self.url).map_err(|_| "Invalid Check observation URL")?;
         if self.url.len() > 2048
             || url.scheme() != "http"
@@ -193,7 +196,7 @@ impl Definition {
         self.limits.response_bytes.min(CAPTURE_BYTES)
     }
     pub fn public_definition(&self) -> Value {
-        serde_json::json!({"check_id":self.check_id,"version":self.version,"source":self.source,"schema_version":self.schema_version,"facts":self.facts,"limits":self.limits,"effective_response_bytes":self.effective_bytes()})
+        serde_json::json!({"check_id":self.check_id,"version":self.version,"source":self.source,"schema_version":self.schema_version,"facts":self.facts,"requirements":self.requirements,"limits":self.limits,"effective_response_bytes":self.effective_bytes()})
     }
 }
 impl ValueType {
@@ -363,3 +366,6 @@ mod collection;
 pub use collection::{Arguments, Client, Envelope, Failure, Owner, Reply, Report, Request, spawn};
 
 pub(crate) mod cli;
+
+mod number;
+pub mod rules;

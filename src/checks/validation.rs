@@ -131,7 +131,7 @@ fn fact(value: &Value, schema: &ValueType) -> Result<Value, &'static str> {
         _ => Err("fact_schema"),
     }
 }
-fn typed(value: &Value, schema: &ValueType) -> Result<Value, &'static str> {
+pub(super) fn typed(value: &Value, schema: &ValueType) -> Result<Value, &'static str> {
     let valid = match schema {
         ValueType::Boolean => value.is_boolean(),
         ValueType::Integer { .. } => value.is_number() && integer(&value.to_string()),
