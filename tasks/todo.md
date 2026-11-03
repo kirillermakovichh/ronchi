@@ -455,17 +455,21 @@ Checkpoints record results and do not require another approval interview.
 
 ### 18. Timeout bursts
 
-- [ ] **Accept:** Implement pre-dispatch timeout/recovery in both modes and keep it distinct from post-acceptance response loss.
+- [x] **Accept:** Implement pre-dispatch timeout/recovery in both modes and keep it distinct from post-acceptance response loss.
 - **Verify:** Cycle boundaries, no dispatch, held batches, cancellation, Case capacity errors, and switching without invented Client Outcomes.
 - **Dependencies:** 7, 9, 17. **Scope:** Small. **Likely files:** `src/cases/timeout.rs`, `src/findings/timeout.rs`, `tests/timeout_case.rs`.
 - **Source:** [Timeout family](../docs/product/cases.md#rpc-unavailability-or-timeout).
 
+- **Implemented / verified:** Main51cf510 implements frozen pre-dispatch outage/recovery, bounded shared holds, notifications/capability validation and later-attempt Findings. Combined `cargo test --locked` passed291 tests; explicit pinned native suite passed14. Source/dispatch boundaries remain distinct from acceptance response loss.
+
 ### 19. Null and stale status views
 
-- [ ] **Accept:** Implement per-identity masking/captured views without altering authoritative lifecycle; preserve mixed-signature order and commitment constraints.
+- [x] **Accept:** Implement per-identity masking/captured views without altering authoritative lifecycle; preserve mixed-signature order and commitment constraints.
 - **Verify:** Source versus boundary evidence in both modes, unknown identities, missing snapshots, recovery, and replacement.
 - **Dependencies:** 9, 17. **Scope:** Medium. **Likely files:** `src/cases/status.rs`, `src/findings/status.rs`, `tests/status_cases.rs`.
 - **Source:** [Status family](../docs/product/cases.md#unavailable-or-stale-transaction-status).
+
+- **Implemented / verified:** Main7ac917b preserves authoritative lifecycle and ordered per-identity null/snapshot views. Combined transaction histories, backend source tests and explicit native status/Custom lookup histories passed within Rust291 + native14. Native first observed state can already be finalized; no prior backend state is invented.
 
 ### 20. Bounded confirmation stalls
 
@@ -478,15 +482,17 @@ Checkpoints record results and do not require another approval interview.
 
 ### 21. Expired-blockhash reuse
 
-- [ ] **Accept:** Reuse genuine tuples with same-authority expiry evidence and retain each mode's actual admission/processing result.
+- [x] **Accept:** Reuse genuine tuples with same-authority expiry evidence and retain each mode's actual admission/processing result.
 - **Verify:** Heights below/at/above the bound, already processed identities, durable nonces, no expired submission, switching, and recovery.
 - **Dependencies:** 6, 9, 17. **Scope:** Small. **Likely files:** `src/cases/blockhash.rs`, `src/findings/blockhash.rs`, `tests/blockhash_case.rs`.
 - **Source:** [Expired-blockhash family](../docs/product/cases.md#expired-recent-blockhash-submission).
 
+- **Implemented / verified:** Maind7503b9 reuses genuine tuples with same-authority inclusive height expiry, mode-specific outcomes and retained Findings. Combined Rust291 + explicit native14 passed, including actual backend height expiry and returned safehash admission. Durable nonce and processed-identity exclusions remain explicit.
+
 ### Checkpoint D
 
-- [ ] Each initial family has tested Coverage Claims and explicit mode limitations.
-- [ ] Full format coverage, source authority, and no-public-write behavior remain intact.
+- [x] Each initial family has tested Coverage Claims and explicit mode limitations.
+- [x] Full format coverage, source authority, and no-public-write behavior remain intact.
 
 ### 22. Declarative Custom Cases
 

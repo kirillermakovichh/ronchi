@@ -1,5 +1,5 @@
 import type { Sequence } from "./wire";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Api, type Status, type Json } from "./api";
 interface Props {
   api: Api;
@@ -17,6 +17,17 @@ export function Controls({ api, status, snapshot, changed }: Props) {
     [busy, setBusy] = useState(false);
   const [selectedCase, setSelectedCase] = useState("tx-response-lost");
   const [catalogVisible, setCatalogVisible] = useState(false);
+  const [catalogLoading,setCatalogLoading]=useState(false);
+  const [catalogError,setCatalogError]=useState("");
+  const catalogPending=useRef(false);
+  async function loadCatalog(show=false){
+    if(show)setCatalogVisible(true);
+    if(catalogPending.current)return;
+    catalogPending.current=true;setCatalogLoading(true);setCatalogError("");
+    try{setCatalog(await api.call<CaseCatalog>("api/cases",undefined));}
+    catch(error){setCatalogError(String(error));}
+    finally{catalogPending.current=false;setCatalogLoading(false);}
+  }
   const [customYaml,setCustomYaml]=useState("");
   const [customPlan,setCustomPlan]=useState<{yaml:string;mode:string;plan:unknown}>();
   const [collection, setCollection] = useState<{
@@ -47,10 +58,8 @@ export function Controls({ api, status, snapshot, changed }: Props) {
     <section className="controls" aria-label="Case and Check controls">
       <details
         onToggle={(event) => {
-          if (event.currentTarget.open && live && catalog === undefined && !busy) {
-            void run(async () =>
-              setCatalog(await api.call<CaseCatalog>("api/cases", undefined)),
-            );
+          if (event.currentTarget.open && live && catalog === undefined) {
+            void loadCatalog();
           }
         }}
       >
@@ -59,13 +68,8 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         </summary>
         <p>Replacing a Case keeps the Journal and previously held effects.</p>
         <button
-          disabled={!live || busy}
-          onClick={() =>
-            void run(async () => {
-              setCatalog(await api.call<CaseCatalog>("api/cases", undefined));
-              setCatalogVisible(true);
-            })
-          }
+          disabled={!live || busy || catalogLoading}
+          onClick={() => void loadCatalog(true)}
         >
           List Cases
         </button>
@@ -302,9 +306,9 @@ export function Controls({ api, status, snapshot, changed }: Props) {
           Inspect Lab status
         </button>
       )}
-      {error && (
+      {(error || catalogError) && (
         <p role="alert">
-          {error}. Inspect current state before repeating a mutation with
+          {error || catalogError}. Inspect current state before repeating a mutation with
           unknown effects.
         </p>
       )}

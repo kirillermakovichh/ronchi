@@ -128,7 +128,42 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       cli(project, "--lab-id", second.lab_id, "down", "--force");
     }
 
+    let releaseCatalog:()=>void=()=>{};
+    const catalogGate=new Promise<void>(resolve=>{releaseCatalog=resolve;});
+    let catalogFinished:()=>void=()=>{};
+    const catalogDone=new Promise<void>(resolve=>{catalogFinished=resolve;});
+    await page.route("**/api/cases",async route=>{
+      try{
+        const response=await route.fetch({headers:{...await route.request().allHeaders(),origin:endpoint.origin}});
+        expect(response.status(),await response.text()).toBe(200);
+        await catalogGate;
+        await route.fulfill({response});
+      }finally{catalogFinished();}
+    });
     await page.getByText("Case controls", { exact: false }).click();
+    const customArtifact = {schema:"ronchi.case/v1",id:"custom.browser",revision:"1",requires:{primitives:["observe.rpc@1"]},modes:["simulator"],filter:{methods:["getHealth"],transaction_origin:"known_local"},state:{key:"case",scope:"activation",max_keys:1,on_exhausted:"error"},sequence:[{id:"observe",using:"observe.rpc@1",until:{matches:1},next:"done"}]};
+    try {
+    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill(JSON.stringify(customArtifact));
+    const [validationResponse]=await Promise.all([
+      page.waitForResponse(response=>response.url().endsWith("/api/case/validate")),
+      page.getByRole("button",{name:"Validate Custom Case"}).click(),
+    ]);
+    expect(validationResponse.status(),await validationResponse.text()).toBe(200);
+    expect(await validationResponse.json()).toMatchObject({result:{digest:expect.any(String)}});
+    await expect(page.getByLabel("Resolved Custom Case plan")).toContainText('"digest"');
+    }finally{
+      releaseCatalog();
+      await catalogDone;
+    }
+    await page.getByRole("button",{name:"Activate Custom Case"}).click();
+    await expect.poll(()=>cli(project,"status").result.active_case?.case_id).toBe("custom.browser");
+    const customRevision=cli(project,"status").result.active_case.revision;
+    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill(JSON.stringify({...customArtifact,schema:"ronchi.case/v2"}));
+    await expect(page.getByRole("button",{name:"Activate Custom Case"})).toBeDisabled();
+    await page.getByRole("button",{name:"Validate Custom Case"}).click();
+    await expect(page.locator(".controls [role=alert]")).toContainText("unsupported_schema");
+    expect(cli(project,"status").result.active_case.revision).toBe(customRevision);
+    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill("");
     await page
       .getByRole("button", { name: "Arm / replace tx-response-lost" })
       .click();

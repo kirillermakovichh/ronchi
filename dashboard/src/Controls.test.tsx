@@ -96,3 +96,21 @@ it("requires the current YAML plan before activating a Custom Case", async () =>
   await userEvent.type(input,"\nrevision: 2");
   expect(activate.disabled).toBe(true);
 });
+
+it("keeps Custom Case authoring available while the independent catalog read is pending", async () => {
+  const api=new Api("L5");
+  let resolveCatalog:(value:unknown)=>void=()=>{};
+  const catalog=new Promise(resolve=>{resolveCatalog=resolve;});
+  const call=vi.spyOn(api,"call").mockImplementation(async(path:string)=>path==="api/cases"?catalog:{result:{digest:"independent-plan"}});
+  render(<Controls api={api} status={{lab_id:"L5",name:"catalog-pending",state:"ready",health:"healthy",journal_state:"open",rpc_address:null,active_case:null,configuration:{mode:"simulator"},snapshot_seq:1}} changed={()=>{}}/>);
+  await userEvent.click(screen.getByText(/Case controls/));
+  await waitFor(()=>expect(call).toHaveBeenCalledWith("api/cases",undefined));
+  const input=screen.getByRole("textbox",{name:"Custom Case YAML"}) as HTMLTextAreaElement;
+  expect(input.disabled).toBe(false);
+  await userEvent.type(input,"schema: ronchi.case/v1");
+  await userEvent.click(screen.getByRole("button",{name:"Validate Custom Case"}));
+  await waitFor(()=>expect(screen.getByLabelText("Resolved Custom Case plan").textContent).toContain("independent-plan"));
+  resolveCatalog({result:[]});
+  await waitFor(()=>expect((screen.getByRole("button",{name:"List Cases"}) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByLabelText("Resolved Custom Case plan").textContent).toContain("independent-plan");
+});
