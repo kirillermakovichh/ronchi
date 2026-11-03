@@ -2,6 +2,7 @@ pub mod cases;
 pub mod config;
 mod control;
 mod files;
+pub mod findings;
 pub mod journal;
 pub mod lab;
 mod network;

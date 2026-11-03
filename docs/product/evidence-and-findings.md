@@ -95,6 +95,45 @@ Configured Checks and sufficient bounded evidence are required for `pass`, `fail
 An injected failure, a capability error, and an internal Ronchi failure have different classifications.
 A Ronchi storage failure cannot establish a System Under Test defect.
 
+### Implemented rule core (task 9a)
+
+`findings::evaluate` is a pure evaluator over one typed candidate incident.
+It reads no simulator state, network source, clock, or payload.
+Query integration and deterministic candidate selection remain task 9b/9c work.
+Summary therefore still declares `not_performed` until it calls this evaluator.
+
+| Rule ID | Version | Supported later fact |
+| --- | --- | --- |
+| `tx-response-lost.lookup-after-withholding` | 1 | Received `getSignatureStatuses` or `getTransaction` for the accepted signature |
+| `tx-response-lost.submission-after-withholding` | 1 | Another recorded submission attempt for the accepted signature |
+
+Both rules support simulator mode and event schema 1.
+Both require original submission, simulator acceptance, selected response-loss Fault, and observed withholding for the same Lab, signature, internal request ID, and registration sequence.
+Acceptance must come from `rpc_simulator`; the other facts must come from `ronchi`.
+The original facts have strict sequence order: submission, acceptance, selection, withholding.
+The later request has a different internal request ID, a greater registration sequence, and a sequence after observed withholding.
+This establishes observation order; it does not establish application causality.
+A caller must choose the earliest eligible later event for each incident and rule.
+Repeated polling and retries do not create all combinations of supporting facts.
+The incident key is Lab, signature, accepted request ID, and acceptance event.
+
+The Finding ID hashes rule ID/version, Lab, semantic incident scope, and role-labelled supporting references.
+It excludes the evaluation time, watermark, page size, and projection.
+An unchanged supporting fact set therefore keeps its ID and statement at a newer watermark.
+The five supporting roles are `submission`, `acceptance`, `fault_selection`, `observed_withholding`, and `later_action`.
+A shared batch boundary is not a separately selected Fault for each sibling element.
+These initial patterns require the identity's own selected Fault and withholding observation.
+
+The submission rule states matching signed content only when the original submission, acceptance, and later attempt retain equal nonempty digests.
+Without these digests, it retains the weaker identity Finding and reports the missing content evidence separately.
+Different signatures produce no shared-intent Finding.
+Neither rule establishes a client timeout, business completion, second transaction, or economic transfer.
+Guidance is a separate field and is not an observed application fact.
+Missing prerequisites return `insufficient_evidence`; incompatible sources or correlation cannot be repaired by inference.
+Complete candidates without a later eligible fact return `no_match`.
+Unsupported mode/schema returns `unsupported`.
+The query adapter must report operational limits separately and preserve independently confirmed Findings.
+
 ## Completeness and payload policy
 
 Each Investigation declares its Observation Boundary, selected interval, committed watermark, and known Evidence Gaps.

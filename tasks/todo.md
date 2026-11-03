@@ -221,6 +221,28 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 8. **Scope:** Medium. **Likely files:** `src/findings.rs`, `src/findings/rules.rs`, `src/query/summary.rs`, `tests/findings.rs`.
 - **Source:** [Deterministic Findings](../docs/product/evidence-and-findings.md#deterministic-findings).
 
+#### 9a. Versioned evaluator and typed rules
+
+- [x] Implement two typed evidence patterns with stable incident identity, explicit support roles, separate guidance, and evaluation states. Candidate selection remains in 9b.
+- **Verify:** Independent positive histories and near misses, required-fact removal, ordering, source/mode/version validation, stable IDs, and digest requirements.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (99 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Four independent typed-history tests cover both positive patterns, stable identity at a newer watermark, required-fact removal, digest-dependent statements, authoritative sources, Lab/snapshot isolation, ordering, and unsupported schema/mode.
+- **Self-review:** Scoped requirements/correctness/resource review found no blocking defect in the pure evaluator. It performs no I/O and evaluates five supplied facts. Query selection, public histories, operational limits, and transport integration remain unchecked below.
+
+#### 9b. Bounded Journal evaluation
+
+- [ ] Adapt saved metadata through the existing query core without reading payloads or simulator state; preserve scope, watermark, deadline, cancellation, and reader limits.
+- **Verify:** Legacy correlation gaps, bounded processing, polling deduplication, batch boundary effects, concurrent appends, finalized/interrupted Journals.
+
+#### 9c. Findings query and supporting Evidence Slice
+
+- [ ] Expose CLI/control/schema/help, shared live/retained evaluation, five-Finding summary, pinned versioned pagination, and snapshot-preserving Finding references.
+- **Verify:** Real CLI/HTTP references, page/projection stability, no hidden scope expansion, and read-only retained queries.
+
+#### 9d. Public histories and completion review
+
+- [ ] Verify real HTTP tx-response-lost and independent counterexamples; document implemented rules and remaining limits; run all four locked checks and scoped self-review.
+
 ## Application evidence and Demo
 
 ### 10. Durable reference relayer
