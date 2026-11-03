@@ -16,6 +16,7 @@ export function Controls({ api, status, snapshot, changed }: Props) {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [selectedCase, setSelectedCase] = useState("tx-response-lost");
+  const [catalogVisible, setCatalogVisible] = useState(false);
   const [collection, setCollection] = useState<{
       collection_id: string;
       status: string;
@@ -36,11 +37,21 @@ export function Controls({ api, status, snapshot, changed }: Props) {
   }
   const live = status.state === "ready";
   const sources = status.configuration.checks?.sources ?? [];
-  const cases = catalog?.result ?? [{ case_id: "tx-response-lost", modes: ["simulator"] }];
-  const supported = cases.some(entry => entry.case_id === selectedCase && entry.modes.includes(status.configuration.mode));
+  const cases = catalog?.result ?? [];
+  const supported = cases.some(
+    (entry) => entry.case_id === selectedCase && entry.modes.includes(status.configuration.mode),
+  );
   return (
     <section className="controls" aria-label="Case and Check controls">
-      <details>
+      <details
+        onToggle={(event) => {
+          if (event.currentTarget.open && live && catalog === undefined && !busy) {
+            void run(async () =>
+              setCatalog(await api.call<CaseCatalog>("api/cases", undefined)),
+            );
+          }
+        }}
+      >
         <summary>
           Case controls {live ? "" : "· read-only retained Journal"}
         </summary>
@@ -48,20 +59,33 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         <button
           disabled={!live || busy}
           onClick={() =>
-            void run(async () =>
-              setCatalog(await api.call<CaseCatalog>("api/cases", undefined)),
-            )
+            void run(async () => {
+              setCatalog(await api.call<CaseCatalog>("api/cases", undefined));
+              setCatalogVisible(true);
+            })
           }
         >
           List Cases
         </button>
-        {catalog !== undefined && <pre>{JSON.stringify(catalog, null, 2)}</pre>}
+        {catalogVisible && catalog !== undefined && <pre>{JSON.stringify(catalog, null, 2)}</pre>}
         <label>
           Case
-          <select value={selectedCase} disabled={!live || busy} onChange={event => setSelectedCase(event.target.value)}>
-            {cases.map(entry => <option key={entry.case_id} value={entry.case_id} disabled={!entry.modes.includes(status.configuration.mode)}>
-              {entry.case_id}{entry.modes.includes(status.configuration.mode) ? "" : " · unsupported in this mode"}
-            </option>)}
+          <select
+            value={catalog === undefined ? "" : selectedCase}
+            disabled={!live || busy || catalog === undefined}
+            onChange={(event) => setSelectedCase(event.target.value)}
+          >
+            {catalog === undefined && <option value="">Case catalog not loaded</option>}
+            {cases.map((entry) => (
+              <option
+                key={entry.case_id}
+                value={entry.case_id}
+                disabled={!entry.modes.includes(status.configuration.mode)}
+              >
+                {entry.case_id}
+                {entry.modes.includes(status.configuration.mode) ? "" : " · unsupported in this mode"}
+              </option>
+            ))}
           </select>
         </label>
         <button
