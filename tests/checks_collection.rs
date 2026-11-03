@@ -18,15 +18,19 @@ fn definition(url: String) -> Definition {
     serde_json::from_value(json!({"check_id":"state","version":1,"source":"independent-app","schema_version":1,"url":url,"facts":{"enabled":{"type":"boolean"}}})).unwrap()
 }
 fn read_request(stream: &mut std::net::TcpStream) -> Value {
+    // macOS accepted sockets inherit O_NONBLOCK from the polling listener.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
     let mut bytes = Vec::new();
     let length = loop {
         let mut b = [0u8; 1];
-        if stream.read(&mut b).unwrap_or(0) == 0 {
-            return Value::Null;
-        }
+        assert_eq!(
+            stream.read(&mut b).unwrap(),
+            1,
+            "source request closed before its headers"
+        );
         bytes.push(b[0]);
         if bytes.ends_with(b"\r\n\r\n") {
             let headers = String::from_utf8_lossy(&bytes);
@@ -293,4 +297,47 @@ async fn collection_owner_cancels_inflight_http_and_excludes_the_same_scope() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[test]
+fn source_fixture_waits_for_request_bytes_after_nonblocking_accept() {
+    use std::net::TcpStream;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let (mut accepted, _) = loop {
+        match listener.accept() {
+            Ok(value) => break value,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("accept failed: {error}"),
+        }
+    };
+    let (sent, received) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || sent.send(read_request(&mut accepted)).unwrap());
+    let early = received.recv_timeout(Duration::from_millis(40));
+    let body = r#"{"invocation_id":"I1"}"#;
+    client
+        .write_all(
+            format!(
+                "POST / HTTP/1.1\r\nHost: local\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let request = early
+        .as_ref()
+        .ok()
+        .cloned()
+        .unwrap_or_else(|| received.recv_timeout(Duration::from_secs(3)).unwrap());
+    reader.join().unwrap();
+    assert!(
+        early.is_err(),
+        "source fixture returned before request bytes: {request}"
+    );
+    assert_eq!(request["invocation_id"], "I1");
 }
