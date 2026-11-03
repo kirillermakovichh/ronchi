@@ -59,7 +59,12 @@ fn platform_identity(pid: u32) -> io::Result<Option<(String, PathBuf)>> {
     let count =
         unsafe { libc::proc_pidpath(pid as i32, path.as_mut_ptr().cast(), path.len() as u32) };
     if count <= 0 {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        // The process can exit after proc_pidinfo supplied its birth identity.
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(None);
+        }
+        return Err(error);
     }
     let len = path.iter().position(|b| *b == 0).unwrap_or(path.len());
     path.truncate(len);
@@ -89,7 +94,16 @@ fn platform_identity(pid: u32) -> io::Result<Option<(String, PathBuf)>> {
         .ok_or_else(|| io::Error::other("Missing process birth"))?
         .to_string();
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    let executable = std::fs::read_link(format!("/proc/{pid}/exe"))?;
+    let executable = match std::fs::read_link(format!("/proc/{pid}/exe")) {
+        Ok(path) => path,
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
     let bytes = executable.as_os_str().as_bytes();
     let executable = PathBuf::from(std::ffi::OsString::from_vec(
         bytes.strip_suffix(b" (deleted)").unwrap_or(bytes).to_vec(),
