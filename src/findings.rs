@@ -20,13 +20,23 @@ pub enum FactKind {
     StatusRequest,
     TransactionRequest,
 }
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+pub struct Requirement {
+    pub kind: FactKind,
+    pub source: &'static str,
+    pub role: &'static str,
+}
 /// Small maintained declarative patterns, not an expression interpreter.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct Definition {
     pub rule_id: &'static str,
     pub version: u32,
     pub execution_mode: Mode,
-    pub required_facts: [FactKind; 4],
+    pub required_facts: [Requirement; 4],
+    pub later_source: &'static str,
+    pub later_role: &'static str,
+    pub guidance: &'static str,
+    pub limitations: &'static [&'static str],
     pub later_kinds: &'static [FactKind],
     pub correlation_keys: &'static [&'static str],
     pub order: &'static str,
@@ -42,10 +52,41 @@ impl Rule {
             version: 1,
             execution_mode: Mode::Simulator,
             required_facts: [
-                FactKind::Submission,
-                FactKind::Acceptance,
-                FactKind::Selection,
-                FactKind::Withholding,
+                Requirement {
+                    kind: FactKind::Submission,
+                    source: "ronchi",
+                    role: "submission",
+                },
+                Requirement {
+                    kind: FactKind::Acceptance,
+                    source: "rpc_simulator",
+                    role: "acceptance",
+                },
+                Requirement {
+                    kind: FactKind::Selection,
+                    source: "ronchi",
+                    role: "fault_selection",
+                },
+                Requirement {
+                    kind: FactKind::Withholding,
+                    source: "ronchi",
+                    role: "observed_withholding",
+                },
+            ],
+            later_source: "ronchi",
+            later_role: "later_action",
+            guidance: match self {
+                Self::LookupAfterWithholding => {
+                    "Inspect how the application reconciles the original signature and completes its operation after this lookup."
+                }
+                Self::SubmissionAfterWithholding => {
+                    "Inspect retry and reconciliation behavior for the original transaction identity. Another attempt does not establish a second transaction or transfer."
+                }
+            },
+            limitations: &[
+                "RPC-only evidence does not establish a client timeout, operation completion, or business intent.",
+                "Simulator acceptance does not establish instruction execution, balance changes, or an economic transfer.",
+                "Event and registration order establish observation order, not application causality.",
             ],
             later_kinds: match self {
                 Self::LookupAfterWithholding => {
@@ -184,13 +225,8 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
         .into_iter()
         .zip(definition.required_facts)
     {
-        let source = if expected == FactKind::Acceptance {
-            "rpc_simulator"
-        } else {
-            "ronchi"
-        };
-        if fact.kind != expected
-            || fact.source != source
+        if fact.kind != expected.kind
+            || fact.source != expected.source
             || fact.request_id.is_empty()
             || fact.registration_seq == 0
             || fact.signature.is_empty()
@@ -217,7 +253,7 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
     let Some(later) = later else {
         return Evaluation::empty(rule, State::NoMatch, None);
     };
-    if later.source != "ronchi"
+    if later.source != definition.later_source
         || later.request_id.is_empty()
         || later.registration_seq == 0
         || later.signature.is_empty()
@@ -242,42 +278,32 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
         && acceptance.digest.as_ref().filter(|d| !d.is_empty())
             == later.digest.as_ref().filter(|d| !d.is_empty())
         && acceptance.digest.as_ref().is_some_and(|d| !d.is_empty());
-    let mut limitations = vec![
-        "RPC-only evidence does not establish a client timeout, operation completion, or business intent.".into(),
-        "Simulator acceptance does not establish instruction execution, balance changes, or an economic transfer.".into(),
-        "Event and registration order establish observation order, not application causality.".into(),
-    ];
+    let mut limitations: Vec<String> = definition.limitations.iter().map(|s| (*s).into()).collect();
     let signature = &acceptance.signature;
-    let (statement, guidance) = match rule {
-        Rule::LookupAfterWithholding => (
-            format!(
-                "Ronchi received a status or transaction lookup for {signature} after observing response withholding for its accepted submission."
-            ),
-            "Inspect how the application reconciles the original signature and completes its operation after this lookup.",
+    let statement = match rule {
+        Rule::LookupAfterWithholding => format!(
+            "Ronchi received a status or transaction lookup for {signature} after observing response withholding for its accepted submission."
         ),
         Rule::SubmissionAfterWithholding => {
             if !same_bytes {
                 limitations.push("Signed-byte equality is unavailable without matching retained content digests.".into());
             }
-            (
-                format!(
-                    "Ronchi recorded another submission attempt for transaction identity {signature} after observing response withholding{}.",
-                    if same_bytes {
-                        "; the retained content digests match"
-                    } else {
-                        ""
-                    }
-                ),
-                "Inspect retry and reconciliation behavior for the original transaction identity. Another attempt does not establish a second transaction or transfer.",
+            format!(
+                "Ronchi recorded another submission attempt for transaction identity {signature} after observing response withholding{}.",
+                if same_bytes {
+                    "; the retained content digests match"
+                } else {
+                    ""
+                }
             )
         }
     };
     let supporting_events: Vec<_> = [
-        "submission",
-        "acceptance",
-        "fault_selection",
-        "observed_withholding",
-        "later_action",
+        definition.required_facts[0].role,
+        definition.required_facts[1].role,
+        definition.required_facts[2].role,
+        definition.required_facts[3].role,
+        definition.later_role,
     ]
     .into_iter()
     .zip([submission, acceptance, selection, withholding, later])
@@ -309,7 +335,7 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
         scope,
         supporting_events,
         statement,
-        guidance: guidance.into(),
+        guidance: definition.guidance.into(),
         limitations,
     };
     let mut result = Evaluation::empty(rule, State::Matched, None);

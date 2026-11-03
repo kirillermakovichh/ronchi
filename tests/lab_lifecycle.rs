@@ -1231,3 +1231,166 @@ fn investigation_text_escapes_untrusted_terminal_controls() {
     assert!(text.contains("\\u{202e}"));
     assert!(out.stderr.is_empty());
 }
+
+#[test]
+fn findings_native_http_supports_both_rules_and_retained_snapshot_links() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use ed25519_dalek::{Signer, SigningKey};
+    fn rpc(address: SocketAddr, value: &Value) -> Value {
+        let body = value.to_string();
+        let response = raw(
+            address,
+            format!(
+                "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+    }
+    for force in [false, true] {
+        let p = Project::new();
+        p.up();
+        let manifest = p.manifest();
+        let id = &manifest.lab_id;
+        let rpc_address = manifest.rpc_address.unwrap();
+        let control = manifest.control_address.unwrap();
+        p.ok(&["case", "arm", "tx-response-lost", "--hold-ms", "30"]);
+        let hash = rpc(
+            rpc_address,
+            &serde_json::json!({"jsonrpc":"2.0","id":7,"method":"getLatestBlockhash"}),
+        )["result"]["value"]["blockhash"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let signer = SigningKey::from_bytes(&[92; 32]);
+        let mut message = vec![1, 0, 0, 1];
+        message.extend(signer.verifying_key().to_bytes());
+        message.extend(bs58::decode(hash).into_vec().unwrap());
+        message.push(0);
+        let signature = signer.sign(&message).to_bytes();
+        let expected = bs58::encode(signature).into_string();
+        let mut wire = vec![1];
+        wire.extend(signature);
+        wire.extend(message);
+        let submission = serde_json::json!({"jsonrpc":"2.0","id":7,"method":"sendTransaction","params":[STANDARD.encode(wire),{"encoding":"base64","skipPreflight":true}]});
+        let body = submission.to_string();
+        assert!(raw(rpc_address,format!("POST / HTTP/1.1\r\nHost: {rpc_address}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len())).is_empty());
+        for _ in 0..3 {
+            rpc(
+                rpc_address,
+                &serde_json::json!({"jsonrpc":"2.0","id":7,"method":"getSignatureStatuses","params":[[expected]]}),
+            );
+        }
+        rpc(
+            rpc_address,
+            &serde_json::json!({"jsonrpc":"2.0","id":7,"method":"getTransaction","params":[expected]}),
+        );
+        assert_eq!(rpc(rpc_address, &submission)["result"], expected);
+        let findings = p.ok(&["investigate", "findings", "--signature", &expected]);
+        assert_eq!(
+            findings["result"]["items"].as_array().unwrap().len(),
+            2,
+            "{findings}"
+        );
+        let snapshot = findings["view"]["snapshot_seq"]
+            .as_u64()
+            .unwrap()
+            .to_string();
+        let token =
+            std::fs::read_to_string(Workspace::new(p.path()).lab(id).unwrap().join("token"))
+                .unwrap();
+        let http_query = |operation: &str, arguments: Value| {
+            let body=serde_json::json!({"contract_version":1,"request_id":"findings-http","lab_id":id,"operation":operation,"arguments":arguments}).to_string();
+            let response = raw(
+                control,
+                format!(
+                    "POST /v1/labs/{id}/investigate HTTP/1.1\r\nHost: {control}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    token.trim(),
+                    body.len()
+                ),
+            );
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+            serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+        };
+        let http = http_query(
+            "investigate.findings",
+            serde_json::json!({"scope":{"signature":[expected]},"snapshot_seq":snapshot.parse::<u64>().unwrap()}),
+        );
+        assert_eq!(http["result"], findings["result"]);
+        for finding in findings["result"]["items"].as_array().unwrap() {
+            let evidence = http_query(
+                "investigate.evidence",
+                finding["evidence_arguments"].clone(),
+            );
+            let cli = p.ok(&[
+                "investigate",
+                "evidence",
+                "--signature",
+                &expected,
+                "--finding-id",
+                finding["finding_id"].as_str().unwrap(),
+                "--snapshot-seq",
+                &snapshot,
+            ]);
+            assert_eq!(evidence["result"], cli["result"]);
+            assert_eq!(evidence["result"]["items"].as_array().unwrap().len(), 5);
+            for item in evidence["result"]["items"].as_array().unwrap() {
+                assert_eq!(item["event_ref"]["lab_id"], *id);
+                assert!(item.get("payload").is_none());
+            }
+            assert!(
+                finding["limitations"]
+                    .to_string()
+                    .contains("client timeout")
+            );
+            assert!(!finding["statement"].as_str().unwrap().contains("timeout"));
+        }
+        let schema = p.ok(&["schema", "investigate.findings"]);
+        assert!(
+            schema["finding_schema"]
+                .to_string()
+                .contains("supporting_events")
+        );
+        assert_eq!(p.manifest().process, manifest.process);
+        p.ok(if force {
+            &["down", "--force"]
+        } else {
+            &["down"]
+        });
+        let journal = Workspace::new(p.path())
+            .lab(id)
+            .unwrap()
+            .join("journal.sqlite");
+        let before = std::fs::read(&journal).unwrap();
+        let retained = p.ok(&[
+            "investigate",
+            "findings",
+            "--lab-id",
+            id,
+            "--signature",
+            &expected,
+            "--snapshot-seq",
+            &snapshot,
+        ]);
+        assert_eq!(retained["result"], findings["result"]);
+        assert_eq!(
+            retained["view"]["journal_state"],
+            if force { "interrupted" } else { "finalized" }
+        );
+        let first = &findings["result"]["items"][0];
+        let evidence = p.ok(&[
+            "investigate",
+            "evidence",
+            "--lab-id",
+            id,
+            "--signature",
+            &expected,
+            "--finding-id",
+            first["finding_id"].as_str().unwrap(),
+            "--snapshot-seq",
+            &snapshot,
+        ]);
+        assert_eq!(evidence["result"]["items"].as_array().unwrap().len(), 5);
+        assert_eq!(std::fs::read(&journal).unwrap(), before);
+    }
+}

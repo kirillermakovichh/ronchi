@@ -216,7 +216,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 9. Evidence-backed Findings
 
-- [ ] **Accept:** Produce stable versioned Findings with supporting references, separate guidance, and explicit Evidence Gaps.
+- [x] **Accept:** Produce stable versioned Findings with supporting references, separate guidance, and explicit Evidence Gaps.
 - **Verify:** Identical snapshot re-evaluation and required-fact removal; different signatures must never imply a shared intent or duplicate economic execution.
 - **Dependencies:** 8. **Scope:** Medium. **Likely files:** `src/findings.rs`, `src/findings/rules.rs`, `src/query/summary.rs`, `tests/findings.rs`.
 - **Source:** [Deterministic Findings](../docs/product/evidence-and-findings.md#deterministic-findings).
@@ -245,7 +245,14 @@ Checkpoints record results and do not require another approval interview.
 
 #### 9d. Public histories and completion review
 
-- [ ] Verify real HTTP tx-response-lost and independent counterexamples; document implemented rules and remaining limits; run all four locked checks and scoped self-review.
+- [x] Verify real HTTP tx-response-lost and independent counterexamples; document implemented rules and remaining limits; run all four locked checks and scoped self-review.
+
+- **Verified:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (113 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Focused checks also passed: `cargo test --locked --test findings --test findings_query`, `cargo test --locked --test lab_lifecycle findings_native -- --nocapture`, and `cargo test --locked --test findings_query linked_sqlite -- --nocapture`.
+- **Public evidence:** A native HTTP history signs an independent transaction, observes an empty withheld transport response, repeats RPC IDs across polls and resubmission, and receives both Findings through real CLI and authenticated HTTP. Both transports resolve each Finding to its five supporting records at the pinned snapshot. Finalized and interrupted retained reads produce the same Finding IDs/statements and leave the Journal file unchanged. No new Lab or simulator lookup supplies evidence.
+- **Counterexamples and completeness:** Thirteen file-backed query tests cover original/later fact removal within exact scope, unrelated signatures and Labs, wrong order, selection without withholding, repeated polling, shared batch boundary without sibling Fault selection, legacy correlation gaps with independent valid Findings, unsupported mode, five-Finding summary, byte-limited traversal, the incident limit, and metadata-only access with payload-storage fault injection. Active SQL deadline/cancellation checks prove concurrent writes and reader release via WAL checkpoint. Typed tests cover unsupported fact schema and authoritative source requirements. No test treats missing client/business evidence as timeout, recovery, duplicate intent, or economic execution.
+- **Storage review:** Linked SQLite is 3.54.1, source `555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76`. `EXPLAIN QUERY PLAN` uses `query_request`, `query_kind`, and the covering signature index for the bounded joins. No schema/index migration or derived write was added.
+- **Self-review:** The final scoped review checked requirements, source authority, correlation, fixed watermark, deterministic earliest support, digest-dependent wording, missing facts, projection limits, cursor/version binding, SQL budgets, and read-only snapshot ownership. Rule declarations now carry their sources, supporting roles, guidance, and limitations. Projection retains material limitations. Missing Finding links use unavailable-target errors; operationally incomplete resolution is separate. No confirmed blocking defect remains.
+- **Boundary:** Two simulator schema-1 rules only. They report later request/submission receipt, not its returned state, application causality, a Client Outcome, business completion, or a Verdict. Batch siblings without their own selection/start facts remain incomplete; shared transport effects are never promoted to separately selected Faults. Analysis stops explicitly after 256 incident candidates and keeps confirmed Findings; narrow the scope to finish. Legacy SQL projection preserves correlation gaps and performs no migration. Native process checks ran on macOS. Task 9 is complete; task 10 is next.
 
 ## Application evidence and Demo
 

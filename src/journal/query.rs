@@ -293,6 +293,7 @@ impl JournalReader {
                         "scope",
                         "supporting_events",
                         "evidence_arguments",
+                        "limitations",
                     ]
                     .contains(&key.as_str())
                         || request.arguments.fields.contains(key)

@@ -8,19 +8,19 @@ All three interfaces call the same core operations against one Lab Journal.
 
 ## Implemented Investigation surface
 
-The Rust query core supports finite summary, Timeline, and Evidence Slice metadata queries.
+The Rust query core supports finite summary, Timeline, Evidence Slice, and Findings queries.
 Schema 6 stores indexed navigation metadata in the same transaction as each Journal event.
 Signed bytes remain in the original event storage.
 Queries use one read-only connection per page and release its SQLite snapshot before returning.
 Cursors bind the immutable Lab, committed watermark, normalized selection, projection, payload choice, and page size.
 Older Journals use a read-only SQL adapter with an explicit correlation gap.
 The core limits concurrent readers to four and cancels SQLite VM work at its deadline.
-Summary reports Findings analysis as `not_performed`; it does not return a fake analysis result.
-CLI exposes `investigate summary|timeline|evidence` with `--signature`, `--rpc-method`, `--case-activation`, `--kind`, `--event-seq`, `--event-ref LAB_ID:EVENT_SEQ`, `--from-seq`, `--to-seq`, `--since`, `--until`, `--fields`, `--limit`, and `--cursor`.
+Summary executes the versioned Findings rules and reports their evaluation states and Evidence Gaps.
+CLI exposes `investigate summary|timeline|evidence|findings` with `--signature`, `--rpc-method`, `--case-activation`, `--kind`, `--event-seq`, `--event-ref LAB_ID:EVENT_SEQ`, `--from-seq`, `--to-seq`, `--since`, `--until`, `--fields`, `--limit`, and `--cursor`.
 Each invocation returns one page and never follows a stream or fetches all pages.
 Live CLI queries use authenticated `POST /v1/labs/{id}/investigate` with the typed core request.
 Retained CLI queries open the exact Journal read-only without starting a Lab.
-`schema investigate.summary|investigate.timeline|investigate.evidence` exposes shared request and success/error models offline.
+`schema investigate.summary|investigate.timeline|investigate.evidence|investigate.findings` exposes shared request and success/error models offline.
 JSON mode emits one envelope; text mode escapes terminal controls in untrusted values.
 Evidence accepts `--include-payload` and returns a SQL-bounded preview of the selected retained payload.
 The preview ceiling is 4096 UTF-8 bytes before JSON escaping; the core can reduce it further to fit the full envelope.
@@ -39,12 +39,13 @@ Summary evaluates the same scope and returns at most five Findings plus `finding
 `analysis.findings` is `performed` or `operational_limit`; per-rule reports distinguish match, no match, insufficient evidence, unsupported evidence, and operational limits.
 The [rule contract](evidence-and-findings.md#implemented-version-1-rules) defines requirements and resource limits.
 `limit`, `cursor`, and `fields` change presentation, not the analyzed facts.
-Findings always retain identity, semantic scope, supporting roles, and `evidence_arguments`.
-`fields` additionally selects `statement`, `guidance`, and `limitations`.
+Findings always retain identity, semantic scope, supporting roles, material limitations, and `evidence_arguments`.
+`fields` additionally selects `statement` and `guidance`.
+`limitations` remains available as an explicit field path and is always retained.
 Each `evidence_arguments` object selects the same scope, stable `finding_id`, and `snapshot_seq`.
 Supply those arguments to `investigate.evidence` to resolve the five supporting records.
 The CLI equivalent uses `--finding-id <id> --snapshot-seq <seq>` with the original scope filters.
-An unknown or out-of-scope ID returns `finding_unavailable`; incomplete analysis that cannot resolve it returns `analysis_incomplete`.
+An unknown or out-of-scope ID returns `finding_unavailable` (exit 3); incomplete analysis that cannot resolve it returns `analysis_incomplete` (exit 5).
 Finding evidence requires an explicit watermark and never silently selects a newer snapshot.
 All operations accept optional `snapshot_seq` (`--snapshot-seq`) to pin an existing committed watermark.
 Findings cursors additionally bind the maintained rule definitions and versions.
