@@ -1,6 +1,6 @@
 # Remaining run assignments
 
-Status: active. Wave1 verified; task17 implementation active.
+Status: active. Modes integrated and verified; parallel18/19/21 implementation active.
 Runtime baseline at preparation: `700949e`, with a clean `main` and no remote.
 Tasks 1–14 are recorded complete in [todo.md](todo.md).
 The preparation commit is later than this runtime baseline; use actual current HEAD for new worktrees.
@@ -12,7 +12,7 @@ Read [remaining-implementation-run.md](remaining-implementation-run.md) before d
 - Coordinator checkout: `/Users/kirillermakovic/Downloads/PROJECTS/SELF/ronchi`, branch `main`.
 - Agent runtime: Codex collaboration tools (`spawn_agent`, messaging, follow-up) available.
 - Actual concurrency: one coordinator and three isolated implementation workers; no recursive delegation.
-- Current integration HEAD: `606b1fd` (wave 1 integrated; no remotes). Starting HEAD was `7b94a24`.
+- Current integration code HEAD: `bd3f8bf` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
 
 ## Assignments
 
@@ -25,11 +25,11 @@ Record exact focused checks and their outcomes before a row becomes `verified`.
 | --- | --- | --- | --- | --- | --- |
 | 15 MCP | verified | `/root/task15` | `run/20261103-a/task-15` / `.worktrees/20261103-a-task-15` / `7b94a24` | worker `e2e7bfc` → main `606b1fd` | 7 actual rmcp stdio process tests passed on combined main; retained read lease added during integration; accumulated checkpoint passed |
 | 16 Read-through | verified | `/root/task16` | `run/20261103-a/task-16` / `.worktrees/20261103-a-task-16` / `7b94a24` | worker `131d0f9` → main `0b8b297` | 10 Read-through HTTP/process tests passed on combined main; redaction review fix included; accumulated checkpoint passed |
-| 17 Surfpool | active | `/root/task23` | `run/20261103-a/task-17` / `.worktrees/20261103-a-task-17` / `606b1fd` | — | Native ownership/tool install/execution packet active; separate target/jobs2 |
-| 18 Timeout bursts | pending | `/root/task15` preparation only | next checkout not yet allocated | — | Read-only prepare/validate-before-dispatch analysis complete; await17 integration |
-| 19 Status views | pending | `/root/task16` preparation only | next checkout not yet allocated | — | Read-only source/cache/query analysis; await17 integration |
-| 20 Confirmation stalls | ready | coordinator | `main` / coordinator checkout / `7b94a24` | `53528f7`, `b0b0eea` | 3 new controlled-clock HTTP histories passed; 33 transaction histories + 13 Findings query tests passed. fmt/check/Clippy passed. Managed-mode capability test awaits task17; checkbox remains open. |
-| 21 Expired-blockhash reuse | pending | — | — | — | — |
+| 17 Surfpool | verified | `/root/task23` | `run/20261103-a/task-17` / `.worktrees/20261103-a-task-17` / `606b1fd` | worker755c20d/c3e4f13 → main7326fd3/bd3f8bf | Native8 + Read-through10 + transaction33 passed; fake source -32603 regression passed; native8 passed again after shared registration seam. macOS arm64 actual execution only. |
+| 18 Timeout bursts | active | `/root/task15` | `run/20261103-a/task-18` / `.worktrees/20261103-a-task-18` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
+| 19 Status views | active | `/root/task16` | `run/20261103-a/task-19` / `.worktrees/20261103-a-task-19` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
+| 20 Confirmation stalls | verified | coordinator | `main` / coordinator checkout / `7b94a24` | `53528f7`, `b0b0eea` | 4 controlled-clock histories; combined transaction34 passed. Finding drill-down/rule cursor tests passed; native Surfpool confirmation capability rejection verified. fmt/check/Clippy passed. |
+| 21 Expired-blockhash reuse | active | `/root/task23` | `run/20261103-a/task-21` / `.worktrees/20261103-a-task-21` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
 | 22 Custom Cases | pending | — | — | — | — |
 | 23 Evidence maintenance | verified | `/root/task23` | `run/20261103-a/task-23` / `.worktrees/20261103-a-task-23` / `7b94a24` | worker `6481a7f` → main `949a7ec` | 10 maintenance process tests passed on combined main after precise process-disappearance fix 31baf3f; original first failure preserved below; accumulated checkpoint passed |
 | 24 Recovery / measurements | pending | — | — | — | — |
@@ -38,7 +38,7 @@ Record exact focused checks and their outcomes before a row becomes `verified`.
 
 - Initial base: `7b94a24`; task-14 checks are recorded baseline, not rerun here. Git status was clean and no remote exists. Each worker owns its isolated target/build and module slice. Common-file wiring will be reconciled by coordinator. Git metadata writes need ordinary sandbox escalation; all three worktree creations succeeded after escalation.
 - Wave 1 integration: `949a7ec` maintenance, `0b8b297` Read-through, `606b1fd` MCP. Combined focused tests: maintenance10 + MCP7 + Read-through10 passed. Cargo.lock conflicts reconciled as union; `cargo check --locked --offline` passed. No dependency was discarded. MCP retained query holds maintenance read lease. Full checkpoint passed after the documented fixture correction: npm ci (audit0), typecheck, unit14, build; fmt/check; full cargo test; all-target Clippy; native build; browser8; release build (optimized1m18s).
-- Mode / Case integration: coordinator implemented task20 simulator schedule and evidence/query seam while wave1 runs. Read selected project architecture, Rust, TDD, Case-validation, CLI, codebase-design, review, and docs-maintenance skills. RED: confirmation Cases unsupported. GREEN: deadlines survive replacement and duplicate; autonomous source progression and gated lookups verified. CLI presets use catalog; dashboard catalog controls will be reconciled with the complete Case wave.
+- Mode / Case integration: task17 native8, Read-through10, transaction33 and fake-backend error isolation passed on main. Shared activation seam08b47f6 passed transaction34 and all-target Clippy; native8 passed after it. Task20 unsupported Surfpool capability verified. Coordinator implemented task20 simulator schedule and evidence/query seam while wave1 runs. Read selected project architecture, Rust, TDD, Case-validation, CLI, codebase-design, review, and docs-maintenance skills. RED: confirmation Cases unsupported. GREEN: deadlines survive replacement and duplicate; autonomous source progression and gated lookups verified. CLI presets use catalog; dashboard catalog controls will be reconciled with the complete Case wave.
 - Custom Case integration: not recorded.
 - Final accumulated acceptance: not recorded.
 - Isolated resource measurements: not recorded.
@@ -56,7 +56,7 @@ Keep lengthy logs and generated reports outside tracked task documents.
 
 ## Resume record
 
-Task17 active in its exact worktree above. Workers15/16 completed wave1; only read-only next-Case preparation is authorized until17 integration. Coordinator committed the test-fixture regression after complete checkpoint success. Tasks15/16/23 checkboxes are complete. Task20 remains open only for managed-mode capability integration. No accumulated process is running. Keep the run moving after checkpoint and17 integration.
+Tasks18/19/21 active in exact worktrees above, all basebd3f8bf. Tasks15/16/17/20/23 checkboxes complete. Main clean at dispatch. No accumulated suite or resource measurement is running. Next: inspect incoming worker contracts/diffs, reconcile Arm/catalog/RPC/actor/query wiring; checkpointD then22 then24. Continue without user handoff.
 Do not discard an active worker checkout to produce a clean status.
 Do not record secrets, bootstrap tickets, signing material, or raw credential-bearing URLs.
 
@@ -76,16 +76,20 @@ Do not record secrets, bootstrap tickets, signing material, or raw credential-be
 
 ## Next unblocked action
 
-Task17 remains active at `.worktrees/20261103-a-task-17` on base606b1fd. Coordinator should review native ownership/fixtures and settle the smallest registration-owned activation state plus prepare/source callbacks before dispatching18/19/21. Workers15/16 are idle after read-only preparation; give each a new isolated checkout only after17 integration. Coordinator implements21 in main or dispatches the third worker if17 worker is free. Do not rerun the accumulated suite until new integrated changes justify it. No user handoff is needed.
+Tasks18/19/21 are active. Integrate verified commits deliberately, then CheckpointD and22. Do not start measurements before15–23 combined implementation is stable. Shared runtime activation seam is implemented as08b47f6; pending cache fields will be unioned during integration.
 
-## Shared Case handoff preparation (not implemented yet)
+## Shared Case handoff contracts and remaining module work
 
 - Worker15 will implement18 after17 integration. Target seam: prepare/validate -> timeout selection -> dispatch. Invalid/unsupported requests and notifications cannot consume a missing-response Fault. Simulator ALT/nonce capability checks currently occur inside submit and need a validate-only stage. Backend prepare currently delegates some read/simulation validation;18 must cover known argument shapes before selection.
 - Freeze activation and registration real/simulator timestamps before batch execution. Timeout phase must not drift while earlier batch elements execute.
 - HoldPool lower-limit check+semaphore acquisition currently lacks one shared critical section. Current response-loss actor serializes it;18 concurrent pre-dispatch selection must fix/test max_held=1 race while preserving one hold per HTTP batch.
 - Worker16 will implement19 after17. Preserve status-array order/duplicates/current source context; getSignatureStatuses has no commitment selector. Unknown/already-null results are not injected Faults. getTransaction snapshots must preserve encoding/version/commitment; backend getTransaction alone cannot distinguish confirmed from finalized. Use actual source status observation or explicit no-snapshot passthrough.
-- Coordinator will establish registration-owned Arc<Activation> before parallel18/19/21. The actor must clone that Arc at registration, not later in RPC processing. Case replacement swaps only active Arc; old registrations keep their old caches. Keep serializable Binding separate from runtime state. Add typed timing fields and let19/21 own their cache state modules; do not create arbitrary plugin state.
-- Current actor register replies with serialized Value. A small typed Reply::Registered plus ordinary Reply::Value can preserve the Arc without changing every operation interface. Existing job(Value) callers remain behind their helper.
+- Coordinator established registration-owned Arc<Activation> in08b47f6 before parallel18/19/21. The actor must clone that Arc at registration, not later in RPC processing. Case replacement swaps only active Arc; old registrations keep their old caches. Keep serializable Binding separate from runtime state. Add typed timing fields and let19/21 own their cache state modules; do not create arbitrary plugin state.
+- Actor now replies via typed Reply::Registered and ordinary Reply::Value; the old public job(Value) behavior remains behind its helper. Policy records activation real/simulator times; RPC references freeze registration times perbatch.
 - Task21 requires genuine tuple/source context/authority/commitment, same-authority getBlockHeight, inclusive equality, then10 real seconds expiry window/recovery. Durable nonce and unresolved lifetime do not establish expiry. Surfpool rejection can end the cache cycle while preserving actual backend outcome.
 - Task21 must also fix known expired-at-admission simulator behavior: it currently stores normal successful2/4/6 deadlines before immediate Expired transition. Preserve signature acceptance but make expiry-prevented processing explicit without advertising a success schedule.
 - Old clean integrated worktrees15/16/23 were removed normally after verification. Their branches/commits remain. Only coordinator and task17 checkout remain active. Main has no owned background test process.
+
+- Native oracle correction in17 regression: a32-byte base58 genesis may have43 or44 characters. tests/read_through now decodes to32 bytes. No runtime change followed. The original43!=44 failure is not a product regression.
+- Native backend may return -32002 for a default-preflight replay of an already processed identity. Tests preserve this backend result instead of fabricating unconditional duplicate success.
+- Source -32603 originally poisoned Journal health in backend-submit actor. Actual fake-backend first-error/second-acceptance RED→GREEN is integrated inbd3f8bf.

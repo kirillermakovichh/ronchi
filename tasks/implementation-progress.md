@@ -1,7 +1,7 @@
 # Task 14 completed: embedded dashboard
 
 Task 14 and slices 14a–14f are complete. The final explicit invalid-detail recovery regression passed.
-The authorized tasks15–24 run is active. Tasks15,16,23 and the simulator task20 slice are integrated. See [parallel-run-state.md](parallel-run-state.md) for current assignments, commits, checks, and remaining acceptance. The task14 evidence below remains the historical baseline.
+The authorized tasks15–24 run is active. Tasks15,16,17,20,23 are verified and integrated. Parallel tasks18,19,21 are active. See [parallel-run-state.md](parallel-run-state.md) for current assignments, commits, checks, and remaining acceptance. The task14 evidence below remains the historical baseline.
 
 ## Next session
 

@@ -446,10 +446,12 @@ Checkpoints record results and do not require another approval interview.
 
 ### 17. Managed native Surfpool
 
-- [ ] **Accept:** Pin/install/verify an owned native backend under the workspace; route all blockchain RPC through it with clean state and no automatic funding.
+- [x] **Accept:** Pin/install/verify an owned native backend under the workspace; route all blockchain RPC through it with clean state and no automatic funding.
 - **Verify:** Install/readiness failure, backend death, missing state, actual local execution, owned cleanup, and disabled direct Read-through.
 - **Dependencies:** 3, 7, 16. **Scope:** Medium; split tool installation if needed. **Likely files:** `src/backend.rs`, `src/backend/surfpool.rs`, `src/tools.rs`, `tests/surfpool_mode.rs`, `tests/backend_ownership.rs`.
 - **Source:** [Lifecycle](../docs/product/lab-lifecycle.md), [mode authority](../docs/adr/0013-managed-surfpool-execution-mode.md).
+
+- **Implemented / verified:** Main7326fd3 pins native Surfpool1.7.0, explicit checksum-verified workspace install, exclusive blockchain authority, actual signed execution from an explicit snapshot, no automatic funding/deployment, readiness/death/clean restart/verified orphan cleanup, and first-only backend response loss. Combined native8 + Read-through10 + transaction33 passed. Mainbd3f8bf keeps source RPC -32603 distinct from Journal failure; actual fake-backend RED→GREEN passed. Native execution is verified on macOS arm64 only. Datasource hydration and other native platforms remain untested. Response-loss Findings remain explicitly simulator-only.
 
 ### 18. Timeout bursts
 
@@ -467,10 +469,12 @@ Checkpoints record results and do not require another approval interview.
 
 ### 20. Bounded confirmation stalls
 
-- [ ] **Accept:** Assign simulator-only delayed progression and expose the actual Surfpool capability limit; existing schedules survive Case changes.
+- [x] **Accept:** Assign simulator-only delayed progression and expose the actual Surfpool capability limit; existing schedules survive Case changes.
 - **Verify:** Progress without polling, commitment-gated lookups, duplicates, disarm, recovery, and no retroactive expiry after processing.
 - **Dependencies:** 6, 9. **Scope:** Small. **Likely files:** `src/cases/confirmation.rs`, `src/findings/confirmation.rs`, `tests/confirmation_case.rs`.
 - **Source:** [Stalled confirmation](../docs/product/cases.md#stalled-confirmation).
+
+- **Implemented / verified:** Main53528f7/b0b0eea assigns bounded 2/34/36 and 2/4/36 schedules at atomic acceptance. Four controlled-clock histories now cover autonomous progression, gating, duplicates/disarm, expiry-after-processing exclusion, bounds/filters/notifications, and frozen batch registration times. Source-backed recovery Finding supports pinned drill-down and rule-bound cursors. Actual Surfpool arm and startup reject authoritative confirmation control without changing policy. Mode checkpoint passed.
 
 ### 21. Expired-blockhash reuse
 
