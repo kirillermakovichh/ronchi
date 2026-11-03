@@ -13,7 +13,9 @@ use tokio_util::sync::CancellationToken;
 const MAX_INCIDENTS: usize = 256;
 #[derive(Serialize)]
 pub(super) struct RuleReport {
-    rule: Rule,
+    rule: String,
+    #[serde(skip)]
+    legacy: Option<Rule>,
     version: u32,
     matched: usize,
     no_match: usize,
@@ -47,7 +49,12 @@ impl JournalReader {
             ]
             .into_iter()
             .map(|rule| RuleReport {
-                rule,
+                rule: serde_json::to_value(rule)
+                    .expect("rule serializes")
+                    .as_str()
+                    .expect("rule name")
+                    .into(),
+                legacy: Some(rule),
                 version: 1,
                 matched: 0,
                 no_match: 0,
@@ -129,10 +136,13 @@ impl JournalReader {
                 .flatten()
                 .find_map(|f| (!f.signature.is_empty()).then(|| f.signature.clone()));
             for rule_report in &mut report.rules {
+                let Some(rule) = rule_report.legacy else {
+                    continue;
+                };
                 let later = if let (Some(signature), Some(withholding), Some(acceptance)) =
                     (&signature, &originals[3], &originals[1])
                 {
-                    let predicate = match rule_report.rule {
+                    let predicate = match rule {
                         Rule::LookupAfterWithholding => {
                             "kind='rpc.registered' AND rpc_method IN ('getSignatureStatuses','getTransaction')"
                         }
@@ -185,7 +195,7 @@ impl JournalReader {
                     withholding: originals[3].clone(),
                     later,
                 };
-                let evaluation = findings::evaluate(rule_report.rule, &evidence);
+                let evaluation = findings::evaluate(rule, &evidence);
                 match evaluation.state {
                     State::Matched => rule_report.matched += 1,
                     State::NoMatch => rule_report.no_match += 1,
@@ -224,6 +234,15 @@ impl JournalReader {
         if self.version < 6 {
             report.gaps.push("Legacy correlation may be missing; associations are not reconstructed by inference".into());
         }
+        self.confirmation_findings(
+            selected_cte,
+            values,
+            lab,
+            snapshot,
+            deadline,
+            cancel,
+            &mut report,
+        )?;
         for rule in &mut report.rules {
             rule.state = if rule.operational_limit {
                 State::OperationalLimit
@@ -242,6 +261,8 @@ impl JournalReader {
         Ok(report)
     }
 }
+#[path = "findings/confirmation.rs"]
+mod confirmation;
 type RowData = (u64, String, String, String);
 fn row_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<RowData> {
     Ok((

@@ -478,6 +478,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     hold_ms,
                     max_held,
                     signatures,
+                    confirmation: None,
                 }),
                 _ => None,
             };

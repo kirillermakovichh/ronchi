@@ -399,7 +399,20 @@ impl Owner {
             .and_then(|h| h.checked_sub(self.clock.profile.initial_block_height))
             .and_then(|h| h.checked_add(1))
             .and_then(|h| h.checked_mul(self.clock.profile.slot_duration_ms * 1_000_000));
-        let process_at_ns = accepted + 2_000_000_000;
+        let delay = crate::cases::confirmation::selected(
+            &binding,
+            &signature,
+            reference["responds"].as_bool().unwrap_or(false),
+        );
+        let [process_at_ns, confirmed_at_ns, finalized_at_ns] = if let Some(delay) = &delay {
+            delay.deadlines(accepted)?
+        } else {
+            [
+                accepted + 2_000_000_000,
+                accepted + 4_000_000_000,
+                accepted + 6_000_000_000,
+            ]
+        };
         let next_due_ns = expiry_at_ns
             .map(|at| at.max(accepted).min(process_at_ns))
             .unwrap_or(process_at_ns);
@@ -417,8 +430,8 @@ impl Owner {
             admission_slot: admission_view.slot,
             admission_height: admission_view.block_height,
             process_at_ns,
-            confirmed_at_ns: accepted + 4_000_000_000,
-            finalized_at_ns: accepted + 6_000_000_000,
+            confirmed_at_ns,
+            finalized_at_ns,
             last_valid_height,
             expiry_at_ns,
             next_due_ns: Some(next_due_ns),
@@ -440,6 +453,9 @@ impl Owner {
             json!({"signature":signature,"digest":signed.digest,"admission":"accepted","request":reference}),
         );
         let mut facts = vec![attempt, accepted_fact];
+        if let Some(delay) = delay {
+            facts.push(crate::lab::event("fault.confirmation_schedule_assigned", self.started, json!({"signature":signature,"request":reference,"policy":binding.policy,"schedule":delay,"process_at_ns":process_at_ns,"confirmed_at_ns":confirmed_at_ns,"finalized_at_ns":finalized_at_ns,"authority":"rpc_simulator"})));
+        }
         if selected {
             facts.push(crate::lab::event("fault.response_loss_selected",self.started,json!({"signature":signature,"request":reference,"policy":binding.policy,"consumed":true})));
         }

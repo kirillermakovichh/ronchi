@@ -1632,6 +1632,9 @@ async fn response_loss_silence_retains_identity_and_autonomous_status() {
 #[path = "cases/response_loss.rs"]
 mod response_loss_cases;
 
+#[path = "cases/confirmation.rs"]
+mod confirmation_cases;
+
 #[tokio::test]
 async fn investigation_correlates_http_signature_lookups_and_exposes_signed_bytes_only_explicitly()
 {

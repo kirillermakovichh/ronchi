@@ -1,6 +1,6 @@
 # Cases and coverage
 
-Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. Other families and Surfpool response loss remain planned. Names, parameters, and YAML syntax are not stable APIs.
+Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. Other families and Surfpool response loss remain planned. Names, parameters, and YAML syntax are not stable APIs.
 This document owns Case scope and catalog status; [overview.md](overview.md) owns the overall product definition.
 
 ## Continuing Case model
@@ -322,6 +322,28 @@ Surfpool cannot provide this authoritative lifecycle variant through a response 
 It remains unsupported there unless a future maintained backend capability can actually control confirmation.
 A stale boundary view in Surfpool is the preceding family, with that family's narrower claim.
 Infinite stalls and arbitrary commitment regressions are outside these initial variants.
+
+#### Verified simulator confirmation-delay claim
+
+`tx-confirmation-stalls` and `finality-delayed` are available through the shared Case catalog and arm operation.
+An optional `confirmation` object contains `processing_ms`, `confirmation_interval_ms`, `extra_delay_ms`, and `hold_at` (`processed` or `confirmed`).
+Each interval is positive and at most 120,000 ms.
+The default schedules are the 2/34/36-second and 2/4/36-second variants above.
+The shared signature filter limits eligible new identities.
+Notifications do not select this Fault.
+Duplicate identities keep their assigned schedule.
+
+Acceptance and `fault.confirmation_schedule_assigned` commit in one atomic group.
+The assigned deadlines and autonomous `transaction.transition` events remain readable after Case replacement.
+The version-1 `sim.confirmation-delay.observed` Finding requires selected simulator acceptance, assignment, held commitment, and recovery transition facts.
+Its statement gives the observed scheduled interval in simulator time.
+Its references remain inside the requested Lab, scope, and snapshot.
+Omitting assignment or transition support prevents that Finding.
+It does not establish an application deadline, application failure, or validator finality.
+
+Controlled-clock HTTP histories verify autonomous recovery, commitment-gated lookup, duplicate and disarm preservation, signature filtering, notifications, interval bounds, and no expiry after processing.
+Managed Surfpool capability verification remains part of the managed-mode integration.
+
 
 ### Expired recent blockhash submission
 

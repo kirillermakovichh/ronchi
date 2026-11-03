@@ -9,6 +9,8 @@ use std::{
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+pub mod confirmation;
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Arm {
@@ -19,6 +21,8 @@ pub struct Arm {
     pub max_held: u16,
     #[serde(default)]
     pub signatures: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<confirmation::Delay>,
 }
 fn default_hold() -> u64 {
     20_000
@@ -33,15 +37,20 @@ impl Default for Arm {
             hold_ms: default_hold(),
             max_held: default_capacity(),
             signatures: vec![],
+            confirmation: None,
         }
     }
 }
 impl Arm {
     pub fn validate(&self) -> Result<(), RpcError> {
-        if self.case_id != "tx-response-lost" {
-            return Err(RpcError::unsupported(
-                "This build implements only simulator tx-response-lost",
-            ));
+        if ![
+            "tx-response-lost",
+            "tx-confirmation-stalls",
+            "finality-delayed",
+        ]
+        .contains(&self.case_id.as_str())
+        {
+            return Err(RpcError::unsupported("Unknown or unavailable Case"));
         }
         if !(1..=20_000).contains(&self.hold_ms)
             || !(1..=16).contains(&self.max_held)
@@ -54,7 +63,21 @@ impl Arm {
         for signature in &self.signatures {
             crate::protocol::signature(&serde_json::json!(signature))?;
         }
+        if let Some(delay) = &self.confirmation {
+            if !self.is_confirmation() {
+                return Err(RpcError::params(
+                    "Confirmation settings require a confirmation Case",
+                ));
+            }
+            delay.validate()?;
+        }
         Ok(())
+    }
+    pub fn is_confirmation(&self) -> bool {
+        matches!(
+            self.case_id.as_str(),
+            "tx-confirmation-stalls" | "finality-delayed"
+        )
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -72,8 +95,9 @@ impl Binding {
     pub fn selects(&self, signature: &str, responds: bool) -> bool {
         responds
             && self.policy.as_ref().is_some_and(|p| {
-                p.settings.signatures.is_empty()
-                    || p.settings.signatures.iter().any(|s| s == signature)
+                p.settings.case_id == "tx-response-lost"
+                    && (p.settings.signatures.is_empty()
+                        || p.settings.signatures.iter().any(|s| s == signature))
             })
     }
 }
@@ -284,12 +308,19 @@ pub struct CatalogEntry {
     pub max_held: u16,
 }
 pub fn catalog() -> Vec<CatalogEntry> {
-    vec![CatalogEntry {
-        case_id: "tx-response-lost".into(),
+    [
+        "tx-response-lost",
+        "tx-confirmation-stalls",
+        "finality-delayed",
+    ]
+    .into_iter()
+    .map(|case_id| CatalogEntry {
+        case_id: case_id.into(),
         modes: vec!["simulator".into()],
         default_hold_ms: 20_000,
         max_held: 16,
-    }]
+    })
+    .collect()
 }
 pub fn lab_error(error: RpcError) -> crate::lab::LabError {
     if error.data.as_ref().is_some_and(|data| {

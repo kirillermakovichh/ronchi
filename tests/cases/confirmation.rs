@@ -1,0 +1,198 @@
+use super::*;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmation_schedules_progress_without_polling_and_survive_replacement() {
+    for (case_id, confirmed_at) in [("tx-confirmation-stalls", 34), ("finality-delayed", 4)] {
+        let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+        server.rpc.wait_initialized().await.unwrap();
+        server
+            .rpc
+            .arm_case(ronchi::cases::Arm {
+                case_id: case_id.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let (signature, wire) = signed(&server.hash().await, 91, false);
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        let assigned = server.record(&signature).await.unwrap();
+        assert_eq!(assigned.process_at_ns, 2_000_000_000);
+        assert_eq!(assigned.confirmed_at_ns, confirmed_at * 1_000_000_000);
+        assert_eq!(assigned.finalized_at_ns, 36_000_000_000);
+        server.time.advance(Duration::from_secs(2)).unwrap();
+        server.phase(&signature, Phase::Processed).await;
+        server.rpc.disarm_case().await.unwrap();
+        // A duplicate cannot replace the accepted schedule.
+        assert_eq!(
+            server.call("sendTransaction", send(&wire)).await["result"],
+            signature
+        );
+        assert_eq!(
+            server.record(&signature).await.unwrap().confirmed_at_ns,
+            assigned.confirmed_at_ns
+        );
+        server
+            .time
+            .advance(Duration::from_secs(confirmed_at - 3))
+            .unwrap();
+        assert!(
+            server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"commitment":"confirmed"}])
+                )
+                .await["result"]
+                .is_null()
+        );
+        server.time.advance(Duration::from_secs(1)).unwrap();
+        server.phase(&signature, Phase::Confirmed).await;
+        assert!(
+            server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"commitment":"confirmed"}])
+                )
+                .await["result"]
+                .is_object()
+        );
+        assert!(
+            server
+                .call(
+                    "getTransaction",
+                    json!([signature,{"commitment":"finalized"}])
+                )
+                .await["result"]
+                .is_null()
+        );
+        server
+            .time
+            .advance(Duration::from_secs(36 - confirmed_at))
+            .unwrap();
+        server.phase(&signature, Phase::Finalized).await;
+        assert!(server.call("getTransaction", json!([signature])).await["result"].is_object());
+        let query = ronchi::query::Request {
+            contract_version: 1,
+            request_id: "confirmation-finding".into(),
+            lab_id: "L-transactions".into(),
+            operation: ronchi::query::Operation::Findings,
+            arguments: Default::default(),
+        };
+        let engine = ronchi::query::Engine::default();
+        let path = server.directory.path().join("journal.sqlite");
+        let result = engine
+            .execute(
+                path.clone(),
+                false,
+                "explicit",
+                query.clone(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.result["items"].as_array().unwrap().len(), 1);
+        let finding = &result.result["items"][0];
+        assert_eq!(finding["rule_id"], "sim.confirmation-delay.observed");
+        assert!(finding["statement"].as_str().unwrap().contains("32000 ms"));
+        let mut narrowed = query;
+        narrowed.arguments.scope.kind = vec![
+            "transaction.transition".into(),
+            "transaction.accepted".into(),
+        ];
+        let result = engine
+            .execute(path, false, "explicit", narrowed, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(result.result["items"].as_array().unwrap().is_empty());
+        assert!(server.stop(false).await);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn already_processed_transaction_does_not_expire_during_confirmation_delay() {
+    let mut server = Server::new(
+        ClockProfile {
+            validity_window_blocks: 6,
+            ..Default::default()
+        },
+        DiskLimits::default(),
+    )
+    .await;
+    server.rpc.wait_initialized().await.unwrap();
+    server
+        .rpc
+        .arm_case(ronchi::cases::Arm {
+            case_id: "tx-confirmation-stalls".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (signature, wire) = signed(&server.hash().await, 92, false);
+    assert_eq!(
+        server.call("sendTransaction", send(&wire)).await["result"],
+        signature
+    );
+    server.time.advance(Duration::from_secs(2)).unwrap();
+    server.phase(&signature, Phase::Processed).await;
+    server.time.advance(Duration::from_secs(34)).unwrap();
+    server.phase(&signature, Phase::Finalized).await;
+    assert_eq!(
+        server
+            .call("getSignatureStatuses", statuses(&signature))
+            .await["result"]["value"][0]["confirmationStatus"],
+        "finalized"
+    );
+    assert!(server.stop(false).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmation_settings_are_bounded_and_nonmatching_submissions_keep_normal_schedule() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    server.rpc.wait_initialized().await.unwrap();
+    let delay = ronchi::cases::confirmation::Delay {
+        extra_delay_ms: 120_001,
+        ..Default::default()
+    };
+    let invalid = ronchi::cases::Arm {
+        case_id: "tx-confirmation-stalls".into(),
+        confirmation: Some(delay),
+        ..Default::default()
+    };
+    assert_eq!(server.rpc.arm_case(invalid).await.unwrap_err().code, -32602);
+    assert!(server.rpc.case_status().policy.is_none());
+    let hash = server.hash().await;
+    let (eligible, wire) = signed(&hash, 93, true);
+    let (other, other_wire) = signed(&hash, 94, false);
+    server
+        .rpc
+        .arm_case(ronchi::cases::Arm {
+            case_id: "tx-confirmation-stalls".into(),
+            signatures: vec![eligible.clone()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        server.call("sendTransaction", send(&other_wire)).await["result"],
+        other
+    );
+    assert_eq!(
+        server.record(&other).await.unwrap().finalized_at_ns,
+        6_000_000_000
+    );
+    let (status, _) = server
+        .http(json!({"jsonrpc":"2.0","method":"sendTransaction","params":send(&wire)}))
+        .await
+        .unwrap();
+    assert_eq!(status, 204);
+    assert_eq!(
+        server.record(&eligible).await.unwrap().finalized_at_ns,
+        6_000_000_000
+    );
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server.phase(&other, Phase::Finalized).await;
+    server.phase(&eligible, Phase::Finalized).await;
+    assert!(server.stop(false).await);
+}
