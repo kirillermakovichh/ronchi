@@ -51,7 +51,8 @@ All operations accept optional `snapshot_seq` (`--snapshot-seq`) to pin an exist
 Findings cursors additionally bind the maintained rule definitions and versions.
 The authenticated control operation uses the existing `POST /v1/labs/{id}/investigate` route.
 `schema investigate.findings` works offline and includes the Finding and rule-definition schemas.
-Dashboard, MCP, follow streams, and export remain separate tasks.
+Dashboard and MCP use these shared query operations.
+Follow streams and export have separate contracts.
 The sections below retain the full accepted contract.
 
 ## Operations and identity
@@ -104,7 +105,7 @@ Transient control-queue capacity returns `state_conflict`; Journal failure retur
 The CLI uses these routes and the same core mutation operation.
 `schema case.list`, `schema case.arm`, and `schema case.disarm` work offline.
 Status exposes `active_case`, `case_registration_seq`, and bounded `held_effects` with original policy revision and remaining real milliseconds.
-No MCP adapter or Findings operation is implied by these controls.
+MCP exposes these controls through the operation names above.
 
 ## First dashboard
 
@@ -247,6 +248,37 @@ Successful empty selections and recorded injected RPC errors are successful tool
 Supported MCP cancellation stops cancellable request work; after uncertain mutation completion, inspect Lab status.
 Tool schemas declare actual read-only/idempotent effects; no tool executes shell commands, starts the backend, or accepts arbitrary code.
 The adapter contains no model, registration, cloud call, or remote transport requirement.
+
+### Implemented stdio adapter
+
+`ronchi --project <directory> mcp stdio` serves the twelve tools in the operation table with official `rmcp` 3.8.0.
+The adapter selects only a Project Workspace.
+Global `--lab` and `--lab-id` are rejected; each scoped tool requires its own immutable `lab_id`.
+`lab.up` accepts `name` and typed configuration `arguments`.
+`lab.status` accepts either `name` or `lab_id`.
+Case arm, Investigation, evaluation, and collection tools accept their shared typed `arguments`.
+Tool listing includes generated input/output schemas and effect annotations.
+The adapter supports legacy initialization and modern discovery through the SDK.
+Process checks use protocol `2025-11-25` initialization and `2026-07-28` discovery.
+They do not establish compatibility with every MCP client.
+
+Each tool returns one shared structured envelope and a short text status.
+Encoded tool arguments are limited to 64 KiB.
+The SDK bounds the full framed input line at 128 KiB and discards larger lines without operation execution.
+A valid bounded call above the argument budget returns `invalid_argument`.
+At most four operations execute concurrently in one adapter.
+Structured result data is limited to 256 KiB.
+If a completed mutation exceeds the result budget, its error retains the resolved identity and reports `effects:applied`.
+The caller must inspect status before another mutation.
+
+`ronchi_check_observe` requires a caller-selected stable `arguments.collection_id`.
+Its default `action:collect` admits one collection and waits for its bounded completion.
+`action:status` and `action:cancel` inspect or cancel that identity without starting another collection.
+They use the same arguments model; only collection identity selects the existing collection.
+Protocol cancellation requests collection cancellation and waits up to five seconds for terminal status.
+Startup cancellation uses the ordinary owned startup cleanup path.
+Cancellation of a control mutation wait reports unknown effects because the Lab may have accepted it.
+EOF drains SDK responses and detaches; a ready Lab and its continuing Case remain alive.
 
 ## Public Check operations
 

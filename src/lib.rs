@@ -10,6 +10,7 @@ pub mod findings;
 pub mod journal;
 pub mod lab;
 pub mod maintenance;
+mod mcp;
 mod network;
 pub mod process;
 pub mod protocol;
@@ -54,6 +55,11 @@ enum Command {
     Lab {
         #[command(subcommand)]
         operation: MaintenanceCommand,
+    },
+    /// Attach a local MCP adapter without owning the persistent Lab
+    Mcp {
+        #[command(subcommand)]
+        transport: McpTransport,
     },
     /// Print a single-use browser launch URL for a ready Lab
     Dashboard {
@@ -121,6 +127,11 @@ enum MaintenanceCommand {
     Delete,
     /// Export a bounded selected evidence stream; requires --lab-id
     Export(Box<maintenance::cli::ExportArgs>),
+}
+#[derive(Subcommand)]
+enum McpTransport {
+    /// Serve official MCP messages on stdio until EOF
+    Stdio,
 }
 #[derive(Subcommand)]
 enum CheckCommand {
@@ -227,11 +238,15 @@ fn failure(json: bool, exit: i32, code: &str, message: String, phase: &str, reco
 }
 pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
     let args: Vec<_> = args.into_iter().collect();
-    let json = args
-        .iter()
-        .skip(1)
-        .take_while(|a| *a != "--")
-        .any(|a| a == "--json");
+    let mcp_stdio = args
+        .windows(2)
+        .any(|pair| pair[0] == "mcp" && pair[1] == "stdio");
+    let json = !mcp_stdio
+        && args
+            .iter()
+            .skip(1)
+            .take_while(|a| *a != "--")
+            .any(|a| a == "--json");
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(e)
@@ -257,6 +272,14 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             );
         }
     };
+    if matches!(cli.command, Command::Mcp { .. }) && (cli.lab.is_some() || cli.lab_id.is_some()) {
+        return render_lab_error(
+            false,
+            lab::LabError::invalid(
+                "MCP arguments select a Project Workspace; each tool selects its explicit Lab",
+            ),
+        );
+    }
     let name = cli.lab.as_deref().unwrap_or("default");
     if !workspace::identifier(name) {
         return render_lab_error(cli.json, lab::LabError::invalid("Invalid Lab name"));
@@ -335,6 +358,17 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     }
                 }
             }
+        }
+        Command::Mcp {
+            transport: McpTransport::Stdio,
+        } => {
+            let result =
+                project(cli.project.as_deref()).and_then(|root| run_async(mcp::serve(root)));
+            if let Err(error) = result {
+                let _ = writeln!(io::stderr(), "{}: {}", error.code, error.message);
+                return error.exit;
+            }
+            0
         }
         Command::Demo(args) => {
             if cli.lab.is_some() || cli.lab_id.is_some() {

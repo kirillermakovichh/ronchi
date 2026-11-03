@@ -278,6 +278,15 @@ pub async fn up(
     )
     .await
 }
+/// Use the ordinary startup cleanup path when an attaching transport cancels.
+pub(crate) async fn up_cancellable(
+    configuration: EffectiveConfig,
+    explicit: Settings,
+    name: &str,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<LabResult, LabError> {
+    up_selected(configuration, explicit, name, false, cancel).await
+}
 /// Start only a never-used name, under the ordinary startup operation lock.
 pub(crate) async fn up_fresh(
     configuration: EffectiveConfig,
