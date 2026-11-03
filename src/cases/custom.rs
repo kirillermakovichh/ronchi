@@ -41,3 +41,23 @@ impl Plan {
 pub fn catalog() -> Value {
     validation::catalog()
 }
+
+/// Validation uses the same result shape across offline and authenticated adapters.
+#[derive(JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+pub enum ValidationEnvelope {
+    Success {
+        contract_version: u32,
+        request_id: Option<String>,
+        lab_id: Option<String>,
+        result: Box<Plan>,
+    },
+    Invalid {
+        contract_version: u32,
+        request_id: Option<String>,
+        lab_id: Option<String>,
+        error: ValidationError,
+    },
+    Failure(crate::ErrorEnvelope),
+}

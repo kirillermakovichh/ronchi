@@ -264,3 +264,114 @@ async fn custom_transaction_first_snapshot_keeps_complete_status_shape_and_commi
     );
     assert!(server.stop(false).await);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn custom_template_joins_all_lookup_entries_and_requires_scoped_source_and_boundary() {
+    let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+    server.rpc.wait_initialized().await.unwrap();
+    let mut artifact:Value=serde_json::from_str(&custom_artifact(json!([
+        {"id":"hide","using":"rpc.lookup-null@1","until":{"elapsed_ms":10000,"clock":"simulator"},"next":"observe"},
+        {"id":"observe","using":"observe.rpc@1","until":{"matches":1},"next":"done"}
+    ]),json!(["getSignatureStatuses","getTransaction"]),"transaction_signature")).unwrap();
+    artifact["state"]["max_keys"] = json!(16);
+    artifact["requires"]["finding_templates"] = json!(["lookup-hidden-then-queried@1"]);
+    artifact["findings"] = json!([{"id":"hidden-then-queried","template":"lookup-hidden-then-queried@1","facts":{"hidden":{"kind":"lookup_hidden","step":"hide"},"later":{"kind":"lookup_received","step":"observe"}},"same":"transaction_signature","order":["hidden","later"],"within_ms":60000}]);
+    server
+        .rpc
+        .arm_case(ronchi::cases::Arm {
+            case_id: "custom".into(),
+            custom_yaml: Some(artifact.to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let hash = server.hash().await;
+    let mut signatures = vec![];
+    for salt in 180..188 {
+        let (signature, wire) = signed(&hash, salt, false);
+        server.call("sendTransaction", send(&wire)).await;
+        signatures.push(signature);
+    }
+    server.time.advance(Duration::from_secs(6)).unwrap();
+    server
+        .phase(signatures.last().unwrap(), Phase::Finalized)
+        .await;
+    let hidden = server
+        .call("getSignatureStatuses", json!([signatures]))
+        .await;
+    assert!(
+        hidden["result"]["value"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(Value::is_null)
+    );
+    server.time.advance(Duration::from_secs(10)).unwrap();
+    assert!(
+        server
+            .call("getSignatureStatuses", json!([signatures]))
+            .await["result"]["value"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v["confirmationStatus"] == "finalized")
+    );
+    assert!(server.stop(false).await);
+    let engine = ronchi::query::Engine::default();
+    let path = server.directory.path().join("journal.sqlite");
+    let request = ronchi::query::Request {
+        contract_version: 1,
+        request_id: "custom-template".into(),
+        lab_id: "L-transactions".into(),
+        operation: ronchi::query::Operation::Findings,
+        arguments: Default::default(),
+    };
+    let found = engine
+        .execute(
+            path.clone(),
+            true,
+            "explicit",
+            request.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let findings = found.result["items"].as_array().unwrap();
+    assert_eq!(findings.len(), 8, "{}", found.result);
+    assert!(
+        findings
+            .iter()
+            .all(|f| f["rule_id"] == "custom.integration.hidden-then-queried")
+    );
+    for finding in findings {
+        assert!(
+            finding["supporting_events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["role"] == "later_lookup_received")
+        );
+    }
+    let mut incomplete = request;
+    incomplete.arguments.scope.kind = vec![
+        "fault.custom_lookup_changed".into(),
+        "rpc.response_prepared".into(),
+        "rpc.boundary".into(),
+        "rpc.registered".into(),
+        "custom.selection".into(),
+    ];
+    let missing = engine
+        .execute(path, true, "explicit", incomplete, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(missing.result["items"].as_array().unwrap().is_empty());
+    assert!(
+        missing
+            .view
+            .evidence_gaps
+            .iter()
+            .any(|gap| gap.message.contains("Custom template")),
+        "{}",
+        serde_json::to_value(missing).unwrap()
+    );
+}

@@ -262,7 +262,7 @@ The adapter contains no model, registration, cloud call, or remote transport req
 
 ### Implemented stdio adapter
 
-`ronchi --project <directory> mcp stdio` serves the twelve tools in the operation table with official `rmcp` 3.8.0.
+`ronchi --project <directory> mcp stdio` serves the thirteen tools in the operation table with official `rmcp` 3.8.0.
 The adapter selects only a Project Workspace.
 Global `--lab` and `--lab-id` are rejected; each scoped tool requires its own immutable `lab_id`.
 `lab.up` accepts `name` and typed configuration `arguments`.

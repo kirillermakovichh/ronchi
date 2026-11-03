@@ -145,6 +145,8 @@ fn output_schema(name: &str) -> Arc<serde_json::Map<String, Value>> {
         schema::<query::Envelope>()
     } else if name == "ronchi_check_observe" {
         schema::<checks::Envelope>()
+    } else if name == "ronchi_case_validate" {
+        schema::<cases::custom::ValidationEnvelope>()
     } else if name == "ronchi_case_list" {
         schema::<CatalogOutput>()
     } else {

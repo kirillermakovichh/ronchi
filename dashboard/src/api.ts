@@ -113,12 +113,12 @@ export class Api {
     if (!response.ok) {
       const error = (
         value as {
-          error?: { code?: string; message?: string; effects?: string };
+          error?: { code?: string; category?: string; path?: string; message?: string; effects?: string };
         }
       ).error;
       throw new ApiError(
         response.status,
-        `${error?.code ?? "operation_error"}: ${error?.message ?? `HTTP ${response.status}`} · effects: ${error?.effects ?? "unknown"}`,
+        `${error?.code ?? error?.category ?? "operation_error"}: ${error?.path ? `${error.path}: ` : ""}${error?.message ?? `HTTP ${response.status}`} · effects: ${error?.effects ?? (error?.category ? "none" : "unknown")}`,
       );
     }
     return value as T;

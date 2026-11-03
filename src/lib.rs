@@ -124,7 +124,7 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "case.validate", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
         operation: String,
     },
 }
@@ -483,6 +483,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 schemars::schema_for!(maintenance::Envelope<maintenance::DeleteResult>)
             } else if operation == "lab.export" {
                 schemars::schema_for!(maintenance::Envelope<maintenance::ExportResult>)
+            } else if operation == "case.validate" {
+                schemars::schema_for!(cases::custom::ValidationEnvelope)
             } else if operation == "case.list" {
                 schemars::schema_for!(CatalogReply)
             } else {

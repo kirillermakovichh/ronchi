@@ -12,7 +12,7 @@ Read [remaining-implementation-run.md](remaining-implementation-run.md) before d
 - Coordinator checkout: `/Users/kirillermakovic/Downloads/PROJECTS/SELF/ronchi`, branch `main`.
 - Agent runtime: Codex collaboration tools (`spawn_agent`, messaging, follow-up) available.
 - Actual concurrency: one coordinator and three isolated implementation workers; no recursive delegation.
-- Current integration code HEAD: `d7503b9` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
+- Current integration code HEAD: `c0e2294` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
 
 ## Assignments
 
@@ -30,9 +30,9 @@ Record exact focused checks and their outcomes before a row becomes `verified`.
 | 19 Status views | integrated | `/root/task16` | `run/20261103-a/task-19` / `.worktrees/20261103-a-task-19` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
 | 20 Confirmation stalls | verified | coordinator | `main` / coordinator checkout / `7b94a24` | `53528f7`, `b0b0eea` | 4 controlled-clock histories; combined transaction34 passed. Finding drill-down/rule cursor tests passed; native Surfpool confirmation capability rejection verified. fmt/check/Clippy passed. |
 | 21 Expired-blockhash reuse | integrated | `/root/task23` | `run/20261103-a/task-21` / `.worktrees/20261103-a-task-21` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
-| 22 Custom Cases | active | coordinator + `/root/task16` | main runtime; isolated parser packet follows review | — | Parser validation and runtime sequencing split; no completion claim |
+| 22 Custom Cases | active | coordinator + three workers | runtime main `c0e2294`; acceptance packets below | `bfd4851`, `89d41c4`, `c0e2294` | Compiler11 + five custom RPC histories + dashboard16 passed; remaining public/native/lifecycle/template acceptance active |
 | 23 Evidence maintenance | verified | `/root/task23` | `run/20261103-a/task-23` / `.worktrees/20261103-a-task-23` / `7b94a24` | worker `6481a7f` → main `949a7ec` | 10 maintenance process tests passed on combined main after precise process-disappearance fix 31baf3f; original first failure preserved below; accumulated checkpoint passed |
-| 24 Recovery / measurements | active | `/root/task23` | `run/20261103-a/task-24-harness` / `.worktrees/20261103-a-task-24-harness` / `d7503b9` | — | Recovery tests and harness only; combined measurements await15–23 |
+| 24 Recovery / measurements | active | coordinator | harness integrated; final main executable required | `82258a0`, `2c12722` | Combined recovery3 + RPCbudget2 passed; simulator/native harness smoke passed in worker. Actual final measurements pending |
 
 ## Integration checkpoints
 
@@ -112,3 +112,13 @@ Remaining task22 histories: response-loss ledger reactivation, whole-batch old a
 No accumulated suite or actual measurement has run for this slice. Tasks22/24 stay open.
 
 Custom runtime slice pre-commit: compiler11, five separate public custom RPC histories, dashboard unit16/typecheck/build, all-target Clippy, budget2 and recovery3 passed. Full accumulated acceptance and remaining Custom histories remain pending.
+
+## Current acceptance packets after c0e2294
+
+- Worker23: branch `run/20261103-a/task-22-lifecycle`, exact reused clean checkout `.worktrees/20261103-a-task-24-harness`, base `c0e2294`. Owns new `tests/cases/custom_lifecycle.rs` and one include in `tests/transaction_history.rs`; response-loss reactivation, old batch binding, confirmation, timeout/repeat histories. No core changes.
+- Worker15: branch `run/20261103-a/task-22-native`, exact reused clean checkout `.worktrees/20261103-a-source-errors`, base `c0e2294`. Owns native test additions `tests/surfpool_mode.rs`, `tests/cases/custom_native.rs`, optional new `src/rpc/custom_tests.rs`; coordinator owns cfg wiring. Actual prepared archive remains `/private/tmp/ronchi-surfpool-v1.7.0-darwin-arm64.tar.gz`.
+- Worker16: branch `run/20261103-a/task-22-surfaces`, exact reused parser checkout `.worktrees/20261103-a-task-22-parser`, base `c0e2294`. Owns only `tests/custom_surfaces.rs`; CLI/offline/schema/actual rmcp validation and activation parity.
+- Coordinator: template positive/incomplete histories and surface corrections in main. New eight-signature template history passed, including scoped-source exclusion. CLI `schema case.validate` clap allowlist fixed after worker RED; specific ValidationEnvelope schema now wired for CLI/MCP, awaiting public tests. Uncommitted paths: `src/lib.rs`, `src/mcp.rs`, `src/cases/custom.rs`, `dashboard/src/api.ts`, `tests/cases/custom.rs`, this ledger.
+- No accumulated native/browser suite or actual measurement is running. Keep at most three implementation workers. Next: integrate acceptance tests, correct observed failures, run combined Case/CheckpointD and full accumulated acceptance; then release measurements with builds/tests stopped. Tasks22/24 and unchecked checkpoints remain open.
+
+Coordinator follow-up: combined custom6 passed including eight-signature template and missing-source scope. CLI schema.case.validate now runs and publishes Plan/ValidationError; dedicated validation output envelope added to CLI/MCP. Dashboard typecheck + unit16 passed after showing category/path for validation errors. Worker16 observed both schema bugs RED before corrections.
