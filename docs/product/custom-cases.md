@@ -259,3 +259,7 @@ The initial custom Finding template requires an available authoritative source, 
 Its evidence includes both the later registration and that registration's immutable step selection.
 Incomplete scoped evidence produces a gap instead of the stronger Finding.
 Author guidance remains separate from the fixed template statement.
+
+A failed auxiliary backend status probe records its source failure and numeric code.
+It does not become a successful authoritative null lookup.
+If no earlier lifecycle snapshot is available, the primitive records `lifecycle_probe_unavailable` and leaves the valid transaction response unchanged.

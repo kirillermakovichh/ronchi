@@ -352,3 +352,44 @@ pub(crate) fn stage_matches(primitive: &str, method: &str) -> bool {
         _ => true,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn real_clock_while_active_repeats_follow_frozen_registration_coordinates() {
+        let artifact = json!({"schema":"ronchi.case/v1","id":"custom.real-repeat","revision":"1","requires":{"primitives":["rpc.timeout-before-dispatch@1","observe.rpc@1"]},"modes":["simulator"],"filter":{"methods":["getHealth"],"transaction_origin":"known_local"},"state":{"key":"case","scope":"activation","max_keys":1,"on_exhausted":"error"},"repeat":{"while_active":true},"sequence":[{"id":"hold","using":"rpc.timeout-before-dispatch@1","with":{"hold_real_ms":20},"until":{"elapsed_ms":10,"clock":"real"},"next":"observe"},{"id":"observe","using":"observe.rpc@1","until":{"matches":1},"next":"hold"}]});
+        let runtime = Runtime::new(
+            super::super::custom::validate(&artifact.to_string(), crate::config::Mode::Simulator)
+                .unwrap(),
+        );
+        for (real, sim, step, cycle) in [
+            (100, 0, "hold", 0),
+            (10_000_099, 9_000_000_000, "hold", 0),
+            (10_000_100, 0, "observe", 0),
+            (10_000_100, 0, "hold", 1),
+            (20_000_100, 0, "observe", 1),
+            (20_000_100, 0, "hold", 2),
+            (30_000_100, 0, "observe", 2),
+            (30_000_100, 0, "hold", 3),
+        ] {
+            let selected = runtime
+                .select_many(&[], real, sim, "getHealth", true, |_| Ok(()))
+                .unwrap();
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0].step, step);
+            assert_eq!(selected[0].cycle, cycle);
+        }
+        assert!(
+            runtime
+                .select_many(&[], 30_000_100, 0, "getHealth", false, |_| Ok(()))
+                .unwrap()
+                .is_empty()
+        );
+        let selected = runtime
+            .select_many(&[], 30_000_100, 0, "getHealth", true, |_| Ok(()))
+            .unwrap();
+        assert_eq!(selected[0].step, "hold");
+        assert_eq!(selected[0].cycle, 3);
+    }
+}

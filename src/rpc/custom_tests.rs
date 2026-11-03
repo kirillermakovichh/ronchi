@@ -348,7 +348,12 @@ async fn custom_snapshot_probe_transport_failure_is_bounded_and_does_not_invent_
         .find(|e| e.data["status_view"].is_null())
         .expect("failed source probe must remain visibly unavailable");
     assert_eq!(
-        unavailable.data["error_code"], -32603,
+        unavailable.data["error_classification"],
+        "backend_transport"
+    );
+    assert_eq!(unavailable.data["source_outcome"], "source_failure");
+    assert_eq!(
+        unavailable.data["error_code"], -32000,
         "transport failure must remain distinct from a successful null status: {}",
         unavailable.data
     );

@@ -274,6 +274,7 @@ impl Owner {
                     json!({"available":!source.is_null(),"slot":source.get("slot")})
                 };
             let source_seq=self.status_append("rpc.custom_lookup_source",authority,json!({"signature":signature,"request":read.reference,"method":read.method,"source_available":!source.is_null(),"source_view":source_view,"source_digest":crate::query::digest(&serde_json::to_vec(source).expect("JSON serializes")),"source_identity":source_id,"entry_index":index}),read.backend.as_ref()).await?;
+            let mut no_change_reason = None;
             let replacement = if source.is_null() || read.reference["responds"] == false {
                 source.clone()
             } else {
@@ -285,6 +286,8 @@ impl Owner {
                             read.method,
                             read.params.get(1).unwrap_or(&Value::Null)
                         );
+                        let mut probe_error = None;
+                        let mut probe_outcome = "result";
                         let actual = if read.method == "getSignatureStatuses" {
                             source.clone()
                         } else if let Some(backend) = &read.backend {
@@ -292,8 +295,22 @@ impl Owner {
                                 .call("getSignatureStatuses", &json!([[signature]]))
                                 .await
                             {
-                                Ok(value) => value["value"][0].clone(),
-                                Err(_) => Value::Null,
+                                Ok(value)
+                                    if value["value"]
+                                        .as_array()
+                                        .is_some_and(|values| values.len() == 1) =>
+                                {
+                                    value["value"][0].clone()
+                                }
+                                Ok(_) => {
+                                    probe_outcome = "unsupported_source_shape";
+                                    Value::Null
+                                }
+                                Err(error) => {
+                                    probe_outcome = "source_failure";
+                                    probe_error = Some(error);
+                                    Value::Null
+                                }
                             }
                         } else {
                             match Box::pin(self.query(
@@ -306,8 +323,12 @@ impl Owner {
                                 Reply::Registered(_) => return Err(RpcError::internal()),
                             }
                         };
-                        let lifecycle_seq=self.status_append("rpc.custom_lifecycle_source",authority,json!({"request":read.reference,"signature":signature,"source_identity":source_id,"status_view":actual}),read.backend.as_ref()).await?;
-                        let _ = lifecycle_seq;
+                        if read.method != "getSignatureStatuses" {
+                            self.status_append("rpc.custom_lifecycle_source",authority,json!({"request":read.reference,"signature":signature,"source_identity":source_id,"status_view":actual,"source_outcome":probe_outcome,"error_code":probe_error.as_ref().map(|error|error.code),"error_classification":probe_error.as_ref().and_then(|error|error.data.as_ref()).and_then(|data|data.get("code"))}),read.backend.as_ref()).await?;
+                        }
+                        if probe_outcome != "result" {
+                            no_change_reason = Some("lifecycle_probe_unavailable");
+                        }
                         match runtime.lifecycle(&selection, &actual)? {
                             None => source.clone(),
                             Some(lifecycle) => {
@@ -341,7 +362,7 @@ impl Owner {
             } else {
                 returned = replacement.clone();
             }
-            self.status_append(if changed{"fault.custom_lookup_changed"}else{"custom.lookup_observed"},"ronchi",json!({"signature":signature,"request":read.reference,"method":read.method,"selection":selection,"source_event_seq":source_seq,"source_available":!source.is_null(),"source_identity":source_id,"entry_index":index,"returned_available":!replacement.is_null(),"returned_digest":crate::query::digest(&serde_json::to_vec(&replacement).expect("JSON serializes")),"reason":if source.is_null(){"source_unavailable"}else if changed{"lookup_changed"}else{"observed_no_change"}}),read.backend.as_ref()).await?;
+            self.status_append(if changed{"fault.custom_lookup_changed"}else{"custom.lookup_observed"},"ronchi",json!({"signature":signature,"request":read.reference,"method":read.method,"selection":selection,"source_event_seq":source_seq,"source_available":!source.is_null(),"source_identity":source_id,"entry_index":index,"returned_available":!replacement.is_null(),"returned_digest":crate::query::digest(&serde_json::to_vec(&replacement).expect("JSON serializes")),"reason":if source.is_null(){"source_unavailable"}else if changed{"lookup_changed"}else{no_change_reason.unwrap_or("observed_no_change")}}),read.backend.as_ref()).await?;
         }
         Ok(returned)
     }

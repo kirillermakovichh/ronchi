@@ -1110,3 +1110,6 @@ fn http_response(status: u16, value: Option<Value>) -> Response<Full<Bytes>> {
         .body(Full::new(Bytes::from(bytes)))
         .expect("Static response headers are valid")
 }
+
+#[cfg(test)]
+mod custom_tests;
