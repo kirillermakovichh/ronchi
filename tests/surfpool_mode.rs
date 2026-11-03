@@ -45,6 +45,10 @@ impl Project {
 impl Drop for Project {
     fn drop(&mut self) {
         let _ = self.run(&["down", "--force"]);
+        if std::thread::panicking() {
+            self.0.disable_cleanup(true);
+            eprintln!("retained native fixture {}", self.path().display());
+        }
     }
 }
 #[test]
@@ -783,3 +787,6 @@ fn blockhash_cli_setting_selects_the_shared_commitment_policy() {
         "tx-blockhash-expired"
     );
 }
+
+#[path = "cases/custom_native.rs"]
+mod custom_cases;
