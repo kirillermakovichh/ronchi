@@ -191,3 +191,17 @@ Screenshots, reports, and temporary runtime artifacts are not committed.
 The isolated earlier normal-down failure remains an unconfirmed observation in
 [`tasks/unconfirmed-down-observation.md`](../tasks/unconfirmed-down-observation.md).
 No retry or speculative Lab lifecycle fix was introduced.
+
+## Optional native Surfpool verification
+
+The managed backend pins Surfpool v1.7.0.
+The [lifecycle contract](product/lab-lifecycle.md#managed-native-surfpool-implementation) owns artifact hashes, offline installation, native flags, and fixture limits.
+Native tests require an explicitly prepared platform archive:
+
+```bash
+RONCHI_TEST_SURFPOOL_ARCHIVE=/absolute/path/surfpool-darwin-arm64.tar.gz cargo test --locked --test surfpool_mode -- --test-threads=1
+```
+
+Those tests use disposable projects and explicit local account snapshots.
+They never require a public RPC, faucet, or Solana CLI.
+The archive is test input and is not committed or bundled into Ronchi.

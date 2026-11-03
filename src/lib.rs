@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod cases;
 pub mod checks;
 pub mod config;
@@ -18,6 +19,7 @@ pub mod query;
 pub mod reference;
 pub mod rpc;
 pub mod simulator;
+pub mod tools;
 pub mod upstream;
 pub mod workspace;
 use clap::{Parser, Subcommand};
@@ -51,6 +53,11 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Install a checksum-pinned native tool into this project's workspace
+    Tool {
+        #[command(subcommand)]
+        tool: ToolCommand,
+    },
     /// Maintain explicitly selected project-local evidence
     Lab {
         #[command(subcommand)]
@@ -119,6 +126,21 @@ enum Command {
     Schema {
         #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
         operation: String,
+    },
+}
+#[derive(Subcommand)]
+enum ToolCommand {
+    Surfpool {
+        #[command(subcommand)]
+        operation: SurfpoolToolCommand,
+    },
+}
+#[derive(Subcommand)]
+enum SurfpoolToolCommand {
+    /// Install the pinned official platform archive without downloading it
+    Install {
+        #[arg(long)]
+        archive: PathBuf,
     },
 }
 #[derive(Subcommand)]
@@ -285,6 +307,34 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
         return render_lab_error(cli.json, lab::LabError::invalid("Invalid Lab name"));
     }
     match cli.command {
+        Command::Tool {
+            tool:
+                ToolCommand::Surfpool {
+                    operation: SurfpoolToolCommand::Install { archive },
+                },
+        } => {
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            match run_async(tools::install(root, archive)) {
+                Err(error) => render_lab_error(cli.json, error),
+                Ok(result) => {
+                    let text = format!(
+                        "Installed Surfpool {} ({}) at {}",
+                        result.version,
+                        result.platform,
+                        result.path.display()
+                    );
+                    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("cli-{}",std::process::id()),"result":result});
+                    match write_output(cli.json, &envelope, &text, false) {
+                        Ok(()) => 0,
+                        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
+                        Err(_) => 6,
+                    }
+                }
+            }
+        }
         Command::Lab {
             operation: MaintenanceCommand::Delete,
         } => {
@@ -551,6 +601,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             }
             let settings = Settings {
                 simulator_state: None,
+                surfpool_snapshot: None,
                 checks: None,
                 schema_version: None,
                 mode,

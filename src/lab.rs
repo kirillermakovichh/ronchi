@@ -124,7 +124,14 @@ pub fn event(kind: &str, started: Instant, data: serde_json::Value) -> Event {
             .unwrap_or_else(|_| "unavailable".into()),
         elapsed_ns: started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
         source: "ronchi".into(),
-        execution_mode: Mode::Simulator,
+        execution_mode: data
+            .get("execution_mode")
+            .or_else(|| {
+                data.get("request")
+                    .and_then(|request| request.get("execution_mode"))
+            })
+            .and_then(|mode| serde_json::from_value(mode.clone()).ok())
+            .unwrap_or(Mode::Simulator),
         data,
     }
 }
@@ -167,8 +174,26 @@ async fn operation_lock_cancellable(
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
     configuration.checks.validate().map_err(LabError::invalid)?;
-    if configuration.mode != Mode::Simulator {
-        return Err(LabError::unsupported("This build supports simulator mode"));
+    if configuration.mode == Mode::Surfpool {
+        if configuration.read_upstream.is_some() {
+            return Err(LabError::invalid("Surfpool rejects direct Read-through"));
+        }
+        if !configuration.simulator_state.lookup_tables.is_empty()
+            || !configuration.simulator_state.nonce_accounts.is_empty()
+        {
+            return Err(LabError::invalid(
+                "Surfpool does not use simulator_state; provide native backend state",
+            ));
+        }
+        if configuration
+            .initial_case
+            .as_ref()
+            .is_some_and(|id| matches!(id.as_str(), "tx-confirmation-stalls" | "finality-delayed"))
+        {
+            return Err(LabError::unsupported(
+                "Surfpool cannot control authoritative confirmation schedules",
+            ));
+        }
     }
     if let Some(case_id) = &configuration.initial_case {
         crate::cases::Arm {
@@ -327,6 +352,9 @@ async fn up_selected(
         return Err(LabError::invalid("Invalid Lab name"));
     }
     available(&configuration)?;
+    if configuration.mode == Mode::Surfpool {
+        crate::tools::verify(configuration.project.clone()).await?;
+    }
     let ws = Workspace::new(&configuration.project);
     ws.initialize()?;
     let mut cancellation =
@@ -368,6 +396,10 @@ async fn up_selected(
                     Some(&crate::upstream::source_identity(v))
                         == config.surfpool_datasource.as_ref()
                 })
+                && explicit
+                    .surfpool_snapshot
+                    .as_ref()
+                    .is_none_or(|value| Some(value) == config.surfpool_snapshot.as_ref())
                 && explicit.rpc_listen.is_none_or(|v| v == config.rpc_listen)
                 && explicit
                     .control_listen
@@ -386,6 +418,13 @@ async fn up_selected(
                 manifest: live,
                 selection_basis: "current".into(),
             });
+        }
+        if previous.configuration.mode == Mode::Surfpool {
+            crate::backend::surfpool::cleanup_orphans(
+                configuration.project.clone(),
+                &previous.owned_children,
+            )
+            .await?;
         }
         for child in &previous.owned_children {
             match crate::process::matches(child) {
@@ -462,7 +501,8 @@ async fn up_selected(
             crate::rpc::BOOTSTRAP_METHODS
                 .into_iter()
                 .chain(crate::simulator::transactions::TRANSACTION_METHODS)
-                .chain(crate::upstream::READ_METHODS.into_iter().filter(|_|configuration.read_upstream.is_some()))
+                .chain(crate::upstream::READ_METHODS.into_iter().filter(|_|configuration.read_upstream.is_some()||configuration.mode==Mode::Surfpool))
+                .chain(["simulateTransaction","requestAirdrop"].into_iter().filter(|_|configuration.mode==Mode::Surfpool))
                 .map(|method| format!("rpc.{method}")),
         )
         .collect(),
@@ -482,6 +522,8 @@ async fn up_selected(
     workspace::atomic_json(&ws.root.join("names").join(format!("{name}.json")), &id)?;
     let mut command = Command::new(std::env::current_exe()?);
     command.env_remove("RONCHI_RUNTIME_READ_UPSTREAM");
+    command.env_remove("RONCHI_RUNTIME_SURFPOOL_DATASOURCE");
+    if let Some(url)=&configuration.surfpool_datasource {command.env("RONCHI_RUNTIME_SURFPOOL_DATASOURCE",url);}
     if let Some(url) = &configuration.read_upstream { command.env("RONCHI_RUNTIME_READ_UPSTREAM", url); }
     let mut child = command
         .args(["__daemon", "--lab-id", &id])
@@ -492,7 +534,7 @@ async fn up_selected(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    let deadline = Instant::now() + STARTUP;
+    let deadline = Instant::now() + if configuration.mode==Mode::Surfpool{Duration::from_secs(120)}else{STARTUP};
     loop {
         if let Ok(manifest) = ws.manifest(&id) {
             if manifest.state == Lifecycle::Ready && !external.is_cancelled() {
@@ -562,7 +604,12 @@ async fn up_selected(
             let ready = ws.manifest(&id).is_ok_and(|m| m.state == Lifecycle::Ready);
             let exited = child.try_wait()?.is_some();
             if !ready && acquired && !exited {
-                child.kill()?;
+                if configuration.mode==Mode::Surfpool {
+                    // SAFETY: this unreaped child is the daemon launched by this operation.
+                    unsafe {libc::kill(child.id() as i32,libc::SIGINT);}
+                    while child.try_wait()?.is_none()&&Instant::now()<gate_deadline {tokio::time::sleep(Duration::from_millis(10)).await;}
+                }
+                if child.try_wait()?.is_none(){child.kill()?;}
                 child.wait()?;
             }
             let uncertain = !ready && !acquired && !exited;

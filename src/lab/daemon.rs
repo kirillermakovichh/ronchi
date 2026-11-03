@@ -80,7 +80,21 @@ pub async fn run(project: PathBuf, id: String) -> Result<(), LabError> {
             ));
         }
     };
-    let result = run_owned(&dir, manifest, upstream).await;
+    let datasource = match (
+        &manifest.configuration.surfpool_datasource,
+        std::env::var("RONCHI_RUNTIME_SURFPOOL_DATASOURCE").ok(),
+    ) {
+        (None, None) => None,
+        (Some(identity), Some(url)) if identity == &crate::upstream::source_identity(&url) => {
+            Some(url)
+        }
+        _ => {
+            return Err(LabError::invalid(
+                "Surfpool datasource runtime identity is unavailable",
+            ));
+        }
+    };
+    let result = run_owned(&dir, manifest, upstream, datasource).await;
     if let Err(error) = &result
         && !dir.join("journal.sqlite").exists()
         && let Ok(mut failed) = ws.manifest(&id)
@@ -101,8 +115,17 @@ async fn run_owned(
     dir: &std::path::Path,
     manifest: Manifest,
     upstream: Option<String>,
+    datasource: Option<String>,
 ) -> Result<(), LabError> {
     let started = Instant::now();
+    let mut startup_interrupt =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    let mode = manifest.configuration.mode;
+    let event = |kind: &str, started: Instant, data: serde_json::Value| {
+        let mut fact = super::event(kind, started, data);
+        fact.execution_mode = mode;
+        fact
+    };
     let token = workspace::read_token(&dir.join("token"))?;
 
     let path = dir.join("journal.sqlite");
@@ -129,13 +152,54 @@ async fn run_owned(
     let mut starting = event(
         "lab.starting",
         started,
-        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":"local-simulator-v1","redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
+        serde_json::json!({"versions":manifest.versions,"persistence":{"disk_limits":manifest.disk_limits,"synchronous":"FULL","journal_mode":"WAL"},"protocol_profile":if mode==Mode::Surfpool{"managed-surfpool-v1"}else{"local-simulator-v1"},"redaction_policy":"typed-facts-v1","configuration":manifest.configuration,"evidence_sources":["ronchi"]}),
     );
     starting.data["configuration"]["checks"] = serde_json::json!({"concurrency":manifest.configuration.checks.concurrency,"sources":manifest.configuration.checks.sources.iter().map(|s|s.public_definition()).collect::<Vec<_>>()});
     if let Err(error) = append(&handle, starting).await {
         let _ = tokio::task::spawn_blocking(move || writer.shutdown(None)).await;
         record_failure(&control, &handle, &error).await;
         return Err(error);
+    }
+    let mut backend = None;
+    if mode == Mode::Surfpool {
+        let launched = crate::backend::surfpool::Owned::spawn(
+            manifest.configuration.project.clone(),
+            &dir.join("backend"),
+            &manifest.lab_id,
+            datasource.as_deref(),
+            manifest.configuration.surfpool_snapshot.as_deref(),
+        )
+        .await;
+        let startup_backend=async {
+            let owned=launched?;
+            control.manifest.write().unwrap_or_else(|e|e.into_inner()).owned_children=vec![owned.identity.clone()];
+            backend=Some(owned);
+            publish(&control,&handle).await?;
+            let owned=backend.as_mut().ok_or_else(||LabError::internal("Surfpool owner is absent"))?;
+            let readiness=tokio::select! {
+                result=owned.ready()=>result,
+                _=startup_interrupt.recv()=>Err(LabError::new(130,"cancelled","Managed Surfpool startup cancelled")),
+            }?;
+            append(&handle,event("backend.ready",started,serde_json::json!({"authority":"execution_backend","source_identity":owned.client.authority(),"process":owned.identity,"version":crate::tools::SURFPOOL_VERSION,"binary_sha256":owned.binary_sha256,"readiness":readiness,"rpc_address":owned.rpc_address,"websocket_address":owned.websocket_address,"automatic_airdrop":false,"state":"clean_memory","automatic_deployment":false}))).await?;
+            control.manifest.write().unwrap_or_else(|e|e.into_inner()).versions.insert("surfpool".into(),crate::tools::SURFPOOL_VERSION.into());
+            Ok::<(),LabError>(())
+        }.await;
+        if let Err(error) = startup_backend {
+            if let Some(owned) = backend.as_mut() {
+                let _ = owned.stop(tokio::time::Instant::now() + CLEANUP).await;
+            }
+            let terminal = event(
+                "lab.startup_interrupted",
+                started,
+                serde_json::json!({"phase":"backend"}),
+            );
+            let _ = tokio::task::spawn_blocking(move || {
+                writer.shutdown(Some((&terminal, JournalState::Interrupted)))
+            })
+            .await;
+            record_failure(&control, &handle, &error).await;
+            return Err(error);
+        }
     }
     let listeners = async {
         let rpc = bind(manifest.configuration.rpc_listen, "--rpc-listen").await?;
@@ -146,6 +210,9 @@ async fn run_owned(
     let (rpc, listener) = match listeners {
         Ok(pair) => pair,
         Err(error) => {
+            if let Some(owned) = backend.as_mut() {
+                let _ = owned.stop(tokio::time::Instant::now() + CLEANUP).await;
+            }
             let terminal = event(
                 "lab.startup_interrupted",
                 started,
@@ -172,13 +239,17 @@ async fn run_owned(
         manifest.lab_id.as_bytes(),
     )
     .map_err(LabError::invalid)?;
-    let rpc_api = crate::rpc::Rpc::with_upstream_state(
-        clock,
-        handle.clone(),
-        started,
-        manifest.configuration.simulator_state.clone(),
-        upstream.as_deref(),
-    )
+    let rpc_api = if let Some(owned) = &backend {
+        crate::rpc::Rpc::with_backend(clock, handle.clone(), started, owned.client.clone())
+    } else {
+        crate::rpc::Rpc::with_upstream_state(
+            clock,
+            handle.clone(),
+            started,
+            manifest.configuration.simulator_state.clone(),
+            upstream.as_deref(),
+        )
+    }
     .map_err(LabError::invalid)?;
     *control.cases.write().unwrap_or_else(|e| e.into_inner()) = Some(rpc_api.clone());
     let rpc_stop = CancellationToken::new();
@@ -226,12 +297,16 @@ async fn run_owned(
         Ok::<(),LabError>(())
     }.await;
     if let Err(error) = startup {
+        if let Some(owned) = backend.as_mut() {
+            let _ = owned.stop(tokio::time::Instant::now() + CLEANUP).await;
+        }
         if let Some(owner) = checks_owner.take() {
             let _ = owner.settle(tokio::time::Instant::now() + CLEANUP).await;
         }
 
         rpc_api.set_ready(false);
         rpc_stop.cancel();
+        rpc_api.cancel_backend();
         rpc_force.cancel();
         control_stop.cancel();
         control_force.cancel();
@@ -251,10 +326,11 @@ async fn run_owned(
     }
     let (mut force, mut failed, rpc_finished, control_finished) = tokio::select! {
         command=stops.recv()=>(command.unwrap_or(true),false,false,false),
+        _=async{if let Some(owned)=backend.as_mut(){let _=owned.exited().await;}else{std::future::pending::<()>().await}}=>(true,true,false,false),
         _=health.wait_for(|status|status.health==WriterHealth::Failed)=>(true,true,false,false),
         _=&mut rpc_task=>(true,true,true,false),
         _=&mut control_task=>(true,true,false,true),
-        _=tokio::signal::ctrl_c()=>(true,true,false,false),
+        _=startup_interrupt.recv()=>(true,true,false,false),
     };
     let shutdown_started = tokio::time::Instant::now();
     let drain_deadline = shutdown_started + Duration::from_secs(25);
@@ -282,12 +358,14 @@ async fn run_owned(
     {
         failed = true;
         force = true;
+        rpc_api.cancel_backend();
         rpc_force.cancel();
         cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
     }
     rpc_api.set_ready(false);
     rpc_stop.cancel();
     if force {
+        rpc_api.cancel_backend();
         rpc_force.cancel();
     }
     let admission = append(
@@ -305,6 +383,7 @@ async fn run_owned(
         failed = true;
         force = true;
         cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
+        rpc_api.cancel_backend();
         rpc_force.cancel();
         control
             .manifest
@@ -322,6 +401,7 @@ async fn run_owned(
     ) {
         failed = true;
         force = true;
+        rpc_api.cancel_backend();
         rpc_force.cancel();
         cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
     }
@@ -334,6 +414,7 @@ async fn run_owned(
             Ok(Ok(Ok(()))) => true,
             Ok(_) => false,
             Err(_) => {
+                rpc_api.cancel_backend();
                 rpc_force.cancel();
                 let deadline =
                     *cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
@@ -349,6 +430,14 @@ async fn run_owned(
         }
     };
     let cleanup_deadline = *cleanup_deadline.get_or_insert(tokio::time::Instant::now() + CLEANUP);
+    let mut backend_stopped = true;
+    if let Some(owned) = backend.as_mut() {
+        backend_stopped = owned.stop(cleanup_deadline).await.is_ok();
+        if !backend_stopped {
+            failed = true;
+        }
+        let _=append(&handle,event("backend.stopped",started,serde_json::json!({"process":owned.identity,"settled":backend_stopped,"lab_failure":failed}))).await;
+    }
     let interrupted = force || failed || !settled || handle.status().health == WriterHealth::Failed;
     let state = if interrupted {
         JournalState::Interrupted
@@ -362,7 +451,7 @@ async fn run_owned(
             "lab.finalized"
         },
         started,
-        serde_json::json!({"forced":force,"rpc_settled":settled,"owned_children":[]}),
+        serde_json::json!({"forced":force,"rpc_settled":settled,"owned_children_settled":backend_stopped}),
     );
     let finished = tokio::task::spawn_blocking(move || writer.shutdown(Some((&terminal, state))));
     let persisted = tokio::time::timeout_at(cleanup_deadline, finished).await;

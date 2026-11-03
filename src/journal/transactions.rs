@@ -64,6 +64,15 @@ CREATE TRIGGER transaction_transition AFTER INSERT ON events
  END;
 PRAGMA user_version=2;";
 impl JournalReader {
+    pub(crate) fn backend_transaction(
+        &self,
+        signature: &str,
+    ) -> Result<Option<serde_json::Value>, JournalError> {
+        let text:Option<String>=self.connection.query_row("SELECT record_json FROM transactions WHERE signature=?1 AND json_extract(record_json,'$.authority')='execution_backend'",[signature],|row|row.get(0)).optional()?;
+        text.map(|value| serde_json::from_str(&value).map_err(JournalError::from))
+            .transpose()
+    }
+
     pub fn transaction(&self, signature: &str) -> Result<Option<TransactionRecord>, JournalError> {
         if self.version < 2 {
             return Ok(None);

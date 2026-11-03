@@ -274,12 +274,13 @@ fn each_allowlisted_read_preserves_source_context_and_local_history_never_falls_
         ))["result"]["value"],
         json!([null])
     );
+    let genesis = lab.rpc(request("getGenesisHash", json!([])));
     assert_eq!(
-        lab.rpc(request("getGenesisHash", json!([])))["result"]
-            .as_str()
+        bs58::decode(genesis["result"].as_str().unwrap())
+            .into_vec()
             .unwrap()
             .len(),
-        44
+        32
     );
     assert_eq!(
         lab.rpc(request("getVersion", json!([])))["result"]["ronchi"]["profile"],

@@ -197,7 +197,7 @@ impl Upstream {
         facts.insert(0, fact);
         Read { result, facts }
     }
-    fn redact(&self, value: &Value) -> (Value, bool) {
+    pub(crate) fn redact(&self, value: &Value) -> (Value, bool) {
         fn contains_secret(value: &str, secrets: &[String]) -> bool {
             secrets
                 .iter()

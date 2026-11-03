@@ -22,6 +22,8 @@ pub struct Settings {
     pub mode: Option<Mode>,
     pub read_upstream: Option<String>,
     pub surfpool_datasource: Option<String>,
+    #[serde(default)]
+    pub surfpool_snapshot: Option<PathBuf>,
     pub rpc_listen: Option<SocketAddr>,
     pub control_listen: Option<SocketAddr>,
     pub initial_case: Option<String>,
@@ -37,6 +39,8 @@ pub struct EffectiveConfig {
     pub mode: Mode,
     pub read_upstream: Option<String>,
     pub surfpool_datasource: Option<String>,
+    #[serde(default)]
+    pub surfpool_snapshot: Option<PathBuf>,
     pub rpc_listen: SocketAddr,
     pub control_listen: SocketAddr,
     pub initial_case: Option<String>,
@@ -86,6 +90,10 @@ pub fn resolve_requested(
         Err(_) => return Err("Configuration cannot be read".into()),
     };
     let requested = Settings {
+        surfpool_snapshot: overrides
+            .surfpool_snapshot
+            .clone()
+            .or(file.surfpool_snapshot.clone()),
         simulator_state: overrides
             .simulator_state
             .clone()
@@ -125,8 +133,10 @@ pub(crate) fn from_settings(
     let mode = requested.mode.unwrap_or_default();
     let read_upstream = requested.read_upstream.clone();
     let surfpool_datasource = requested.surfpool_datasource.clone();
+    let surfpool_snapshot = requested.surfpool_snapshot.clone();
     if (mode == Mode::Surfpool && read_upstream.is_some())
-        || (mode == Mode::Simulator && surfpool_datasource.is_some())
+        || (mode == Mode::Simulator
+            && (surfpool_datasource.is_some() || surfpool_snapshot.is_some()))
     {
         return Err("Execution mode conflicts with the configured datasource authority".into());
     }
@@ -138,7 +148,7 @@ pub(crate) fn from_settings(
             return Err("Datasource must be an absolute HTTP or HTTPS URL".into());
         }
     }
-    if let Some(url) = &read_upstream {
+    for url in [&read_upstream, &surfpool_datasource].into_iter().flatten() {
         crate::upstream::Upstream::new(url)?;
     }
     let rpc_listen = requested
@@ -169,6 +179,7 @@ pub(crate) fn from_settings(
         mode,
         read_upstream,
         surfpool_datasource,
+        surfpool_snapshot,
         rpc_listen,
         control_listen,
         initial_case,

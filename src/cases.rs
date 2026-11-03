@@ -316,7 +316,11 @@ pub fn catalog() -> Vec<CatalogEntry> {
     .into_iter()
     .map(|case_id| CatalogEntry {
         case_id: case_id.into(),
-        modes: vec!["simulator".into()],
+        modes: if case_id == "tx-response-lost" {
+            vec!["simulator".into(), "surfpool".into()]
+        } else {
+            vec!["simulator".into()]
+        },
         default_hold_ms: 20_000,
         max_held: 16,
     })

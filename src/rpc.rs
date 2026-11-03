@@ -96,6 +96,7 @@ pub struct Rpc(Arc<State>);
 struct State {
     pub clock: Clock,
     upstream: Option<crate::upstream::Upstream>,
+    backend: Option<crate::backend::Client>,
     writer: WriterHandle,
     ready: AtomicBool,
     pause: Mutex<Option<Arc<PauseState>>>,
@@ -148,6 +149,7 @@ impl Rpc {
         Ok(Self(Arc::new(State {
             transactions,
             upstream,
+            backend: None,
             owner: Mutex::new(Some(owner)),
             initialized,
             clock,
@@ -159,10 +161,33 @@ impl Rpc {
             started,
         })))
     }
+    pub(crate) fn with_backend(
+        clock: Clock,
+        writer: WriterHandle,
+        started: Instant,
+        backend: crate::backend::Client,
+    ) -> Result<Self, String> {
+        let mut rpc = Self::with_state(clock, writer, started, Default::default())?;
+        let state = Arc::get_mut(&mut rpc.0).ok_or("Backend initialization state is shared")?;
+        state.backend = Some(backend);
+        state
+            .owner
+            .get_mut()
+            .map_err(|_| "Backend policy owner is poisoned")?
+            .as_mut()
+            .ok_or("Backend policy owner is absent")?
+            .backend_mode();
+        Ok(rpc)
+    }
     pub async fn arm_case(
         &self,
         args: crate::cases::Arm,
     ) -> Result<crate::cases::Binding, RpcError> {
+        if self.0.backend.is_some() && args.is_confirmation() {
+            return Err(RpcError::unsupported(
+                "Surfpool cannot control authoritative confirmation schedules; use simulator mode",
+            ));
+        }
         self.0.transactions.change(Some(args)).await
     }
     pub async fn disarm_case(&self) -> Result<crate::cases::Binding, RpcError> {
@@ -190,6 +215,11 @@ impl Rpc {
             previous.released.cancel();
         }
         RegistrationPause(state)
+    }
+    pub(crate) fn cancel_backend(&self) {
+        if let Some(backend) = &self.0.backend {
+            backend.cancel();
+        }
     }
     pub fn set_ready(&self, ready: bool) {
         self.0.ready.store(ready, Ordering::SeqCst);
@@ -270,6 +300,12 @@ impl Rpc {
             .into_iter()
             .map(|data| {
                 let mut event = crate::lab::event(kind, self.0.started, data);
+                if self.0.backend.is_some() {
+                    event.execution_mode = crate::config::Mode::Surfpool;
+                }
+                if kind.starts_with("rpc.backend") {
+                    event.source = "surfpool".into();
+                }
                 if kind.starts_with("rpc.upstream") {
                     event.source = "read_upstream".into();
                 }
@@ -404,7 +440,7 @@ impl Exchange {
         let mut responses = Vec::new();
         let mut received = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
-            let reference = json!({"registration_seq":registration,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size});
+            let reference = json!({"registration_seq":registration,"batch_id":if batch{Some(registration)}else{None},"request_id":format!("r{registration}:{index}"),"binding":binding,"responds":item.get("id").is_some(),"batch_size":batch_size,"execution_mode":if self.rpc.0.backend.is_some(){"surfpool"}else{"simulator"}});
             let valid = item.is_object()
                 && item.get("jsonrpc") == Some(&json!("2.0"))
                 && item.get("method").is_some_and(Value::is_string)
@@ -419,6 +455,7 @@ impl Exchange {
             registration_fact["method"] = json!(if BOOTSTRAP_METHODS.contains(&method)
                 || crate::simulator::transactions::TRANSACTION_METHODS.contains(&method)
                 || crate::upstream::READ_METHODS.contains(&method)
+                || (self.rpc.0.backend.is_some() && crate::backend::METHODS.contains(&method))
             {
                 method
             } else {
@@ -497,6 +534,50 @@ impl Exchange {
                     message: "Local Lab is not ready".into(),
                     data: None,
                 })
+            } else if let Some(backend) = &self.rpc.0.backend {
+                match crate::backend::prepare(method, item.get("params").unwrap_or(&Value::Null))
+                    .await
+                {
+                    Err(error) => Err(error),
+                    Ok(prepared) => {
+                        upstream_source = Some(backend.authority().to_string());
+                        if prepared.signed.is_some() {
+                            self.rpc
+                                .0
+                                .transactions
+                                .backend_submit(
+                                    backend.clone(),
+                                    prepared,
+                                    reference.clone(),
+                                    self.hold.clone(),
+                                )
+                                .await
+                        } else {
+                            let start = json!({"request":reference,"method":method,"source_identity":backend.authority(),"authority":"execution_backend"});
+                            match self.rpc.record("rpc.backend_started", vec![start]).await {
+                                Err(error) => Err(error),
+                                Ok(()) => {
+                                    let result = backend.call(method, &prepared.params).await;
+                                    let facts = backend
+                                        .source_facts(method, &result, self.rpc.0.started)
+                                        .into_iter()
+                                        .map(|mut fact| {
+                                            fact["request"] = reference.clone();
+                                            fact
+                                        })
+                                        .collect();
+                                    match self.rpc.record("rpc.backend", facts).await {
+                                        Ok(()) => result,
+                                        Err(error) => {
+                                            self.rpc.0.writer.fail_fatal();
+                                            Err(error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } else if crate::simulator::transactions::TRANSACTION_METHODS
                 .contains(&item["method"].as_str().unwrap_or(""))
             {
@@ -559,14 +640,16 @@ impl Exchange {
                 )
             };
             let mut fact = reference.clone();
-            let view = self
-                .rpc
-                .0
-                .clock
-                .view(crate::simulator::clock::Commitment::Processed);
-            fact["simulated_time_ns"] = json!(view.simulated_time_ns);
-            fact["slot"] = json!(view.slot);
-            fact["block_height"] = json!(view.block_height);
+            if self.rpc.0.backend.is_none() {
+                let view = self
+                    .rpc
+                    .0
+                    .clock
+                    .view(crate::simulator::clock::Commitment::Processed);
+                fact["simulated_time_ns"] = json!(view.simulated_time_ns);
+                fact["slot"] = json!(view.slot);
+                fact["block_height"] = json!(view.block_height);
+            }
             let mut boundary = reference;
             boundary["rpc_response"] = json!(if notification {
                 "notification_no_response"
@@ -579,7 +662,7 @@ impl Exchange {
                 Ok(result) => {
                     if let Some(source) = &upstream_source {
                         fact["source_identity"] = json!(source);
-                        fact["source_result"] = json!({"availability":"separate_source_exchange","kind":"rpc.upstream"});
+                        fact["source_result"] = json!({"availability":"separate_source_exchange","kind":if self.rpc.0.backend.is_some(){"rpc.backend"}else{"rpc.upstream"}});
                     } else {
                         fact["result"] = result.clone();
                     }

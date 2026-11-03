@@ -1,6 +1,6 @@
 # Cases and coverage
 
-Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. Other families and Surfpool response loss remain planned. Names, parameters, and YAML syntax are not stable APIs.
+Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. Other families remain planned; managed Surfpool response loss has the scoped claim below. Names, parameters, and YAML syntax are not stable APIs.
 This document owns Case scope and catalog status; [overview.md](overview.md) owns the overall product definition.
 
 ## Continuing Case model
@@ -486,3 +486,23 @@ It does not replace named Cases.
 Any such feature would need recorded choices/seeds and a way to reduce a useful discovery into a reproducible Case.
 A seed alone would not control external state or concurrent request ordering.
 No Exploration API or implementation is selected here.
+
+## Managed Surfpool response-loss claim
+
+`tx-response-lost` is available in simulator and managed Surfpool modes.
+The two confirmation-delay Cases remain simulator-only.
+Surfpool arm and initial-Case selection reject those confirmation capabilities before changing policy.
+
+In Surfpool mode, Ronchi validates signed input and forwards submission only to its owned native backend.
+A successful backend response must match the first signature independently decoded from the signed input.
+Ronchi durably records that signed identity and its source authority before returning or withholding a successful response.
+The acceptance and once-per-identity response-loss selection commit atomically.
+Duplicates still contact Surfpool and retain its actual result or preflight rejection.
+They never restart the accepted identity or consume another response-loss Fault.
+Disarming, replacing, and reactivating the Case preserve this identity memory.
+
+This acceptance establishes a backend RPC response, not a promise of successful execution.
+Account effects and status require actual later backend evidence.
+Ronchi records no invented simulated processing or commitment transitions in this mode.
+The current response-loss Findings remain simulator-specific and report their source/mode limitation for Surfpool evidence.
+A core source response does not establish a Client Outcome.

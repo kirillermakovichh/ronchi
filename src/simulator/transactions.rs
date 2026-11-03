@@ -55,6 +55,12 @@ enum Operation {
         crate::rpc::methods::ContextConfig,
     ),
     Submit(SignedTransaction, Value, std::sync::Arc<crate::cases::Hold>),
+    BackendSubmit(
+        crate::backend::Client,
+        crate::backend::Prepared,
+        Value,
+        std::sync::Arc<crate::cases::Hold>,
+    ),
     Register,
     Change(Option<crate::cases::Arm>),
     Statuses(Vec<String>, bool),
@@ -79,6 +85,7 @@ pub(crate) struct Owner {
     policy_status: tokio::sync::watch::Sender<crate::cases::Binding>,
     holds: std::sync::Arc<crate::cases::HoldPool>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
+    backend: bool,
 }
 impl Transactions {
     pub(crate) fn channel(
@@ -103,6 +110,7 @@ impl Transactions {
                 policy_status,
                 holds,
                 credits: BTreeMap::new(),
+                backend: false,
             },
         )
     }
@@ -225,6 +233,16 @@ impl Transactions {
         };
         self.job(operation).await
     }
+    pub(crate) async fn backend_submit(
+        &self,
+        client: crate::backend::Client,
+        prepared: crate::backend::Prepared,
+        reference: Value,
+        hold: std::sync::Arc<crate::cases::Hold>,
+    ) -> Result<Value, RpcError> {
+        self.job(Operation::BackendSubmit(client, prepared, reference, hold))
+            .await
+    }
     pub(crate) async fn register(&self) -> Result<crate::cases::Binding, RpcError> {
         serde_json::from_value(self.job(Operation::Register).await?)
             .map_err(|_| RpcError::internal())
@@ -255,6 +273,9 @@ impl Transactions {
     }
 }
 impl Owner {
+    pub(crate) fn backend_mode(&mut self) {
+        self.backend = true;
+    }
     pub(crate) async fn initialize(&mut self) -> Result<(), JournalError> {
         let writer = self.writer.clone();
         let reader = tokio::task::spawn_blocking(move || writer.reader())
@@ -264,7 +285,9 @@ impl Owner {
         if self.read(|reader| reader.has_transactions()).await? {
             return Err(JournalError::Closed);
         }
-        if !self.state.lookup_tables.is_empty() || !self.state.nonce_accounts.is_empty() {
+        if !self.backend
+            && (!self.state.lookup_tables.is_empty() || !self.state.nonce_accounts.is_empty())
+        {
             let fact = crate::lab::event(
                 "protocol.fixture",
                 self.started,
@@ -288,7 +311,12 @@ impl Owner {
         self.reader = Some(reader);
         result
     }
-    async fn append(&mut self, events: Vec<crate::journal::Event>) -> Result<(), JournalError> {
+    async fn append(&mut self, mut events: Vec<crate::journal::Event>) -> Result<(), JournalError> {
+        if self.backend {
+            for event in &mut events {
+                event.execution_mode = crate::config::Mode::Surfpool;
+            }
+        }
         let writer = self.writer.clone();
         let receipt = tokio::task::spawn_blocking(move || writer.try_append(&events))
             .await
@@ -478,11 +506,108 @@ impl Owner {
         }
         Ok(json!(signature))
     }
+    async fn backend_submit(
+        &mut self,
+        client: crate::backend::Client,
+        prepared: crate::backend::Prepared,
+        reference: Value,
+        hold: std::sync::Arc<crate::cases::Hold>,
+    ) -> Result<Value, RpcError> {
+        let signed = prepared.signed.ok_or_else(RpcError::internal)?;
+        let signature = signed.signature.clone();
+        let key = signature.clone();
+        let existing = self
+            .read(move |reader| reader.backend_transaction(&key))
+            .await
+            .map_err(|_| RpcError::internal())?;
+        if existing.as_ref().is_some_and(|value| {
+            value["digest"] != signed.digest || value["wire_base64"] != signed.wire_base64
+        }) {
+            return Err(RpcError::params(
+                "Signed identity conflicts with retained backend content",
+            ));
+        }
+        let binding: crate::cases::Binding = serde_json::from_value(reference["binding"].clone())
+            .map_err(|_| RpcError::internal())?;
+        let selected = existing.is_none()
+            && binding.selects(&signature, reference["responds"].as_bool().unwrap_or(false));
+        if selected {
+            let policy = binding.policy.as_ref().ok_or_else(RpcError::internal)?;
+            hold.reserve(
+                &self.holds,
+                policy.settings.max_held,
+                binding.registration_seq,
+                policy.revision,
+            )?;
+            hold.reserve_evidence(
+                self.writer.clone(),
+                reference["batch_size"].as_u64().unwrap_or(1) as usize,
+            )
+            .await?;
+        }
+        let mut dispatch = crate::lab::event(
+            "rpc.backend_started",
+            self.started,
+            json!({"request":reference,"method":"sendTransaction","signature":signature,"blockhash":signed.blockhash,"authority":"execution_backend","source_identity":client.authority(),"submission_effects":"unknown_until_source_result"}),
+        );
+        dispatch.execution_mode = crate::config::Mode::Surfpool;
+        self.append(vec![dispatch])
+            .await
+            .map_err(|_| RpcError::internal())?;
+        let result = client.call("sendTransaction", &prepared.params).await;
+        let mut source = Vec::new();
+        for mut data in client.source_facts("sendTransaction", &result, self.started) {
+            data["request"] = reference.clone();
+            let mut event = crate::lab::event("rpc.backend", self.started, data);
+            event.source = "surfpool".into();
+            event.execution_mode = crate::config::Mode::Surfpool;
+            source.push(event);
+        }
+        self.append(source)
+            .await
+            .map_err(|_| RpcError::internal())?;
+        let result = result?;
+        if result != signature {
+            self.writer.fail_fatal();
+            return Err(RpcError::internal());
+        }
+        let mut attempt = crate::lab::event(
+            "transaction.submission",
+            self.started,
+            json!({"signature":signature,"digest":signed.digest,"admission":if existing.is_some(){"backend_duplicate_response"}else{"backend_accepted"},"request":reference,"authority":"execution_backend"}),
+        );
+        attempt.execution_mode = crate::config::Mode::Surfpool;
+        let mut facts = vec![attempt];
+        if existing.is_none() {
+            let data = json!({"signature":signature,"digest":signed.digest,"wire_base64":signed.wire_base64,"version":signed.version,"blockhash":signed.blockhash,"admission_request":reference,"accepted_elapsed_ns":self.started.elapsed().as_nanos().min(i64::MAX as u128)as u64,"authority":"execution_backend","source_identity":client.authority(),"next_due_ns":null,"execution":"backend_acceptance_only"});
+            let mut fact = crate::lab::event("transaction.accepted", self.started, data);
+            fact.execution_mode = crate::config::Mode::Surfpool;
+            fact.source = "surfpool".into();
+            facts.push(fact);
+        }
+        if selected {
+            let mut fact = crate::lab::event(
+                "fault.response_loss_selected",
+                self.started,
+                json!({"signature":signature,"request":reference,"policy":binding.policy,"consumed":true,"authority":"execution_backend"}),
+            );
+            fact.execution_mode = crate::config::Mode::Surfpool;
+            facts.push(fact);
+        }
+        self.append(facts).await.map_err(|_| RpcError::internal())?;
+        if selected && hold.deadline().is_none() {
+            hold.start(&self.writer,self.started,binding.policy.as_ref().ok_or_else(RpcError::internal)?.settings.hold_ms,json!({"request":reference,"signature":signature,"authority":"execution_backend","execution_mode":"surfpool"})).await?;
+        }
+        Ok(result)
+    }
     async fn advance_due(
         &mut self,
         until: Duration,
         force: &CancellationToken,
     ) -> Result<Option<u64>, JournalError> {
+        if self.backend {
+            return Ok(None);
+        }
         loop {
             if force.is_cancelled() {
                 return Ok(None);
@@ -574,6 +699,9 @@ impl Owner {
     }
     async fn query(&mut self, operation: Operation, at: Duration) -> Result<Value, RpcError> {
         match operation {
+            Operation::BackendSubmit(client, prepared, reference, hold) => {
+                self.backend_submit(client, prepared, reference, hold).await
+            }
             Operation::Fee(message, cfg) => {
                 let view = self.clock.view_at(at, cfg.commitment.unwrap_or_default());
                 if cfg.min_context_slot.is_some_and(|slot| slot > view.slot) {

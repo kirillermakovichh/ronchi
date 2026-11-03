@@ -360,3 +360,15 @@ Verify concurrency and ordering through representative histories, including dupl
 Use fake upstreams or isolated local execution; public writes are not a test oracle.
 User validation must still establish whether this contract is sufficient for independently running backends.
 The [evidence contract](evidence-and-findings.md) defines Journal storage, completeness, redaction, and retention.
+
+## Managed backend RPC boundary
+
+Managed Surfpool uses one exclusive local state authority.
+The boundary routes its supported methods through that owned backend, including bootstrap methods and local transaction history.
+It does not fall back to simulator state or direct Read-through.
+Backend responses and source errors are retained with the owned authority identity and bounded chunk metadata.
+Configured datasource credentials remain redacted from retained source content.
+Unknown methods and unsupported parameter shapes fail before network dispatch where Ronchi can classify them.
+Surfpool remains responsible for state-dependent preflight, account availability, execution, and native method configuration errors.
+Cancellation after dispatch records uncertainty; it does not claim backend rollback.
+Core transport limits and batch binding remain unchanged.

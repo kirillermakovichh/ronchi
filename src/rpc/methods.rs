@@ -42,7 +42,7 @@ pub(super) fn check_context(
     }
     Ok(view)
 }
-pub(super) fn hash(value: Option<&Value>) -> Result<&str, RpcError> {
+pub(crate) fn hash(value: Option<&Value>) -> Result<&str, RpcError> {
     let text = value
         .and_then(Value::as_str)
         .ok_or_else(|| RpcError::params("Expected a base58 blockhash"))?;

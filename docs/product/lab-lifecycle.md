@@ -1,6 +1,6 @@
 # Persistent Lab lifecycle
 
-Status: accepted product contract. Task 3 implements the simulator lifecycle slice; RPC methods, Cases, Surfpool, and dashboard capabilities follow in their own tasks.
+Status: implemented simulator lifecycle and optional managed native Surfpool, with scoped validation and limitations below.
 This document refines [ADR-0013](../adr/0013-managed-surfpool-execution-mode.md), [ADR-0014](../adr/0014-project-local-workspace.md), [ADR-0015](../adr/0015-persistent-lab-first.md), and [ADR-0016](../adr/0016-continuous-lab-journal.md).
 The native stack remains defined by [ADR-0019](../adr/0019-resource-efficient-rust-core.md).
 
@@ -51,7 +51,7 @@ Case changes use `case arm` and `case disarm` without restarting it.
 
 The CLI implements persistent `up`, `status`, and `down` for simulator lifecycle controls.
 Startup validates configuration before creating workspace files or opening listeners.
-Unsupported Surfpool and initial Case settings return exit `4` before allocating resources.
+Unsupported platform, absent Surfpool installation, and unavailable initial Case capabilities return exit `4` before allocating a Lab.
 Task 16 adds the explicit [Read-through profile](solana-rpc-contract.md#implemented-read-through-profile), including credential-free source identities in retained metadata.
 Help, version, and schemas for `lab.up`, `lab.status`, and `lab.down` work without project access.
 The readiness response lists implemented lifecycle and RPC capabilities.
@@ -90,7 +90,9 @@ Listeners require loopback socket addresses and distinct nonzero endpoints.
 Port `0` remains valid for future dynamic allocation.
 Case identifiers contain 1–128 ASCII letters, digits, hyphens, or underscores.
 Case availability and mode capability validation remain part of the later Case implementation.
-Runtime-limit keys and native Surfpool configuration paths are not implemented yet.
+Runtime-limit configuration keys remain unimplemented.
+`surfpool_snapshot` is an optional file-only path to an explicit native Surfpool account snapshot inside the selected project.
+Simulator mode rejects this setting.
 Unknown keys remain errors until their owning slice introduces them.
 No environment variable selects the project or an independent workspace location.
 
@@ -216,7 +218,10 @@ A rebuilt executable file does not create a new daemon birth identity.
 No retained PID alone authorizes a signal or name takeover.
 Recorded children are inspected before name reuse.
 A live child whose cleanup capability is unavailable, or an unverifiable child identity, causes a conflict.
-This build starts no managed children; verified Surfpool ownership and cleanup remain task 17.
+Surfpool mode records the native child's birth identity and executable device/inode before waiting for backend readiness.
+Shutdown interrupts and reaps that owned child, with bounded kill fallback.
+After daemon death, name reuse can clean only a recorded child whose complete identity and checksum-pinned tool still match.
+Unknown or unverifiable orphan ownership remains a conflict.
 The process tests were executed on macOS; Linux code is present but has not been exercised in this session.
 
 ## Case changes and request deadlines
@@ -311,3 +316,65 @@ UI closure and MCP stdio EOF disconnect only their adapter; neither stops or dis
 Verify concurrent `up`, occupied ports, cancellation around readiness, a held request during Case replacement, and normal versus forced stop.
 Verify writer failure, Surfpool startup failure and death, stale manifests, PID reuse, unknown orphan ownership, and cleanup failure through public controls.
 Verify that every new Lab has clean chain state, retains prior Journals, and leaves the independently running backend alive.
+
+## Managed native Surfpool implementation
+
+Install the explicit official v1.7.0 platform archive with `ronchi tool surfpool install --archive PATH`.
+Installation never downloads a tool or changes global caches.
+It stores the archive and executable under `ronchi/tools/surfpool/1.7.0/`.
+The installer accepts regular files only, caps the compressed archive at 64 MiB, and caps the extracted executable at 128 MiB.
+Installation and verification check a five-minute cooperative deadline.
+The system `/usr/bin/tar` extracts only the named `surfpool` entry after archive verification.
+Every launch verifies the archive against the pinned SHA-256 and compares the executable with the entry read from that verified archive.
+Existing installation names are verified rather than overwritten.
+
+| Platform artifact | Pinned SHA-256 |
+| --- | --- |
+| `surfpool-darwin-arm64.tar.gz` | `32c309e3b79bfa3913e384b3c9b109000720cfe7f346d145feb6693fccfb202f` |
+| `surfpool-darwin-x64.tar.gz` | `b9724b6a67ac33b9cc94fb41adaf47bd638269142c7ddc6a0dae7ca77fd9e760` |
+| `surfpool-linux-x64.tar.gz` | `5bef2b0b186a74622508f104b6d2e4e2db040932b6d8f3a811172e241f802a63` |
+
+These hashes identify the official `solana-foundation/surfpool` v1.7.0 release published on 2026-10-28.
+Actual local execution is verified on macOS 15.2 arm64.
+The other pinned targets remain untested on this host.
+Windows and other architectures have no native Ronchi ownership implementation in this build.
+
+Start the installed backend with `ronchi up --mode surfpool`.
+Ronchi allocates separate private dynamic loopback RPC and WebSocket ports.
+Readiness requires the owned process, health, version response, and a genuine backend blockhash tuple.
+The manifest reports the exact Surfpool version and retains its child identity.
+The Journal records the verified executable checksum and readiness evidence.
+A backend death causes Lab fail-stop and interrupted evidence; Ronchi does not restart it silently.
+The ordinary application RPC address remains the Ronchi boundary.
+
+Native startup uses the selected project as its working directory.
+If `txtx.yml` exists there, Ronchi selects it as Surfpool's native manifest.
+Ronchi passes `--ci --no-deploy --airdrop-amount 0 --db :memory:`.
+It also places native logs inside the owned per-Lab backend directory.
+Automatic native program deployment is disabled in this build.
+The mode does not claim to execute arbitrary project deployment runbooks.
+Programs and accounts must be available in the backend's actual state.
+No signer funding, faucet call, or airdrop occurs as a startup action.
+An explicit application `requestAirdrop` targets only the owned local backend.
+
+Without a configured datasource, Surfpool runs offline.
+An explicit `surfpool_datasource` reaches Surfpool only through its private environment.
+Public configuration and retained evidence use opaque datasource identities.
+Ronchi never opens a second Read-through path in this mode.
+All supported blockchain RPC, including bootstrap reads, status/history lookup, submission, preflight, and simulation, reaches the owned backend.
+Unknown provider-specific methods remain unavailable.
+Method results retain backend state authority; Ronchi never creates simulator lifecycle transitions for them.
+
+For explicit offline state, `surfpool_snapshot = "snapshot.json"` selects a native JSON account map.
+Keys are public account addresses.
+Values contain the native account fields `lamports`, `owner`, `executable`, `rentEpoch`, `data` (base64), and optional `parsedData`.
+Ronchi copies at most 16 MiB into the new per-Lab backend directory before launch.
+The selected file must resolve inside the project.
+A supplied snapshot may explicitly contain a funded test fee payer.
+It is fixture state supplied by the user, not automatic funding by Ronchi.
+Each subsequent Lab reloads its declared starting state into fresh memory.
+
+The native acceptance fixture signs a system transfer independently of Ronchi's decoder.
+It verifies changed recipient balance, actual transaction status, missing-fee-payer rejection, duplicate backend responses, response loss, clean-state restart, binary tamper rejection, native snapshot startup failure, child death, owned cleanup, and verified orphan cleanup.
+Set `RONCHI_TEST_SURFPOOL_ARCHIVE` to the local pinned archive to run `cargo test --locked --test surfpool_mode -- --test-threads=1` with real native execution.
+Without that explicit fixture, native tests print or retain their fixture limitation and do not establish execution coverage.

@@ -1,6 +1,6 @@
 use super::{JournalReader, query_index};
 use crate::query::{self, Cursor, Error, Gap, Limits, Operation, Page, Request, Response, View};
-use rusqlite::{params_from_iter, types::Value as SqlValue};
+use rusqlite::{OptionalExtension, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -182,6 +182,8 @@ impl JournalReader {
             gaps.push(Gap{code:"legacy_correlation".into(),message:"This legacy schema projects retained fields in SQL; missing request/signature associations cannot be invented".into()});
         }
         let cte = self.query_cte();
+        let mode:Option<String>=self.connection.query_row(&format!("{cte} SELECT json_extract(metadata_json,'$.execution_mode') FROM q WHERE event_seq<=?1 ORDER BY event_seq LIMIT 1"),[cursor.snapshot as i64],|row|row.get(0)).optional().map_err(|_|Error::storage())?;
+
         if (request.arguments.scope.since.is_some()||request.arguments.scope.until.is_some())&&self.connection.query_row(&format!("{cte} SELECT EXISTS(SELECT 1 FROM q WHERE recorded_sec IS NULL AND event_seq<=?1)"),[cursor.snapshot as i64],|row|row.get::<_,bool>(0)).map_err(|_|Error::storage())?{
         gaps.push(Gap{code:"invalid_recorded_time".into(),message:"Some retained records cannot be matched against the selected time interval".into()});
     }
@@ -196,7 +198,14 @@ impl JournalReader {
                 scope: request.arguments.scope.clone(),
                 fields: request.arguments.fields.clone(),
                 include_payload: request.arguments.include_payload,
-                observation_boundary: vec!["rpc".into(), "simulator".into()],
+                observation_boundary: vec![
+                    "rpc".into(),
+                    if mode.as_deref() == Some("surfpool") {
+                        "execution_backend".into()
+                    } else {
+                        "simulator".into()
+                    },
+                ],
                 evidence_gaps: gaps,
                 journal_state: cursor.state,
                 selection_complete: true,
