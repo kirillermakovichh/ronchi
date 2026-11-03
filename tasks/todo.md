@@ -410,6 +410,13 @@ Checkpoints record results and do not require another approval interview.
 - **Verify:** No traffic, no match, Finding selection, Evidence Gaps, stopped/interrupted views, and browser closure without Lab stop.
 - **Dependencies:** 9, 12. **Scope:** Medium; split panels if needed. **Likely files:** `dashboard/`, `src/dashboard.rs`, `tests/dashboard_flow.rs`.
 - **Source:** [First dashboard](../docs/product/investigation-interfaces.md#first-dashboard).
+- [x] 14a. Reproducible React package and embedded asset serving.
+- [ ] 14b. Bounded browser tickets and Lab-scoped sessions.
+- [ ] 14c. Summary, Timeline, Findings, and evidence detail.
+- [ ] 14d. Pinned selection and public Case/Check controls.
+- [ ] 14e. Retained viewer and startup/Demo launch paths.
+- [ ] 14f. Native browser acceptance, accessible narrow layout, and visual review.
+- **Initial slice verification:** Frontend clean install, strict typecheck, two selection tests, and production build passed. Full Rust suite, fmt, check, and warning-free Clippy passed. Native HTTP verifies single-use tickets, Host/Origin rejection, bearer separation, and cross-Lab session rejection. Playwright opened built embedded assets in an empty temporary project, pinned evidence, and proved browser closure leaves the Lab ready. Desktop and 390px screenshots were inspected. Expiry/capacity have unit coverage; browser expiry and the remaining task-14 workflows are still pending.
 
 ### 15. Local MCP adapter
 

@@ -2,6 +2,7 @@ pub mod cases;
 pub mod checks;
 pub mod config;
 mod control;
+mod dashboard;
 pub mod demo;
 mod files;
 pub mod findings;
@@ -46,6 +47,8 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Print a single-use browser launch URL for a ready Lab
+    Dashboard,
     /// Run an isolated bundled public-path experiment
     Demo(demo::Args),
     /// Start a persistent Lab and wait for lifecycle readiness
@@ -357,6 +360,24 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Err(error) => return render_lab_error(cli.json, error),
             };
             query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
+        }
+        Command::Dashboard => {
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            match run_async(dashboard::launch(root, name, cli.lab_id.as_deref())) {
+                Err(error) => render_lab_error(cli.json, error),
+                Ok(result) => {
+                    let text = result.launch_url.clone();
+                    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("cli-{}",std::process::id()),"result":result});
+                    match write_output(cli.json, &envelope, &text, false) {
+                        Ok(()) => 0,
+                        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
+                        Err(_) => 6,
+                    }
+                }
+            }
         }
         Command::Up {
             mode,

@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 pub struct Control {
+    pub browser: crate::dashboard::Sessions,
     pub writer: crate::journal::WriterHandle,
     pub queries: crate::query::Engine,
     pub journal_path: std::path::PathBuf,
@@ -60,7 +61,11 @@ impl Control {
 struct Down {
     force: bool,
 }
-fn authorize(control: &Control, id: &str, headers: &HeaderMap) -> Result<(), StatusCode> {
+pub(crate) fn authorize(
+    control: &Control,
+    id: &str,
+    headers: &HeaderMap,
+) -> Result<(), StatusCode> {
     let manifest = control.snapshot();
     if id != manifest.lab_id {
         return Err(StatusCode::NOT_FOUND);
@@ -117,7 +122,36 @@ async fn down(
     Ok((StatusCode::ACCEPTED, Json(control.snapshot())))
 }
 pub fn router(control: Control) -> Router {
+    let browser = Router::new()
+        .route("/ui/{id}/api/status", get(status))
+        .route("/ui/{id}/api/cases", get(case_list))
+        .route("/ui/{id}/api/case/arm", post(case_arm))
+        .route("/ui/{id}/api/case/disarm", post(case_disarm))
+        .route("/ui/{id}/api/checks/observe", post(check_observe))
+        .route(
+            "/ui/{id}/api/check-collections/{collection}",
+            get(check_status),
+        )
+        .route(
+            "/ui/{id}/api/check-collections/{collection}/cancel",
+            post(check_cancel),
+        )
+        .route("/ui/{id}/api/checks/evaluate", post(evaluate))
+        .route("/ui/{id}/api/investigate", post(investigate))
+        .layer(axum::extract::DefaultBodyLimit::max(
+            crate::query::MAX_REQUEST_BYTES,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            control.clone(),
+            crate::dashboard::authenticate,
+        ));
     Router::new()
+        .merge(browser)
+        .merge(crate::dashboard::routes())
+        .route(
+            "/v1/labs/{id}/dashboard-ticket",
+            post(crate::dashboard::ticket),
+        )
         .route("/v1/labs/{id}/status", get(status))
         .route("/v1/labs/{id}/down", post(down))
         .route(

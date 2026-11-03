@@ -63,3 +63,45 @@ The pinned compiler successfully built and ran a temporary edition-2024 program 
 Package initialization creates and verifies the application lockfiles.
 The native package and application lockfile now exist.
 Task 1 in the queue records the application build and process checks.
+
+## Dashboard build (task 14, initial slice)
+
+Build the frontend before every native build that must include changed assets:
+
+```bash
+npm --prefix dashboard ci
+npm --prefix dashboard run typecheck
+npm --prefix dashboard test -- --run
+npm --prefix dashboard run build
+cargo build --locked
+npm --prefix dashboard exec -- playwright install chromium
+npm --prefix dashboard run test:browser
+```
+
+The browser suite starts the real native executable in an empty temporary project.
+`RONCHI_CHROMIUM=/absolute/path/to/chromium` selects an existing Chromium executable for that suite.
+The default uses Playwright's matching installed Chromium.
+Inspect screenshots under `dashboard/test-results/` after browser tests.
+Do not commit these screenshots or reports.
+
+Cargo's build script embeds only files from the completed `dashboard/dist` build.
+It fails with a build instruction if `index.html` is absent.
+It never runs npm or Vite.
+The executable requires no frontend files or Node process at runtime.
+Unknown static files return 404; API errors do not fall back to HTML.
+
+For a ready Lab, run `ronchi dashboard --lab-id <immutable-id>`.
+This finite command prints a launch URL and never opens a browser.
+`--json` returns a version-1 envelope.
+The fragment contains a single-use ticket valid for 60 seconds.
+The browser removes that fragment before exchanging it for a 30-minute HttpOnly, SameSite=Strict cookie.
+The Lab owns at most 16 unexpired tickets and 32 sessions.
+Cookies have Lab- and port-specific names and Lab-specific paths.
+Browser API requests require the actual Host and same-origin browser context.
+Bearer control requests retain their existing authorization rules.
+Do not share launch URLs as evidence links.
+The dashboard's copy-link action omits tickets, credentials, and pagination cursors.
+
+This initial slice exposes live summary, bounded Timeline pages, pinned evidence, filters, and explicit payload previews.
+Case/Check UI controls, retained viewer, startup/Demo launch integration, and broader browser acceptance remain in task 14.
+Closing the browser leaves the persistent Lab running.
