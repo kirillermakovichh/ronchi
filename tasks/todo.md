@@ -281,8 +281,11 @@ Checkpoints record results and do not require another approval interview.
 
 #### 10c. Application observation endpoint
 
-- [ ] Add read-only `POST /checks/observe` with explicit scope, availability, source revision, requested facts, deadline, and consistent application snapshot.
+- [x] Add read-only `POST /checks/observe` with explicit scope, availability, source revision, requested facts, deadline, and consistent application snapshot.
 - **Verify:** Unknown facts, absent intents, bounded input/output, no worker effects, and no private signing material.
+
+- **Verified 10c:** All four locked checks passed (121 tests). Direct HTTP histories verify consistent revision/mapping, both unsafe identities, no RPC/worker/DB changes during repeated observations at a controlled prepared barrier, unavailable missing facts, unknown fact/scope/version/Lab rejection, deadline errors, the 8 KiB input budget, bounded responses, and absence of signing material. The endpoint reports application-only snapshot authority and never emits a Verdict.
+- **Self-review:** Observation reads one SQLite snapshot through the same bounded owner, accepts only the published `intent` fact and one explicit intent, and does not notify the worker. This implements the source endpoint only; generic Check collection remains task 11.
 
 #### 10d. Crash recovery and completion review
 

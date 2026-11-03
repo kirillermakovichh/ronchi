@@ -136,6 +136,20 @@ fn unsafe_prepares_exactly_one_replacement_even_with_the_same_blockhash() {
             .len(),
         2
     );
+    let (status, observed) =
+        relayer.request("POST", "/checks/observe", observe_request(&lab, "W1"));
+    assert_eq!(status, 200);
+    assert_eq!(
+        observed["facts"]["intent"]["value"]["prepared_identities"]["value"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        observed["facts"]["intent"]["value"]["original_signature"],
+        terminal["original_signature"]
+    );
     relayer.stop();
     let mut recovered = lab.start("unsafe", None);
     assert_eq!(recovered.intent(), terminal);
@@ -224,4 +238,102 @@ fn failed_identity_commit_prevents_submission_and_stops_the_process() {
     let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
     assert!(!diagnostics.contains(&hex));
     assert!(!diagnostics.contains("injected identity"));
+}
+
+fn observe_request(lab: &Lab, intent: &str) -> serde_json::Value {
+    json!({"contract_version":1,"invocation_id":"C1","check_id":"intent-state","lab_id":lab.id,"snapshot_seq":42,"scope":{"intent_ids":[intent]},"facts":["intent"],"deadline":(time::OffsetDateTime::now_utc()+time::Duration::seconds(5)).format(&time::format_description::well_known::Rfc3339).unwrap()})
+}
+#[test]
+fn observations_are_read_only_consistent_explicit_and_do_not_release_the_worker() {
+    let lab = Lab::new();
+    let mut relayer = lab.start("resilient", Some("prepared"));
+    relayer.request("POST", "/intents", input());
+    lab.barrier("prepared");
+    let before = relayer.intent();
+    let registrations =
+        lab.command(&["investigate", "summary"])["result"]["counts"]["rpc_registrations"].clone();
+    for _ in 0..5 {
+        let (status, observation) =
+            relayer.request("POST", "/checks/observe", observe_request(&lab, "W1"));
+        assert_eq!(status, 200, "{observation}");
+        assert_eq!(observation["source"], "reference-relayer");
+        assert_eq!(observation["invocation_id"], "C1");
+        assert_eq!(observation["snapshot_seq"], 42);
+        assert_eq!(
+            observation["revision"],
+            before["revision"].as_i64().unwrap().to_string()
+        );
+        assert_eq!(observation["facts"]["intent"]["availability"], "available");
+        assert_eq!(
+            observation["facts"]["intent"]["value"]["original_signature"],
+            before["original_signature"]
+        );
+        assert_eq!(observation["facts"]["intent"]["value"]["state"], "prepared");
+        assert!(observation.get("verdict").is_none());
+        assert!(!observation.to_string().contains("wire_base64"));
+        assert!(!observation.to_string().contains("signing.seed"));
+    }
+    assert_eq!(relayer.intent(), before);
+    assert_eq!(
+        lab.command(&["investigate", "summary"])["result"]["counts"]["rpc_registrations"],
+        registrations
+    );
+    let missing = relayer
+        .request("POST", "/checks/observe", observe_request(&lab, "missing"))
+        .1;
+    assert_eq!(missing["facts"]["intent"]["availability"], "unavailable");
+    assert!(missing.get("revision").is_none());
+    assert!(missing["facts"]["intent"].get("value").is_none());
+    let mut unsupported = observe_request(&lab, "W1");
+    unsupported["facts"] = json!(["balance"]);
+    assert_eq!(
+        relayer.request("POST", "/checks/observe", unsupported).0,
+        400
+    );
+    let mut expired = observe_request(&lab, "W1");
+    expired["deadline"] = json!("2020-01-01T00:00:00Z");
+    assert_eq!(relayer.request("POST", "/checks/observe", expired).0, 408);
+    relayer.stop();
+    assert_eq!(lab.command(&["status"])["result"]["state"], "ready");
+}
+
+#[test]
+fn observation_scope_names_and_body_budget_are_validated_without_creating_work() {
+    use base64::Engine;
+    let lab = Lab::new();
+    let mut relayer = lab.start("resilient", None);
+    for variation in 0..4 {
+        let mut request = observe_request(&lab, "missing");
+        match variation {
+            0 => request["lab_id"] = json!("another-lab"),
+            1 => request["scope"]["intent_ids"] = json!([]),
+            2 => request["contract_version"] = json!(2),
+            _ => request["facts"] = json!(["intent", "unknown"]),
+        }
+        assert_eq!(relayer.request("POST", "/checks/observe", request).0, 400);
+    }
+    let mut oversized = observe_request(&lab, "missing");
+    oversized["facts"] = json!(["X".repeat(8192)]);
+    assert_eq!(relayer.request("POST", "/checks/observe", oversized).0, 400);
+    let (status, response) =
+        relayer.request("POST", "/checks/observe", observe_request(&lab, "missing"));
+    assert_eq!(status, 200);
+    assert!(response.to_string().len() <= 256 * 1024);
+    let connection =
+        rusqlite::Connection::open(lab.reference_dir().join("relayer.sqlite")).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM intents", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    let seed = std::fs::read(lab.reference_dir().join("signing.seed")).unwrap();
+    let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+    assert!(!response.to_string().contains(&hex));
+    assert!(
+        !response
+            .to_string()
+            .contains(&base64::engine::general_purpose::STANDARD.encode(seed))
+    );
+    relayer.stop();
 }

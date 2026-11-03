@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implementation in progress. Durable intake, foreground execution, submission, and profiles are implemented; the observation endpoint and crash acceptance remain in the task queue.
+Status: task 10 implementation in progress. Durable intake, foreground execution, submission, and profiles are implemented; the observation endpoint is implemented; full crash acceptance remains in the task queue.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -66,6 +66,21 @@ State transitions and their supporting observations share one SQLite transaction
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
 The generic Check collector, Verdict evaluator, and Demo remain tasks 11–13.
+
+### Read-only observation source
+
+`POST /checks/observe` accepts contract version 1 with `invocation_id`, `check_id`, the pinned `lab_id`, `snapshot_seq`, `scope:{intent_ids:[id]}`, `facts:["intent"]`, and an RFC 3339 `deadline`.
+The first source supports one explicit intent and the `intent` fact record; other names/scopes are rejected.
+The deadline must be future and at most 30 seconds away; the server also caps each HTTP handler at 5 seconds.
+The operation returns `source:reference-relayer`, `schema_version:1`, invocation identity, `observed_at`, optional per-intent `revision`, and per-fact availability.
+The `intent` value includes committed state, original/tracked mapping, the complete bounded prepared set, attempts, and retained client/status observations.
+Original/tracked signatures and unknown attempt results declare `availability:unavailable` until collected.
+A missing intent returns an unavailable fact without a fabricated state, zero revision, or empty observation value.
+The same SQLite read transaction supplies the intent row and its identities, attempts, and observations.
+`snapshot_relation:application_only` explicitly separates this application snapshot from the caller's Lab evidence prefix.
+The endpoint does not send RPC, notify the worker, append observations, mutate state, or return a Verdict.
+Signing material and exact signed bytes are excluded from public responses.
+A direct HTTP test of this source does not implement the generic collector in task 11.
 
 ## Reference Behavior Profiles
 

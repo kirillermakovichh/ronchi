@@ -1,6 +1,6 @@
 # Checks and Verdicts
 
-Status: initial implementation contract. Runtime code and verification do not yet exist.
+Status: generic Check collection and Verdict evaluation remain implementation work (tasks 11–12). The Reference Application implements the read-only HTTP source endpoint described below; that does not implement the generic adapter.
 These are reversible defaults for the first implementation.
 The [evidence contract](evidence-and-findings.md) owns Journal facts and Findings.
 This document owns external application observations and their bounded outcome evaluation.
