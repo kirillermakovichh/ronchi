@@ -1,4 +1,5 @@
 pub mod cases;
+pub mod checks;
 pub mod config;
 mod control;
 mod files;
@@ -310,6 +311,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             }
             let settings = Settings {
                 simulator_state: None,
+                checks: None,
                 schema_version: None,
                 mode,
                 read_upstream,

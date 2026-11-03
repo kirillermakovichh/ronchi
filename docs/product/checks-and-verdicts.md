@@ -31,6 +31,54 @@ A rule can compare reported intent signatures with retained submission identitie
 An injected RPC error is not itself a failed application Check.
 An adapter failure is not evidence that the System Under Test violated a Business Invariant.
 
+## Implemented Check configuration (task 11a)
+
+Named sources live in the existing `ronchi/config.toml` version-1 configuration.
+The initial transport accepts exact HTTP URLs; HTTPS is not implemented by this adapter.
+URL user information, query strings, and fragments are rejected before Lab startup.
+Loopback IPs and `localhost` are allowed by default.
+Other hosts require an explicit `allowed_origin` equal to the parsed URL origin.
+Redirects are never part of origin authorization.
+`authorization_env` names runtime Authorization configuration; it does not contain the credential value.
+
+```toml
+schema_version = 1
+[checks]
+concurrency = 4
+[[checks.sources]]
+check_id = "intent-state"
+version = 1
+source = "reference-relayer"
+schema_version = 1
+url = "http://127.0.0.1:9001/checks/observe"
+[checks.sources.facts.intent]
+type = "record"
+exact = false
+[checks.sources.facts.intent.fields.state]
+type = "enum"
+values = ["accepted", "prepared", "submitting", "reconciling", "succeeded", "failed", "unresolved"]
+[checks.sources.facts.intent.fields.original_signature]
+type = "availability"
+[checks.sources.facts.intent.fields.original_signature.value]
+type = "string"
+max_bytes = 88
+```
+
+Schemas support boolean, arbitrary-precision JSON integer, finite decimal string, bounded string, enum, bounded array, and record.
+`nullable` explicitly permits a null value; `availability` validates a nested availability wrapper.
+Available facts require a value; unavailable/redacted facts forbid a substituted value.
+A record retains its declared fields; `exact:true` additionally rejects extra fields.
+Unselected record fields never become validated evidence.
+Numeric unit strings and enum values are part of the declared schema.
+Decimal strings stay strings through validation and persistence.
+Schema budgets are depth 12, 128 nodes, 32 fields/enum values, 4,000 array elements, and 32 KiB strings.
+The complete Check configuration is bounded to 16 KiB and 16 sources.
+Limits default to `timeout_ms=5000`, `poll_interval_ms=1000`, `horizon_seconds=60`, `response_bytes=262144`, and `max_facts=1000`.
+Hard limits follow the invocation contract below.
+The effective source response ceiling is additionally 32 KiB so one complete validated result and its metadata fit the unchanged 64 KiB Journal event limit.
+Oversized source JSON must become a gap, never a complete truncated observation.
+Collection transport and commands remain later task-11 slices at this checkpoint.
+
 ## No-SDK HTTP observation adapter
 
 The first adapter invokes a configured HTTP JSON observation operation with `POST`.

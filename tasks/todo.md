@@ -305,6 +305,28 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 8. **Scope:** Medium. **Likely files:** `src/checks.rs`, `src/checks/http.rs`, `src/checks/schema.rs`, `src/cli/check.rs`, `tests/check_observe.rs`.
 - **Source:** [Checks and Verdicts](../docs/product/checks-and-verdicts.md).
 
+#### 11a. Check configuration and wire validation
+
+- [x] Add named sources and bounded typed schemas to existing configuration; validate origins, limits, exact identities, availability, and decimal strings.
+
+- **Verified 11a:** All four locked checks passed (134 tests). Three independent configuration/validation histories cover exact decimal/integer preservation, explicit unavailable values, malformed values, identity/source/schema mismatch, records/arrays/enums, origin authorization, URL credential rejection, duplicate definitions, and pre-effect configuration rejection. Scoped review checked schema/input budgets and no Verdict or expression engine. Collection is not exposed at this slice boundary.
+
+#### 11b. Durable bounded HTTP invocation
+
+- [ ] Reserve terminal evidence and commit start before HTTP; stream a deadline-bounded response, validate/redact selected facts, and commit completion/gap through the existing writer.
+
+#### 11c. Public collection operation
+
+- [ ] Expose CLI/control/schema, normalized scopes, bounded status/references, explicit polling, per-Lab concurrency, and Check/scope exclusivity.
+
+#### 11d. Cancellation and Lab shutdown
+
+- [ ] Own collection tasks and transport cancellation; stop polls on Ctrl-C, broken pipe, cancellation, and Lab stop while retaining terminal evidence.
+
+#### 11e. Public histories and evidence integration
+
+- [ ] Verify independent HTTP sources and the real relayer, source failures, budgets, commit failures, retained evidence, credential exclusion, and no Verdict; run locked checks and scoped review.
+
 ### 12. Deterministic Check evaluation
 
 - [ ] **Accept:** Implement public `check.evaluate` over a pinned retained snapshot with bounded Verdicts, supporting facts, source authority, and gaps.
