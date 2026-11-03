@@ -163,13 +163,29 @@ async fn hold_capacity_rejects_before_admission_and_peer_disconnect_releases_it(
     server.phase(&a, Phase::Finalized).await;
     server.phase(&b, Phase::Finalized).await;
     assert!(server.stop(false).await);
-    assert!(
-        events(&server)
-            .await
-            .iter()
-            .any(|event| event.kind == "rpc.boundary"
-                && event.data["transport"] == "peer_closed_while_withheld")
-    );
+    let boundary_events = events(&server).await;
+    let held_boundaries: Vec<_> = boundary_events
+        .iter()
+        .filter(|event| event.kind == "rpc.boundary" && event.data["shared_withholding"] == true)
+        .collect();
+    assert_eq!(held_boundaries.len(), 2);
+    for event in held_boundaries {
+        assert_eq!(event.data["rpc_response"], "no_transport_response");
+        // Hyper can observe a transport error before the peer monitor observes EOF.
+        // Both observations release the hold; neither establishes a client timeout.
+        assert!(
+            matches!(
+                event.data["transport"].as_str(),
+                Some(
+                    "peer_closed_while_withheld"
+                        | "transport_failed"
+                        | "transport_failed_while_withheld"
+                )
+            ),
+            "{:?}",
+            event.data
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

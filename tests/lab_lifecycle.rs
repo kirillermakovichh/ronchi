@@ -990,3 +990,92 @@ fn native_normal_and_force_stop_with_live_hold_finalize_or_interrupt_after_owned
         );
     }
 }
+
+#[test]
+fn investigation_cli_queries_live_and_retained_identity_without_new_capture() {
+    let p = Project::new();
+    let up = p.up();
+    let id = up["lab_id"].as_str().unwrap();
+    let first = p.ok(&[
+        "investigate",
+        "timeline",
+        "--fields",
+        "kind,source",
+        "--limit",
+        "2",
+    ]);
+    assert_eq!(first["lab_id"], id);
+    assert_eq!(first["selection_basis"], "current");
+    assert!(!first["result"]["items"].as_array().unwrap().is_empty());
+    let stopped = p.ok(&["down"]);
+    let historical = p.ok(&[
+        "investigate",
+        "evidence",
+        "--lab-id",
+        id,
+        "--event-seq",
+        "1",
+    ]);
+    assert_eq!(historical["selection_basis"], "explicit");
+    assert_eq!(
+        historical["result"]["items"][0]["event_ref"],
+        serde_json::json!({"lab_id":id,"event_seq":1})
+    );
+    assert_eq!(
+        historical["view"]["snapshot_seq"],
+        stopped["result"]["snapshot_seq"]
+    );
+    let latest = p.ok(&["investigate", "summary"]);
+    assert_eq!(latest["selection_basis"], "latest");
+    assert_eq!(latest["result"]["analysis"]["findings"], "not_performed");
+    p.up();
+    let retained = p.ok(&[
+        "investigate",
+        "evidence",
+        "--lab-id",
+        id,
+        "--event-seq",
+        "1",
+    ]);
+    assert_eq!(retained["result"], historical["result"]);
+}
+
+#[test]
+fn investigation_control_auth_and_scoped_cli_result_agree() {
+    let p = Project::new();
+    p.up();
+    let manifest = p.manifest();
+    let address = manifest.control_address.unwrap();
+    let id = &manifest.lab_id;
+    let token =
+        std::fs::read_to_string(Workspace::new(p.path()).lab(id).unwrap().join("token")).unwrap();
+    let body=serde_json::json!({"contract_version":1,"request_id":"http-query","lab_id":id,"operation":"investigate.timeline","arguments":{"scope":{"kind":["lab.starting"]},"fields":["kind","source"],"limit":50}}).to_string();
+    let request = |credential: &str, body: &str| {
+        format!(
+            "POST /v1/labs/{id}/investigate HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {credential}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    assert!(raw(address, request("wrong", &body)).starts_with("HTTP/1.1 401"));
+    let http = raw(address, request(token.trim(), &body));
+    assert!(http.starts_with("HTTP/1.1 200"), "{http}");
+    let response: Value = serde_json::from_str(http.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let cli = p.ok(&[
+        "investigate",
+        "timeline",
+        "--kind",
+        "lab.starting",
+        "--fields",
+        "kind,source",
+    ]);
+    assert_eq!(cli["result"], response["result"]);
+    assert_eq!(cli["view"], response["view"]);
+    assert_eq!(response["request_id"], "http-query");
+    let malformed = raw(address, request(token.trim(), "{"));
+    assert!(malformed.contains("invalid_argument"));
+    let oversized = raw(address, request(token.trim(), &" ".repeat(65537)));
+    assert!(oversized.contains("invalid_argument"));
+    let schema = p.ok(&["schema", "investigate.evidence"]);
+    assert_eq!(schema["implemented"], true);
+    assert!(schema["request"].to_string().contains("include_payload"));
+}

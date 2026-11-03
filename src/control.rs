@@ -21,6 +21,8 @@ use tokio::sync::mpsc;
 #[derive(Clone)]
 pub struct Control {
     pub writer: crate::journal::WriterHandle,
+    pub queries: crate::query::Engine,
+    pub journal_path: std::path::PathBuf,
     pub manifest: Arc<RwLock<Manifest>>,
     pub token: String,
     pub stop: mpsc::Sender<bool>,
@@ -121,6 +123,12 @@ pub fn router(control: Control) -> Router {
         .route("/v1/labs/{id}/case/disarm", post(case_disarm))
         .route("/v1/labs/{id}/cases", get(case_list))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
+        .route(
+            "/v1/labs/{id}/investigate",
+            post(investigate).layer(axum::extract::DefaultBodyLimit::max(
+                crate::query::MAX_REQUEST_BYTES,
+            )),
+        )
         .layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
                 use axum::response::IntoResponse;
@@ -371,4 +379,131 @@ pub async fn case_request(
         }
         error
     })
+}
+
+async fn investigate(
+    State(control): State<Control>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    args: Result<Json<crate::query::Request>, axum::extract::rejection::JsonRejection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+    authorize(&control, &id, &headers)?;
+    let request = match args {
+        Ok(Json(request)) => request,
+        Err(_) => {
+            return Ok(query_failure(
+                &id,
+                "unparsed",
+                crate::query::Error::invalid("Invalid typed query JSON or request exceeds 64 KiB"),
+            ));
+        }
+    };
+    let request_id = request.request_id.clone();
+    if request.lab_id != id {
+        return Ok(query_failure(
+            &id,
+            &request_id,
+            crate::query::Error::invalid("Route and request Lab identity differ"),
+        ));
+    }
+    match control
+        .queries
+        .execute(
+            control.journal_path,
+            true,
+            "explicit",
+            request,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    {
+        Ok(response) => Ok((
+            StatusCode::OK,
+            Json(serde_json::to_value(response).expect("typed response serializes")),
+        )),
+        Err(error) => Ok(query_failure(&id, &request_id, error)),
+    }
+}
+fn query_failure(
+    id: &str,
+    request_id: &str,
+    error: crate::query::Error,
+) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(
+            serde_json::to_value(crate::query::Failure {
+                contract_version: 1,
+                request_id: request_id.into(),
+                lab_id: Some(id.into()),
+                error,
+            })
+            .expect("typed error serializes"),
+        ),
+    )
+}
+pub async fn query_request(
+    ws: &Workspace,
+    manifest: &Manifest,
+    request: &crate::query::Request,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<crate::query::Response, crate::query::Error> {
+    use crate::query::Error;
+    let token = crate::workspace::read_token(
+        &ws.lab(&manifest.lab_id)
+            .map_err(|_| Error::storage())?
+            .join("token"),
+    )
+    .map_err(|_| Error::storage())?;
+    let address = manifest
+        .control_address
+        .filter(|a| a.ip().is_loopback())
+        .ok_or_else(|| {
+            Error::new(
+                "lab_unavailable",
+                "No authenticated loopback control endpoint",
+            )
+        })?;
+    let request = hyper::Request::builder()
+        .method("POST")
+        .uri(format!(
+            "http://{address}/v1/labs/{}/investigate",
+            manifest.lab_id
+        ))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(
+            serde_json::to_vec(request).map_err(|_| Error::storage())?,
+        )))
+        .map_err(|_| Error::storage())?;
+    let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .pool_max_idle_per_host(0)
+        .build_http();
+    let future = async {
+        let response = client
+            .request(request)
+            .await
+            .map_err(|_| Error::new("lab_unavailable", "Investigation control transport failed"))?;
+        let status = response.status();
+        let bytes = Limited::new(response.into_body(), crate::query::MAX_RESPONSE_BYTES)
+            .collect()
+            .await
+            .map_err(|_| Error::storage())?
+            .to_bytes();
+        if status.is_success() {
+            serde_json::from_slice(&bytes).map_err(|_| Error::storage())
+        } else {
+            #[derive(Deserialize)]
+            struct Failure {
+                error: Error,
+            }
+            Err(serde_json::from_slice::<Failure>(&bytes)
+                .map_err(|_| Error::storage())?
+                .error)
+        }
+    };
+    tokio::select! {
+        result=tokio::time::timeout(std::time::Duration::from_secs(10),future)=>result.map_err(|_|Error::new("deadline_exceeded","Investigation control deadline exceeded"))?,
+        _=cancel.cancelled()=>Err(Error::new("cancelled","Investigation cancelled; the Lab keeps running"))
+    }
 }

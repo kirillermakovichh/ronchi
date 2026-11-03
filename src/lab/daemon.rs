@@ -98,6 +98,8 @@ async fn run_owned(dir: &std::path::Path, manifest: Manifest) -> Result<(), LabE
     let mut health = handle.subscribe();
     let (sender, mut stops) = tokio::sync::mpsc::channel(1);
     let control = Control {
+        queries: crate::query::Engine::default(),
+        journal_path: dir.join("journal.sqlite"),
         writer: handle.clone(),
         manifest: Arc::new(RwLock::new(manifest.clone())),
         token,

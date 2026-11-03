@@ -1,4 +1,5 @@
 //! Finite read-only views of one existing Lab Journal.
+pub(crate) mod cli;
 use crate::journal::{JournalReader, JournalState};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use schemars::JsonSchema;
@@ -156,9 +157,9 @@ impl Error {
     pub fn exit(&self) -> i32 {
         match self.code.as_ref() {
             "invalid_argument" | "invalid_field" | "invalid_cursor" => 2,
-            "journal_unavailable" => 3,
+            "journal_unavailable" | "lab_unavailable" => 3,
             "unsupported_capability" => 4,
-            "capacity_exceeded" => 5,
+            "capacity_exceeded" | "state_conflict" => 5,
             "deadline_exceeded" => 124,
             "cancelled" => 130,
             _ => 6,
@@ -171,6 +172,13 @@ pub struct Failure {
     pub request_id: String,
     pub lab_id: Option<String>,
     pub error: Error,
+}
+#[derive(JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+pub enum Envelope {
+    Success(Box<Response>),
+    Failure(Box<Failure>),
 }
 #[derive(Clone)]
 pub struct Limits {

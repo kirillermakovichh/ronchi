@@ -198,7 +198,11 @@ Checkpoints record results and do not require another approval interview.
 
 #### 8c. CLI/control and historical Lab selection
 
-- [ ] Expose authenticated live queries and read-only retained queries, schemas/help, cancellation, and finite text/JSON output.
+- [x] Expose authenticated live queries and read-only retained queries, schemas/help, cancellation, and finite text/JSON output.
+
+- **Observed:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (79 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Native tests verify identical scoped CLI/control results, bearer authentication, malformed/oversized request errors, offline schema, read-only finalized queries, and event references after name reuse.
+- **Review:** Live queries share one bounded reader engine. Query transport preserves immutable Lab selection and never creates capture events. CLI emits one finite page. Cancellation and pipe monitoring are implemented; their acceptance checks remain in 8d.
+- **Regression diagnosis:** The existing peer-close test raced Hyper transport failure against EOF observation. A failing run retained `transport_failed` with `shared_withholding:true` and `no_transport_response` for both requests. The assertion now accepts either observed close path and checks both boundaries. Twelve focused runs and the full suite passed; no runtime response-loss behavior changed.
 
 #### 8d. Payloads, byte budgets, and completeness
 

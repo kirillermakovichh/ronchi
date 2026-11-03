@@ -64,6 +64,8 @@ enum Command {
         #[command(subcommand)]
         operation: CaseCommand,
     },
+    /// Query one bounded page of existing Journal evidence
+    Investigate(query::cli::Selection),
     /// Inspect a live or retained Lab
     Status,
     /// Stop the current named Lab and retain evidence
@@ -75,7 +77,7 @@ enum Command {
     Daemon,
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence"])]
         operation: String,
     },
 }
@@ -210,13 +212,16 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
     match cli.command {
         Command::Schema { operation } => {
             let request = match operation.as_str() {
+                op if op.starts_with("investigate.") => schemars::schema_for!(query::Request),
                 "lab.up" => schemars::schema_for!(UpRequest),
                 "lab.status" => schemars::schema_for!(StatusRequest),
                 "lab.down" => schemars::schema_for!(DownRequest),
                 "case.arm" => schemars::schema_for!(CaseRequest),
                 _ => schemars::schema_for!(StatusRequest),
             };
-            let response = if operation == "case.list" {
+            let response = if operation.starts_with("investigate.") {
+                schemars::schema_for!(query::Envelope)
+            } else if operation == "case.list" {
                 schemars::schema_for!(CatalogReply)
             } else {
                 schemars::schema_for!(LabEnvelope)
@@ -227,6 +232,13 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
                 Err(_) => 6,
             }
+        }
+        Command::Investigate(selection) => {
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
         }
         Command::Up {
             mode,

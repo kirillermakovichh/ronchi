@@ -16,7 +16,13 @@ Cursors bind the immutable Lab, committed watermark, normalized selection, proje
 Older Journals use a read-only SQL adapter with an explicit correlation gap.
 The core limits concurrent readers to four and cancels SQLite VM work at its deadline.
 Summary reports Findings analysis as `not_performed`; it does not return a fake analysis result.
-CLI/control exposure and explicit payload previews remain unfinished in task 8.
+CLI exposes `investigate summary|timeline|evidence` with `--signature`, `--rpc-method`, `--case-activation`, `--kind`, `--event-seq`, `--event-ref LAB_ID:EVENT_SEQ`, `--from-seq`, `--to-seq`, `--since`, `--until`, `--fields`, `--limit`, and `--cursor`.
+Each invocation returns one page and never follows a stream or fetches all pages.
+Live CLI queries use authenticated `POST /v1/labs/{id}/investigate` with the typed core request.
+Retained CLI queries open the exact Journal read-only without starting a Lab.
+`schema investigate.summary|investigate.timeline|investigate.evidence` exposes shared request and success/error models offline.
+JSON mode emits one envelope; text mode escapes terminal controls in untrusted values.
+Explicit payload previews and cancellation/pipe acceptance checks remain unfinished in task 8.
 The sections below retain the full accepted contract.
 
 ## Operations and identity
