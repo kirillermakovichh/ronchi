@@ -29,7 +29,11 @@ export function requestJson(value: unknown, key = ""): string {
   return JSON.stringify(value) ?? "null";
 }
 export function coordinate(value: string): Sequence | undefined {
-  if (value.length>19 || !/^\d+$/.test(value) || BigInt(value) > 9223372036854775807n)
+  if (
+    value.length > 19 ||
+    !/^\d+$/.test(value) ||
+    BigInt(value) > 9223372036854775807n
+  )
     return undefined;
   const exact = BigInt(value);
   return exact <= BigInt(Number.MAX_SAFE_INTEGER)

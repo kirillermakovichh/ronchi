@@ -269,8 +269,25 @@ async fn static_file(
     }
     asset(&format!("assets/{path}"))
 }
+async fn unselected_index(
+    State(control): State<crate::control::Control>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let id = control.snapshot().lab_id;
+    index(State(control), Path(id), headers).await
+}
+async fn unselected_asset(
+    State(control): State<crate::control::Control>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let id = control.snapshot().lab_id;
+    static_file(State(control), Path((id, path)), headers).await
+}
 pub fn routes() -> Router<crate::control::Control> {
     Router::new()
+        .route("/", get(unselected_index))
+        .route("/assets/{*path}", get(unselected_asset))
         .route("/ui/{id}/", get(index))
         .route("/ui/{id}/assets/{*path}", get(static_file))
         .route(

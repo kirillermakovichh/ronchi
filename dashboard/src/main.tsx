@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Api,
+  ApiError,
   bootstrap,
   type Json,
   type QueryReply,
@@ -11,7 +12,7 @@ import {
 } from "./api";
 import { selection, bookmark, type DetailSelection } from "./selection";
 import "./style.css";
-import {StateNotice} from "./StateNotice";
+import { StateNotice } from "./StateNotice";
 import { Findings } from "./Findings";
 import { Controls } from "./Controls";
 const initial = selection(location.search);
@@ -27,6 +28,7 @@ function App() {
   const [status, setStatus] = useState<Status>(),
     [scope, setScope] = useState<Scope>(initial.scope),
     [snapshot, setSnapshot] = useState<Sequence | undefined>(initial.snapshot);
+  const [committedScope, setCommittedScope] = useState<Scope>(initial.scope);
   const [summary, setSummary] = useState<QueryReply>(),
     [timeline, setTimeline] = useState<QueryReply>(),
     [detail, setDetail] = useState<QueryReply>(),
@@ -36,7 +38,7 @@ function App() {
     DetailSelection | undefined
   >(initial.detail);
   const evidenceRequest = useRef<AbortController | undefined>(undefined);
-  useEffect(() => () => evidenceRequest.current?.abort(), [api, scope]);
+  useEffect(() => () => evidenceRequest.current?.abort(), [api]);
   async function loadEvidence(
     selected: Scope,
     seq: Sequence,
@@ -53,6 +55,8 @@ function App() {
       extra,
       controller.signal,
     );
+    if (controller.signal.aborted)
+      throw new DOMException("Aborted", "AbortError");
     if (!controller.signal.aborted) {
       if (!response.result.items?.length)
         throw new Error(
@@ -67,7 +71,7 @@ function App() {
     [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let active = true;
-    if(!labId)return;
+    if (!labId) return;
     bootstrap(api)
       .then(() => {
         if (active) setAuthorized(true);
@@ -162,6 +166,7 @@ function App() {
         );
         if (controller.signal.aborted) return;
         setSummary(result);
+        setCommittedScope(scope);
         setTimeline(events);
         if (current.state !== "ready" && snapshot === undefined)
           setSnapshot(result.view.snapshot_seq);
@@ -169,7 +174,9 @@ function App() {
       } catch (e) {
         if (!controller.signal.aborted)
           setError(
-            `Connection or core failure: ${String(e)}. Last pinned evidence is retained on screen.`,
+            e instanceof ApiError
+              ? `Operational query error: ${String(e)}. Last pinned evidence is retained on screen.`
+              : `Connection lost: ${String(e)}. Last pinned evidence is retained on screen.`,
           );
       }
       if (!controller.signal.aborted && snapshot === undefined)
@@ -210,7 +217,10 @@ function App() {
       clearTimeout(timer);
     };
   }, [api, authorized, snapshot, status?.state]);
+  const actionPending = useRef(false);
   async function act(work: () => Promise<void>) {
+    if (actionPending.current) return;
+    actionPending.current = true;
     setBusy(true);
     try {
       await work();
@@ -219,26 +229,47 @@ function App() {
       if (!(e instanceof DOMException && e.name === "AbortError"))
         setError(String(e));
     } finally {
+      actionPending.current = false;
       setBusy(false);
     }
+  }
+  function saveLocation(
+    selected: Scope,
+    seq?: Sequence,
+    target?: DetailSelection,
+  ) {
+    const url = new URL(bookmark(labId, selected, seq ?? 0, target));
+    if (seq === undefined) url.searchParams.delete("snapshot");
+    history.replaceState(null, "", url.pathname + url.search);
   }
   async function evidence(item: Record<string, Json>, isFinding = false) {
     const seq = summary?.view.snapshot_seq;
     if (seq === undefined) return;
     setSnapshot(seq);
+    setScope(committedScope);
     setFinding(isFinding ? item : undefined);
     const ref = item.event_ref as
       { lab_id: string; event_seq: Sequence } | undefined;
     const selected: Scope = isFinding
-      ? { ...scope, finding_id: String(item.finding_id) }
+      ? { ...committedScope, finding_id: String(item.finding_id) }
       : { event_refs: ref ? [ref] : [] };
     setSelectedDetail(
       isFinding
         ? { finding_id: String(item.finding_id) }
         : { event_seq: ref?.event_seq },
     );
+    saveLocation(
+      committedScope,
+      seq,
+      isFinding
+        ? { finding_id: String(item.finding_id) }
+        : { event_seq: ref?.event_seq },
+    );
     await loadEvidence(selected, seq);
   }
+  const commandPrefix = status?.configuration.project
+    ? `ronchi --project '${status.configuration.project.replaceAll("'", "'\\''")}'`
+    : "ronchi";
   return (
     <>
       <header>
@@ -252,11 +283,18 @@ function App() {
           <span>Investigation</span>
         </div>
         <div className="live">
-          {status?.state ?? "Connecting"} · {status?.health ?? "unknown health"}
+          {error.startsWith("Connection") ? "Last known · " : ""}
+          {!labId ? "No Lab selected" : (status?.state ?? "Connecting")} ·{" "}
+          {status?.health ?? "unknown health"}
         </div>
       </header>
       <main>
-        <StateNotice labId={labId} status={status} analysis={summary?.result.analysis} error={error}/>
+        <StateNotice
+          labId={labId}
+          status={status}
+          analysis={summary?.result.analysis}
+          error={error}
+        />
         <section className="lab-head">
           <div>
             <p className="eyebrow">
@@ -293,11 +331,11 @@ function App() {
               replaces the old live endpoint.
             </p>
             <code>
-              ronchi dashboard --serve --lab-id {labId} --selection '
+              {commandPrefix} dashboard --serve --lab-id {labId} --selection '
               {new URL(
                 bookmark(
                   labId,
-                  scope,
+                  committedScope,
                   summary.view.snapshot_seq,
                   selectedDetail,
                 ),
@@ -310,12 +348,16 @@ function App() {
           <div role="alert" className="error">
             {error}
             <p>
-              Use <code>ronchi dashboard --lab-id {labId}</code> for a new
-              session. A lost connection does not prove that the Lab stopped.
+              Use{" "}
+              <code>
+                {commandPrefix} dashboard --lab-id {labId}
+              </code>{" "}
+              for a new session. A lost connection does not prove that the Lab
+              stopped.
             </p>
           </div>
         )}
-        {!authorized && (
+        {labId && !authorized && (
           <p>
             Exchange the single-use launch ticket to open this Investigation.
           </p>
@@ -331,9 +373,12 @@ function App() {
               </span>
               <button
                 onClick={() => {
+                  evidenceRequest.current?.abort();
+                  saveLocation(scope);
                   setSnapshot(undefined);
                   setDetail(undefined);
                   setSelectedDetail(undefined);
+                  setDetailError("");
                   setFinding(undefined);
                   setRefresh((x) => x + 1);
                 }}
@@ -345,7 +390,7 @@ function App() {
                   void navigator.clipboard.writeText(
                     bookmark(
                       labId,
-                      scope,
+                      committedScope,
                       summary.view.snapshot_seq,
                       selectedDetail,
                     ),
@@ -380,6 +425,10 @@ function App() {
               {summary.view.observation_boundary.join(" · ")}
             </p>
             <details>
+              <summary>Committed scope</summary>
+              <Facts value={committedScope} />
+            </details>
+            <details>
               <summary>Analysis state</summary>
               <Facts value={summary.result.analysis} />
             </details>
@@ -389,13 +438,21 @@ function App() {
               </p>
             ))}
             <Findings
-              key={`${summary.view.snapshot_seq}:${JSON.stringify(scope)}`}
+              key={`${summary.view.snapshot_seq}:${JSON.stringify(committedScope)}`}
               api={api}
-              scope={scope}
+              scope={committedScope}
               snapshot={summary.view.snapshot_seq}
               items={summary.result.findings ?? []}
               more={summary.result.findings_more === true}
-              pin={() => setSnapshot(summary.view.snapshot_seq)}
+              pin={() => {
+                setScope(committedScope);
+                setSnapshot(summary.view.snapshot_seq);
+                saveLocation(
+                  committedScope,
+                  summary.view.snapshot_seq,
+                  selectedDetail,
+                );
+              }}
               select={(item) => void act(() => evidence(item, true))}
             />
           </section>
@@ -421,10 +478,13 @@ function App() {
               setError(next.error);
               return;
             }
+            evidenceRequest.current?.abort();
             setSelectionValid(true);
+            saveLocation(next.scope, snapshot);
             setScope(next.scope);
             setDetail(undefined);
             setSelectedDetail(undefined);
+            setDetailError("");
             setFinding(undefined);
           }}
         >
@@ -490,7 +550,7 @@ function App() {
                     setTimeline(
                       await api.query(
                         "timeline",
-                        scope,
+                        committedScope,
                         timeline.view.snapshot_seq,
                         timeline.page.next_cursor,
                       ),

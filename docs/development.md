@@ -155,3 +155,39 @@ ronchi dashboard --serve --lab-id <id> --selection 'snapshot=42&event=7'
 The CLI rejects credential, cursor, unknown, and oversized selection fields before requesting a ticket or binding a viewer.
 A live endpoint does not survive Lab stop.
 The interface shows exact-ID retained viewer instructions for its current selection.
+
+### Dashboard cancellation and acceptance coverage
+
+UI polling and server Check collection have separate owners.
+Hiding the page pauses unnecessary UI reads; it does not cancel a collection.
+Changing filters or refreshing a snapshot aborts obsolete reads.
+The interface retains the last committed scope while another selection is loading or fails.
+A late old response cannot replace a newer selection.
+Opening a detail pins its snapshot and updates the credential-free URL for reload.
+The evidence panel is a non-modal `aside`; keyboard activation keeps normal document focus.
+
+A collection start stores its client-generated identity before sending HTTP.
+If the response is lost, the UI labels its outcome unknown.
+Use `Refresh collection status` or `Inspect Lab status` before repeating a mutation.
+`Cancel collection` uses the public cancellation operation.
+Only a server-reported terminal state is displayed as cancelled.
+The browser does not interpret a cancelled Fetch as a cancelled collection.
+Payload continuation follows `payload.next_offset` in UTF-8 bytes.
+Only an explicit action loads each chunk; repeated clicks while busy do not queue work.
+
+The native Playwright suite covers real RPC-generated Findings, live/retained bookmarks,
+real relayer evaluation, an independent HTTP source, lost collection responses,
+public cancellation, Unicode payload chunks, stale native reads, keyboard focus,
+no selected Lab, invalid snapshot errors, connection loss, and browser closure.
+Visibility is a controlled `document.hidden` signal in real Chromium; HTTP responses remain native.
+Starting, unsupported-capability, analysis-limit, and core-failure renderer branches use controlled DTO tests.
+These renderer tests do not claim to simulate the corresponding native failure lifecycle.
+The Rust `dashboard_flow` suite closes a real viewer stdout pipe after readiness.
+It waits for process exit, checks listener release, compares unchanged Journal bytes,
+and verifies that another Lab remains available.
+
+Desktop and narrow native screenshots are reviewed manually after visual changes.
+Screenshots, reports, and temporary runtime artifacts are not committed.
+The isolated earlier normal-down failure remains an unconfirmed observation in
+[`tasks/unconfirmed-down-observation.md`](../tasks/unconfirmed-down-observation.md).
+No retry or speculative Lab lifecycle fix was introduced.

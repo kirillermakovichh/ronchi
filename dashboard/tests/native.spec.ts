@@ -18,6 +18,40 @@ function cli(project: string, ...args: string[]) {
     );
   }
 }
+function normalDownWithDiagnostics(project: string, labId: string) {
+  try {
+    cli(project, "down");
+  } catch (original) {
+    let resources: unknown = { state: "unknown" },
+      cleanup = "not attempted: status unavailable";
+    try {
+      const current = cli(project, "--lab-id", labId, "status").result;
+      resources = {
+        lab_id: current.lab_id,
+        state: current.state,
+        health: current.health,
+        journal_state: current.journal_state,
+        snapshot_seq: current.snapshot_seq,
+        pid: current.process?.pid,
+      };
+      if (current.state === "ready") {
+        try {
+          cli(project, "--lab-id", labId, "down", "--force");
+          cleanup = "owned cleanup completed";
+        } catch {
+          cleanup = "owned cleanup failed";
+        }
+      } else {
+        cleanup = "no ready owned Lab remained";
+      }
+    } catch {
+      /* Keep the original normal-down failure even if inspection fails. */
+    }
+    throw new Error(
+      `${String(original)}; sequence=up-ready -> normal down; known_lab_id=${labId}; resource_state=${JSON.stringify(resources)}; cleanup=${cleanup}`,
+    );
+  }
+}
 test("native embedded dashboard authenticates, pins evidence, and leaves Lab running after browser closure", async ({
   browser,
 }, info) => {
@@ -101,6 +135,9 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     await expect
       .poll(() => cli(project, "status").result.active_case?.case_id)
       .toBe("tx-response-lost");
+    await expect(
+      page.getByText("waiting_for_match.", { exact: false }),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "Disarm Case", exact: true })
       .click();
@@ -135,9 +172,24 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       { ...session, expires: Math.floor(Date.now() / 1000) - 1 },
     ]);
     await page.reload();
-    await expect(page.getByRole("alert")).toContainText("401");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Operational query error:" }),
+    ).toContainText("401");
 
+    cli(
+      project,
+      "--lab-id",
+      lab.lab_id,
+      "case",
+      "arm",
+      "tx-response-lost",
+      "--hold-ms",
+      "30",
+    );
     await context.close();
+    expect(cli(project, "status").result.active_case.case_id).toBe(
+      "tx-response-lost",
+    );
     expect(cli(project, "status").result.state).toBe("ready");
     expect(lab.lab_id).toBe(cli(project, "status").result.lab_id);
   } finally {
@@ -163,7 +215,7 @@ test("retained viewer reads the original immutable Journal without restarting a 
       "--control-listen",
       "127.0.0.1:0",
     ).result;
-    cli(project, "down");
+    normalDownWithDiagnostics(project, lab.lab_id);
     child = spawn(
       binary,
       [
@@ -478,6 +530,10 @@ test("real Findings continue at a pinned prefix and restore an event bookmark", 
     const fresh = new URL(cli(project, "dashboard").result.launch_url);
     fresh.search = new URL(saved).search;
     await page.goto(fresh.toString());
+    await expect(
+      page.getByRole("button", { name: "Load raw payload preview" }),
+    ).toBeVisible();
+    await page.reload();
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
     ).toBeVisible();

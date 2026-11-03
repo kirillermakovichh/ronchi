@@ -117,7 +117,12 @@ It uses server filtering, 50-item pages, and explicit payload previews.
 Application collection and evaluation require explicit actions.
 The current Check form selects one intent and a configured definition version.
 HTTP-only collection, its 32 KiB cap, and evaluation budgets remain unchanged.
-Broader acceptance gaps remain tracked under task 14.
+Findings use explicit five-item continuation after the bounded summary.
+Copied event/Finding links retain the exact scope and pinned prefix, without cursors or credentials.
+`dashboard --selection` moves that query to a fresh live session or retained viewer.
+Collection cancellation is distinct from UI request cancellation.
+Unknown mutation outcomes retain an identity for public status inspection.
+See the [acceptance coverage](../development.md#dashboard-cancellation-and-acceptance-coverage) for native and controlled renderer test boundaries.
 
 
 The first dashboard has a Lab header, a compact Investigation summary, a Timeline, and an evidence detail panel.

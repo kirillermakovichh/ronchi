@@ -345,4 +345,26 @@ select {
   margin-left: auto;
   color: var(--muted);
 }
-.counts{display:flex;flex-wrap:wrap;gap:12px 32px;margin:12px 0}.counts dt{font-size:11px;margin:0}.counts dd{font:16px ui-monospace,monospace;margin:4px 0}.lab-head{margin-bottom:20px}
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  margin: 12px 0;
+}
+.counts dt {
+  font-size: 11px;
+  margin: 0;
+}
+.counts dd {
+  font:
+    16px ui-monospace,
+    monospace;
+  margin: 4px 0;
+}
+.lab-head {
+  margin-bottom: 20px;
+}
+code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

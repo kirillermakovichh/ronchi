@@ -8,6 +8,7 @@ interface Props {
   changed: () => void;
 }
 export function Controls({ api, status, snapshot, changed }: Props) {
+  const [inspection, setInspection] = useState<unknown>();
   const [catalog, setCatalog] = useState<unknown>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -95,6 +96,12 @@ export function Controls({ api, status, snapshot, changed }: Props) {
                 setError("Select exactly one intent.");
                 return;
               }
+              const collectionId = crypto.randomUUID();
+              setCollection({
+                collection_id: collectionId,
+                status: "outcome_unknown",
+                snapshot_seq: snapshot ?? 0,
+              });
               void run(async () => {
                 const reply = await api.call<{
                   result: NonNullable<typeof collection>;
@@ -104,7 +111,7 @@ export function Controls({ api, status, snapshot, changed }: Props) {
                   request_id: crypto.randomUUID(),
                   lab_id: api.labId,
                   arguments: {
-                    collection_id: crypto.randomUUID(),
+                    collection_id: collectionId,
                     check_id: checkId,
                     scope: { intent_ids: [intent], signatures: [] },
                     poll: data.get("poll") === "on",
@@ -220,6 +227,24 @@ export function Controls({ api, status, snapshot, changed }: Props) {
           </div>
         )}
       </details>
+      {inspection !== undefined && (
+        <details open>
+          <summary>Current public Lab status</summary>
+          <pre>{JSON.stringify(inspection, null, 2)}</pre>
+        </details>
+      )}
+      {error && (
+        <button
+          disabled={busy}
+          onClick={() =>
+            void run(async () =>
+              setInspection(await api.call("api/status", undefined)),
+            )
+          }
+        >
+          Inspect Lab status
+        </button>
+      )}
       {error && (
         <p role="alert">
           {error}. Inspect current state before repeating a mutation with
