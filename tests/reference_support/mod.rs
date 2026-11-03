@@ -77,6 +77,16 @@ impl Lab {
         horizon: Option<u32>,
         id: Option<&str>,
     ) -> Relayer {
+        self.start_at(profile, barrier, horizon, id, None)
+    }
+    pub fn start_at(
+        &self,
+        profile: &str,
+        barrier: Option<&str>,
+        horizon: Option<u32>,
+        id: Option<&str>,
+        listen: Option<SocketAddr>,
+    ) -> Relayer {
         for file in ["barrier.json", "barrier.release"] {
             let _ = std::fs::remove_file(self.reference_dir().join(file));
         }
@@ -89,6 +99,9 @@ impl Lab {
             "--profile",
             profile,
         ]);
+        if let Some(listen) = listen {
+            command.args(["--listen", &listen.to_string()]);
+        }
         if let Some(horizon) = horizon {
             command.args(["--horizon-seconds", &horizon.to_string()]);
         }

@@ -83,7 +83,13 @@ Validation failures retain a gap and no partial source JSON.
 Validated selected facts use application authority; supplied values never become trusted Journal events or causal links.
 Known runtime Authorization values echoed in source facts are redacted before persistence.
 Only metadata and evidence references enter collection status; full selected facts remain in the observation payload.
-An internal supervisor bounds active collections to 16 and retained status cache entries to 128.
+Evidence payload previews remain bounded to 4,096 bytes.
+For one explicit `--event-seq`, use `--include-payload --payload-offset 0` and follow `payload.next_offset` to read the complete retained JSON.
+Offsets are UTF-8 byte boundaries; the caller keeps the same Lab, event, and snapshot.
+A truncated query preview does not change `complete_validated_selection` retention.
+The query boundary includes `application_check` only after an observation enters the pinned Journal prefix.
+This marker does not claim complete application coverage.
+The Lab-owned supervisor bounds active collections to 16 and retained status cache entries to 128.
 Older completed metadata resolves through the existing indexed Journal projection.
 The public CLI is `ronchi check observe <check-id> --intent-id W1`.
 Scope accepts repeated `--intent-id` and `--signature` plus `--since` and `--until`.
@@ -100,6 +106,8 @@ Start returns bounded running metadata; status returns terminal metadata and evi
 A collection ID deduplicates identical admission; changed arguments conflict.
 One Check and normalized scope cannot have overlapping collections.
 Lab stop stops admission and cancels active collection work before writer shutdown.
+Collection cleanup uses the existing five-second cleanup budget, not the polling horizon.
+The source application keeps running.
 Stopped and retained Journals reject new collection; CLI never falls back to historical mutation.
 
 ## No-SDK HTTP observation adapter

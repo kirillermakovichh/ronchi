@@ -45,6 +45,9 @@ pub struct Selection {
     /// Include a bounded retained payload preview in evidence only
     #[arg(long)]
     include_payload: bool,
+    /// Read the next bounded payload chunk for one explicit event reference
+    #[arg(long, default_value_t = 0)]
+    payload_offset: u32,
     /// Resolve the supporting facts at --snapshot-seq
     #[arg(long)]
     finding_id: Option<String>,
@@ -105,6 +108,7 @@ async fn execute(
             cursor: selection.cursor,
             fields: selection.fields,
             include_payload: selection.include_payload,
+            payload_offset: selection.payload_offset,
             snapshot_seq: selection.snapshot_seq,
         },
     };

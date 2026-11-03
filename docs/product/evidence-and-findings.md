@@ -26,6 +26,13 @@ The Lab-start record identifies the Ronchi build, protocol profile, redaction po
 Case records retain the effective definition, versioned primitives and Finding rules, configuration digest, and any seed.
 RPC IDs remain protocol values; an internal `request_id` distinguishes repeated IDs, notifications, and batch elements.
 Each source record identifies its authority without persisting endpoint credentials.
+Public Check capture records `check.collection_started`, `check.invocation_started`, `check.observation` or `check.invocation_error`, and `check.collection_completed`.
+Validated observations retain `source:application`, configured source/schema identity, explicit scope, source time/revision, and their complete selected payload.
+Source failures retain a gap and no partial source JSON.
+They do not establish application failure or a Verdict.
+Only Ronchi creates the committed start reference used by Check `cause_refs`.
+Evidence previews remain bounded; explicit payload offsets permit complete readback without changing event or response limits.
+The [Check contract](checks-and-verdicts.md) owns the capture and redaction limits.
 
 ## Order, time, and correlation
 

@@ -87,6 +87,10 @@ pub(super) async fn post(
             let mut builder = hyper::Request::builder()
                 .method("POST")
                 .uri(url.as_str())
+                .header(
+                    "host",
+                    &url[url::Position::BeforeHost..url::Position::AfterPort],
+                )
                 .header("content-type", "application/json")
                 .header("connection", "close");
             if let Some(value) = &runtime.authorization {

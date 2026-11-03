@@ -236,11 +236,16 @@ The adapter contains no model, registration, cloud call, or remote transport req
 Both Check operations select a configured `check_id`, its definition version, immutable `lab_id`, and explicit bounded `scope`.
 Check scope includes the relevant intent IDs or signatures and the observation interval; it does not infer business correlation from a Timeline selection.
 `check.observe` pins the current committed `snapshot_seq` for the source request and invokes the configured read-only HTTP adapter.
-It returns an `invocation_id`, committed observation references, and the new watermark after collection.
+The implemented CLI returns bounded collection metadata, the last `invocation_id`, committed observation references, and the new watermark after collection.
+An ordinary call collects once; `--poll --horizon-seconds 60` explicitly enables bounded polling.
+The authenticated control start/status/cancel paths are documented in the [Check contract](checks-and-verdicts.md).
+For a complete retained observation, select its exact event and follow bounded `payload.next_offset` values with `--include-payload --payload-offset N`.
+The first offset is zero; keep the same pinned snapshot for subsequent chunks.
 If collection uses polling, each HTTP invocation has its own ID and timeout within the declared bounded horizon.
 Cancellation stops the remaining polls.
 The ordinary query deadline does not replace the explicit Check invocation and horizon limits.
-`check.evaluate` requires `snapshot_seq` and evaluates only retained facts through that watermark.
+`check.evaluate` remains planned for task 12.
+It requires `snapshot_seq` and evaluates only retained facts through that watermark.
 It returns the rule version, bounded Verdict, supporting references, and Evidence Gaps without appending observations or calling external sources.
 Re-evaluation is available for stopped or interrupted Journals and preserves their completeness limits.
 The [Check contract](checks-and-verdicts.md) owns adapter limits, rules, and Verdict meanings.

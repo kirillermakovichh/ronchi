@@ -68,7 +68,8 @@ The worker reserves terminal headroom within 128 observations per intent and end
 State transitions and their supporting observations share one SQLite transaction.
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
-The generic Check collector, Verdict evaluator, and Demo remain tasks 11–13.
+The generic HTTP Check collector is implemented separately from the relayer source.
+Verdict evaluation and Demo remain tasks 12–13.
 
 ### Read-only observation source
 
@@ -84,7 +85,8 @@ The same SQLite read transaction supplies the intent row and its identities, att
 The endpoint does not send RPC, notify the worker, append observations, mutate state, or return a Verdict.
 Signing material and exact signed bytes are excluded from public responses.
 `wire_digest` is SHA-256 over the retained canonical base64 UTF-8 representation; it is not the Lab raw-wire digest.
-A direct HTTP test of this source does not implement the generic collector in task 11.
+The task-11 integration tests collect this source through the generic public CLI and HTTP adapter.
+The relayer remains an independent source and does not own collection.
 
 ## Reference Behavior Profiles
 

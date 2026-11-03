@@ -300,7 +300,7 @@ Checkpoints record results and do not require another approval interview.
 
 ### 11. Public Check collection
 
-- [ ] **Accept:** Implement configured read-only HTTP observation and public `check.observe`; commit validated facts with source, explicit scope, deadlines, and bounded polling.
+- [x] **Accept:** Implement configured read-only HTTP observation and public `check.observe`; commit validated facts with source, explicit scope, deadlines, and bounded polling.
 - **Verify:** Timeouts, unavailable facts, schema errors, redirects, byte limits, cancellation, and stop; adapter failure remains an Evidence Gap.
 - **Dependencies:** 8. **Scope:** Medium. **Likely files:** `src/checks.rs`, `src/checks/http.rs`, `src/checks/schema.rs`, `src/cli/check.rs`, `tests/check_observe.rs`.
 - **Source:** [Checks and Verdicts](../docs/product/checks-and-verdicts.md).
@@ -332,7 +332,10 @@ Checkpoints record results and do not require another approval interview.
 
 #### 11e. Public histories and evidence integration
 
-- [ ] Verify independent HTTP sources and the real relayer, source failures, budgets, commit failures, retained evidence, credential exclusion, and no Verdict; run locked checks and scoped review.
+- [x] Verify independent HTTP sources and the real relayer, source failures, budgets, commit failures, retained evidence, credential exclusion, and no Verdict; run locked checks and scoped review.
+
+- **Verified 11e:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (146 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Eight native CLI/control histories cover a real relayer mapping without worker advancement; explicit unavailable facts; malformed JSON/types/identity/source/schema; redirects; chunked overflow; a slow streaming body under one deadline; normalized scope exclusion and configured concurrency; busy-poll skips; distinct invocation IDs without overlap; Ctrl-C, broken pipe, and Lab stop; stopped mutation rejection; retained evidence; runtime credential redaction; and complete Unicode observation reconstruction from bounded Evidence chunks. Earlier file-backed tests inject start/completion commit failures.
+- **Scoped review:** The real relayer exposed a missing HTTP Host header; the generic transport now sends the parsed URL authority. Application facts remain application-source claims. New `payload_offset` reads preserve the existing 4,096-byte preview cap and response limits. Readers release each request snapshot. No Findings rule or Verdict was added. The effective capture ceiling remains 32 KiB under the unchanged Journal event budget. HTTP is supported; HTTPS remains explicitly unsupported. Next task: 12.
 
 ### 12. Deterministic Check evaluation
 

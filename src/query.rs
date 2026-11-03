@@ -68,6 +68,7 @@ pub struct Arguments {
     pub cursor: Option<String>,
     pub fields: Vec<String>,
     pub include_payload: bool,
+    pub payload_offset: u32,
     pub snapshot_seq: Option<u64>,
 }
 impl Default for Arguments {
@@ -78,6 +79,7 @@ impl Default for Arguments {
             cursor: None,
             fields: vec![],
             include_payload: false,
+            payload_offset: 0,
             snapshot_seq: None,
         }
     }
@@ -421,6 +423,13 @@ impl Request {
         if a.include_payload && self.operation != Operation::Evidence {
             return Err(Error::invalid(
                 "Payload selection requires investigate.evidence",
+            ));
+        }
+        if a.payload_offset > 0
+            && (!a.include_payload || s.event_refs.len() != 1 || a.payload_offset > 65536)
+        {
+            return Err(Error::invalid(
+                "Payload offset requires one explicit Evidence event and include_payload; maximum offset is 65536",
             ));
         }
         let defaults = if self.operation == Operation::Findings {

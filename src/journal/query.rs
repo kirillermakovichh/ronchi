@@ -207,6 +207,12 @@ impl JournalReader {
                 reason: None,
             },
         };
+        if self.version >= 6 && self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM query_events WHERE kind='check.observation' AND event_seq<=?1)",
+            [cursor.snapshot as i64], |row| row.get::<_, bool>(0)
+        ).map_err(|_| Error::storage())? {
+            response.view.observation_boundary.push("application_check".into());
+        }
         let mut effective_request = request.clone();
         let mut analysis = None;
         if matches!(request.operation, Operation::Summary | Operation::Findings)
@@ -457,7 +463,7 @@ impl JournalReader {
                 let mut item: Value = serde_json::from_str(&text).map_err(|_| Error::storage())?;
                 if request.arguments.include_payload {
                     let sql = format!(
-                        "{cte} SELECT q.payload_bytes,q.payload_encoding,CASE WHEN json_extract(q.metadata_json,'$.payload_status')='available' THEN substr(CAST({payload_value} AS BLOB),1,?2) ELSE NULL END FROM q JOIN events e ON e.event_seq=q.event_seq WHERE q.event_seq=?1",
+                        "{cte} SELECT q.payload_bytes,q.payload_encoding,CASE WHEN json_extract(q.metadata_json,'$.payload_status')='available' THEN substr(CAST({payload_value} AS BLOB),?3+1,?2) ELSE NULL END FROM q JOIN events e ON e.event_seq=q.event_seq WHERE q.event_seq=?1",
                         payload_value =
                             query_index::payload_value("e.event_json", "q.payload_path")
                     );
@@ -465,14 +471,31 @@ impl JournalReader {
                         self.connection
                             .query_row(
                                 &sql,
-                                rusqlite::params![id, limits.preview_bytes as i64],
+                                rusqlite::params![
+                                    id,
+                                    limits.preview_bytes as i64,
+                                    request.arguments.payload_offset
+                                ],
                                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                             )
                             .map_err(|_| Error::storage())?;
                     item["payload"] = if let Some(bytes) = bytes {
-                        let valid = std::str::from_utf8(&bytes)
-                            .map_or_else(|e| e.valid_up_to(), |s| s.len());
-                        json!({"preview":std::str::from_utf8(&bytes[..valid]).map_err(|_|Error::storage())?,"retained_bytes":length,"encoding":encoding,"payload_truncated":length.is_some_and(|n|n>valid as i64)})
+                        let valid = match std::str::from_utf8(&bytes) {
+                            Ok(s) => s.len(),
+                            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+                            Err(_) => {
+                                return Err(Error::invalid(
+                                    "Payload offset must be a UTF-8 boundary from next_offset",
+                                ));
+                            }
+                        };
+                        let offset = u64::from(request.arguments.payload_offset);
+                        let next = offset + valid as u64;
+                        if length.is_some_and(|n| offset > n as u64) {
+                            return Err(Error::invalid("Payload offset exceeds retained bytes"));
+                        }
+                        let more = length.is_some_and(|n| n > next as i64);
+                        json!({"preview":std::str::from_utf8(&bytes[..valid]).map_err(|_|Error::storage())?,"retained_bytes":length,"encoding":encoding,"offset":offset,"next_offset":if more {Some(next)} else {None},"payload_truncated":more})
                     } else {
                         Value::Null
                     };
@@ -574,6 +597,8 @@ fn fit_preview(items: &mut [Value], response: &mut Response, budget: usize) -> b
         let preview = preview[..length].to_string();
         item["payload"]["preview"] = json!(preview);
         item["payload"]["payload_truncated"] = json!(true);
+        let offset = item["payload"]["offset"].as_u64().unwrap_or(0);
+        item["payload"]["next_offset"] = json!(offset + length as u64);
     }
 }
 
