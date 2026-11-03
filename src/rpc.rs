@@ -405,6 +405,31 @@ impl Exchange {
             } else {
                 "unsupported_or_invalid"
             });
+            // Retain only bounded signature lookup parameters, never the raw request body.
+            if valid {
+                let signatures: Vec<&str> = match method {
+                    "getTransaction" => item
+                        .get("params")
+                        .and_then(|p| p.get(0))
+                        .and_then(Value::as_str)
+                        .into_iter()
+                        .collect(),
+                    "getSignatureStatuses" => item
+                        .get("params")
+                        .and_then(|p| p.get(0))
+                        .and_then(Value::as_array)
+                        .filter(|a| a.len() <= 256)
+                        .map(|a| a.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default(),
+                    _ => vec![],
+                };
+                registration_fact["signatures"] = json!(
+                    signatures
+                        .into_iter()
+                        .filter(|s| s.len() <= 88)
+                        .collect::<Vec<_>>()
+                );
+            }
             received.push(registration_fact);
             prepared.push((reference, item, valid));
         }

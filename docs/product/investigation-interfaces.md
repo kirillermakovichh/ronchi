@@ -6,6 +6,19 @@ The [evidence contract](evidence-and-findings.md) owns facts, correlation, Findi
 The [Lab lifecycle](lab-lifecycle.md) owns workspace resolution, process ownership, readiness, and mutation effects.
 All three interfaces call the same core operations against one Lab Journal.
 
+## Implementation status: task 8 in progress
+
+The Rust query core supports finite summary, Timeline, and Evidence Slice metadata queries.
+Schema 6 stores indexed navigation metadata in the same transaction as each Journal event.
+Signed bytes remain in the original event storage.
+Queries use one read-only connection per page and release its SQLite snapshot before returning.
+Cursors bind the immutable Lab, committed watermark, normalized selection, projection, payload choice, and page size.
+Older Journals use a read-only SQL adapter with an explicit correlation gap.
+The core limits concurrent readers to four and cancels SQLite VM work at its deadline.
+Summary reports Findings analysis as `not_performed`; it does not return a fake analysis result.
+CLI/control exposure and explicit payload previews remain unfinished in task 8.
+The sections below retain the full accepted contract.
+
 ## Operations and identity
 
 | Core operation | CLI | MCP tool | Effect |

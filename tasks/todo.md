@@ -189,6 +189,21 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 7. **Scope:** Medium. **Likely files:** `src/query.rs`, `src/journal/query.rs`, `src/api.rs`, `src/cli/investigate.rs`, `tests/investigation.rs`.
 - **Source:** [Investigation interfaces](../docs/product/investigation-interfaces.md).
 
+#### 8a–8b. Storage query core and snapshot pagination
+
+- [x] Add typed summary/Timeline/Evidence Slice selection, storage projection and filters, fixed watermarks, and validated bound cursors without persistent reader snapshots.
+
+- **Observed:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (77 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. Four file-backed query tests cover scoped metadata without payload, fixed-watermark pages during append, changed/damaged cursors, OR/AND and nanosecond time/sequence bounds, mandatory projection context, and explicit unperformed Findings analysis. Existing disk-budget and protocol histories pass.
+- **Review:** Query projection commits with the event. Reader permits stay with blocking workers. Each page releases its snapshot. Signature correlations from later appends are bounded by the pinned watermark. Remaining transport, payload, exact-size and cancellation acceptance work stays in 8c/8d.
+
+#### 8c. CLI/control and historical Lab selection
+
+- [ ] Expose authenticated live queries and read-only retained queries, schemas/help, cancellation, and finite text/JSON output.
+
+#### 8d. Payloads, byte budgets, and completeness
+
+- [ ] Verify exact envelope bounds, payload previews, completeness states, reader cancellation/timeout, pipe closure, and concurrent writes.
+
 ### 9. Evidence-backed Findings
 
 - [ ] **Accept:** Produce stable versioned Findings with supporting references, separate guidance, and explicit Evidence Gaps.

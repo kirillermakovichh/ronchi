@@ -7,6 +7,7 @@ pub mod lab;
 mod network;
 pub mod process;
 pub mod protocol;
+pub mod query;
 pub mod rpc;
 pub mod simulator;
 pub mod workspace;

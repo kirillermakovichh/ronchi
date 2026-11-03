@@ -131,11 +131,11 @@ impl Budget {
             let bytes = encoded
                 .iter()
                 .try_fold(0u64, |n, s| add(n, s.len() as u64))?;
-            // Version-3 event and protocol projections: overflow pages, leaf/interior splits, and fixed metadata.
+            // Event, protocol and query projections: overflow pages, index splits, and fixed metadata.
             let growth = add(
                 add(
-                    bytes.div_ceil(account.page_size - 128),
-                    mul(encoded.len() as u64, 12)?,
+                    mul(bytes, 3)?.div_ceil(account.page_size - 128),
+                    mul(encoded.len() as u64, 32)?,
                 )?,
                 16,
             )?;
@@ -176,11 +176,11 @@ impl Budget {
                 .map_err(io)?
                 .max(4096);
             // Bounded event/transaction/nonce projections at the default 1 GiB quota; no cache spilling.
-            // Reserve 256 dirty frames plus 32 growth pages, SHM and allocation rounding.
+            // Reserve 256 dirty frames plus 64 growth pages, SHM and allocation rounding.
             let liability = add(
                 add(
                     mul(256, account.page_size + 24)?,
-                    mul(32, account.page_size)?,
+                    mul(64, account.page_size)?,
                 )?,
                 add(65536, mul(granularity, 4)?)?,
             )?;
@@ -189,7 +189,7 @@ impl Budget {
                 .checked_add(1)
                 .ok_or(JournalError::DiskBudget)?;
             let id = account.next;
-            account.pending.insert(id, (32, liability, true));
+            account.pending.insert(id, (64, liability, true));
             if let Err(error) = account.check(0, true) {
                 account.pending.remove(&id);
                 return Err(error);
