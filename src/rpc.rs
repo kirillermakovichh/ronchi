@@ -435,7 +435,7 @@ impl Exchange {
             Err(failure) => return http_response(503, Some(error(Value::Null, failure))),
         };
         let binding = registered.binding;
-        let _activation = registered.activation;
+        let activation = registered.activation;
         let registration = binding.registration_seq;
         let batch_size = items.len();
         let mut prepared = Vec::new();
@@ -552,6 +552,7 @@ impl Exchange {
                                     prepared,
                                     reference.clone(),
                                     self.hold.clone(),
+                                    activation.clone(),
                                 )
                                 .await
                         } else {
@@ -592,6 +593,7 @@ impl Exchange {
                         item.get("params").unwrap_or(&Value::Null),
                         reference.clone(),
                         self.hold.clone(),
+                        activation.clone(),
                     )
                     .await
             } else if crate::upstream::READ_METHODS.contains(&method) {
@@ -641,6 +643,29 @@ impl Exchange {
                     item.get("params").unwrap_or(&Value::Null),
                 )
             };
+            let result = if matches!(method, "getSignatureStatuses" | "getTransaction")
+                && crate::cases::status::selected(&binding)
+            {
+                match (result, activation.clone()) {
+                    (Ok(source), Some(activation)) => {
+                        self.rpc
+                            .0
+                            .transactions
+                            .status_view(
+                                method,
+                                item.get("params").unwrap_or(&Value::Null),
+                                source,
+                                reference.clone(),
+                                activation,
+                                self.rpc.0.backend.clone(),
+                            )
+                            .await
+                    }
+                    (result, _) => result,
+                }
+            } else {
+                result
+            };
             let mut fact = reference.clone();
             if self.rpc.0.backend.is_none() {
                 let view = self
@@ -662,6 +687,26 @@ impl Exchange {
             });
             match result {
                 Ok(result) => {
+                    if crate::cases::status::selected(&binding)
+                        && matches!(method, "getSignatureStatuses" | "getTransaction")
+                    {
+                        fact["lookup_boundary_digests"] = if method == "getSignatureStatuses" {
+                            json!(result["value"].as_array().map(|values| {
+                                values
+                                    .iter()
+                                    .map(|value| {
+                                        crate::query::digest(
+                                            &serde_json::to_vec(value).expect("JSON serializes"),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            }))
+                        } else {
+                            json!([crate::query::digest(
+                                &serde_json::to_vec(&result).expect("JSON serializes")
+                            )])
+                        };
+                    }
                     if let Some(source) = &upstream_source {
                         fact["source_identity"] = json!(source);
                         fact["source_result"] = json!({"availability":"separate_source_exchange","kind":if self.rpc.0.backend.is_some(){"rpc.backend"}else{"rpc.upstream"}});

@@ -138,7 +138,7 @@ impl JournalReader {
             rule.matched += 1;
             report.findings.push(Finding {
                 finding_id: format!("f1-{}", crate::query::digest(&serde_json::to_vec(&(lab, signature, request, selection_seq, end_seq, crate::cases::confirmation::finding_definition())).expect("typed identity serializes"))), rule_id: "sim.confirmation-delay.observed".into(), version: 1, lab_id: lab.into(),
-                scope: FindingScope { signature: signature.into(), accepted_request_id: request.into(), from_seq: accepted, to_seq: end_seq },
+                scope: FindingScope::AcceptedTransaction { signature: signature.into(), accepted_request_id: request.into(), from_seq: accepted, to_seq: end_seq },
                 supporting_events: [("acceptance",accepted),("schedule_assignment",selection_seq),("held_commitment",start_seq),("recovery",end_seq)].into_iter().map(|(role,event_seq)| Support { role: role.into(),event_ref: EventRef { lab_id: lab.into(),event_seq } }).collect(),
                 statement: format!("The simulator retained {hold_at} commitment for {} ms before the recorded recovery transition.",(end-start)/1_000_000),
                 guidance: "Inspect the application's commitment deadline and reconciliation behavior in the linked RPC history.".into(),

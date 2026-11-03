@@ -137,6 +137,13 @@ Its stable `f1-` identity includes the maintained rule definition and supporting
 The [confirmation-delay claim](cases.md#verified-simulator-confirmation-delay-claim) defines its tested boundary.
 Findings cursors bind this rule definition as well as the response-loss definitions.
 
+The independent `rpc.lookup-view.changed@1` rule supports simulator and owned Surfpool lookup evidence.
+It joins acceptance, authoritative source, selected replacement, prepared result digest, and completed transport facts for the same signature and request.
+Stale conclusions additionally require the cited captured view in the selected scope.
+A source-only lookup, an already-null result, a notification, or a missing prerequisite cannot establish that Finding.
+The [null and stale lookup claim](cases.md#verified-null-and-stale-lookup-claim) records its tested limits.
+Findings cursors also bind this maintained rule definition.
+
 A shared batch boundary is not a separately selected Fault for each sibling element.
 These initial patterns require the identity's own selected Fault and withholding observation.
 

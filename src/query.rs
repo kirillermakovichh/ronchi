@@ -538,6 +538,7 @@ impl Request {
                     crate::findings::Rule::SubmissionAfterWithholding.definition(),
                 ],
                 crate::cases::confirmation::finding_definition(),
+                crate::cases::status::finding_definition(),
             ))
             .expect("typed request serializes"),
         )

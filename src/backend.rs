@@ -149,6 +149,13 @@ impl Client {
             ),
         })
     }
+    pub(crate) fn redact(&self, value: &Value) -> (Value, bool) {
+        self.0
+            .redactor
+            .as_ref()
+            .map(|redactor| redactor.redact(value))
+            .unwrap_or_else(|| (value.clone(), false))
+    }
     pub(crate) fn source_facts(
         &self,
         method: &str,
@@ -257,6 +264,7 @@ mod tests {
                     .unwrap(),
                 reference.clone(),
                 Default::default(),
+                None,
             )
             .await
             .unwrap_err();
@@ -272,6 +280,7 @@ mod tests {
                     .unwrap(),
                 second,
                 Default::default(),
+                None,
             )
             .await
             .unwrap();
@@ -291,3 +300,7 @@ mod tests {
             .unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "backend/status_tests.rs"]
+mod status_tests;

@@ -234,6 +234,15 @@ impl JournalReader {
         if self.version < 6 {
             report.gaps.push("Legacy correlation may be missing; associations are not reconstructed by inference".into());
         }
+        self.status_findings(
+            selected_cte,
+            values,
+            lab,
+            snapshot,
+            deadline,
+            cancel,
+            &mut report,
+        )?;
         self.confirmation_findings(
             selected_cte,
             values,
@@ -263,6 +272,8 @@ impl JournalReader {
 }
 #[path = "findings/confirmation.rs"]
 mod confirmation;
+#[path = "findings/status.rs"]
+mod status;
 type RowData = (u64, String, String, String);
 fn row_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<RowData> {
     Ok((

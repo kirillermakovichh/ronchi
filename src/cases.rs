@@ -10,6 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 pub mod confirmation;
+pub mod status;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +24,8 @@ pub struct Arm {
     pub signatures: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmation: Option<confirmation::Delay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<status::Settings>,
 }
 fn default_hold() -> u64 {
     20_000
@@ -38,6 +41,7 @@ impl Default for Arm {
             max_held: default_capacity(),
             signatures: vec![],
             confirmation: None,
+            status: None,
         }
     }
 }
@@ -47,6 +51,8 @@ impl Arm {
             "tx-response-lost",
             "tx-confirmation-stalls",
             "finality-delayed",
+            "signature-status-null",
+            "stale-transaction-read-after-submission",
         ]
         .contains(&self.case_id.as_str())
         {
@@ -70,6 +76,15 @@ impl Arm {
                 ));
             }
             delay.validate()?;
+        }
+        if let Some(status) = &self.status {
+            if !matches!(
+                self.case_id.as_str(),
+                "signature-status-null" | "stale-transaction-read-after-submission"
+            ) {
+                return Err(RpcError::params("Status settings require a status Case"));
+            }
+            status.validate()?;
         }
         Ok(())
     }
@@ -97,7 +112,9 @@ pub struct Binding {
 }
 /// Activation state follows registered exchanges, independently of later replacements.
 #[derive(Debug, Default)]
-pub(crate) struct Activation {}
+pub(crate) struct Activation {
+    pub status: Mutex<status::Cache>,
+}
 pub(crate) struct Registration {
     pub binding: Binding,
     pub activation: Option<Arc<Activation>>,
@@ -325,11 +342,18 @@ pub fn catalog() -> Vec<CatalogEntry> {
         "tx-response-lost",
         "tx-confirmation-stalls",
         "finality-delayed",
+        "signature-status-null",
+        "stale-transaction-read-after-submission",
     ]
     .into_iter()
     .map(|case_id| CatalogEntry {
         case_id: case_id.into(),
-        modes: if case_id == "tx-response-lost" {
+        modes: if matches!(
+            case_id,
+            "tx-response-lost"
+                | "signature-status-null"
+                | "stale-transaction-read-after-submission"
+        ) {
             vec!["simulator".into(), "surfpool".into()]
         } else {
             vec!["simulator".into()]

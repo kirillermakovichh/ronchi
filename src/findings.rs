@@ -137,12 +137,24 @@ pub struct Support {
     pub event_ref: EventRef,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct FindingScope {
-    pub signature: String,
-    pub accepted_request_id: String,
-    pub from_seq: u64,
-    pub to_seq: u64,
+#[serde(untagged)]
+pub enum FindingScope {
+    AcceptedTransaction {
+        signature: String,
+        accepted_request_id: String,
+        from_seq: u64,
+        to_seq: u64,
+    },
+    RpcRequest {
+        request_id: String,
+        rpc_method: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+        from_seq: u64,
+        to_seq: u64,
+    },
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct Finding {
     pub finding_id: String,
@@ -312,7 +324,7 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
         event_ref: fact.event_ref.clone(),
     })
     .collect();
-    let scope = FindingScope {
+    let scope = FindingScope::AcceptedTransaction {
         signature: signature.clone(),
         accepted_request_id: acceptance.request_id.clone(),
         from_seq: submission.event_ref.event_seq,

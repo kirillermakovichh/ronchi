@@ -25,6 +25,7 @@ pub const TRANSACTION_METHODS: [&str; 4] = [
     "getFeeForMessage",
 ];
 const MAX_ACTIVE: usize = 128;
+mod status;
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendConfig {
@@ -54,12 +55,19 @@ enum Operation {
         crate::protocol::fees::FeeMessage,
         crate::rpc::methods::ContextConfig,
     ),
-    Submit(SignedTransaction, Value, std::sync::Arc<crate::cases::Hold>),
+    Submit(
+        SignedTransaction,
+        Value,
+        std::sync::Arc<crate::cases::Hold>,
+        Option<std::sync::Arc<crate::cases::Activation>>,
+    ),
+    StatusView(Box<status::Read>),
     BackendSubmit(
         crate::backend::Client,
         crate::backend::Prepared,
         Value,
         std::sync::Arc<crate::cases::Hold>,
+        Option<std::sync::Arc<crate::cases::Activation>>,
     ),
     Register,
     Change(Option<crate::cases::Arm>),
@@ -91,6 +99,7 @@ pub(crate) struct Owner {
     holds: std::sync::Arc<crate::cases::HoldPool>,
     credits: BTreeMap<String, Vec<TransitionReservation>>,
     backend: bool,
+    status_activations: BTreeMap<String, std::sync::Weak<crate::cases::Activation>>,
 }
 impl Transactions {
     pub(crate) fn channel(
@@ -117,6 +126,7 @@ impl Transactions {
                 holds,
                 credits: BTreeMap::new(),
                 backend: false,
+                status_activations: BTreeMap::new(),
             },
         )
     }
@@ -127,6 +137,7 @@ impl Transactions {
         params: &Value,
         reference: Value,
         hold: std::sync::Arc<crate::cases::Hold>,
+        activation: Option<std::sync::Arc<crate::cases::Activation>>,
     ) -> Result<Value, RpcError> {
         let args = crate::rpc::methods::positional(params)?;
         let operation = match method {
@@ -185,7 +196,7 @@ impl Transactions {
                 })
                 .await
                 .map_err(|_| RpcError::internal())??;
-                Operation::Submit(signed, reference, hold)
+                Operation::Submit(signed, reference, hold, activation)
             }
             "getSignatureStatuses" => {
                 if args.is_empty() || args.len() > 2 {
@@ -245,9 +256,31 @@ impl Transactions {
         prepared: crate::backend::Prepared,
         reference: Value,
         hold: std::sync::Arc<crate::cases::Hold>,
+        activation: Option<std::sync::Arc<crate::cases::Activation>>,
     ) -> Result<Value, RpcError> {
-        self.job(Operation::BackendSubmit(client, prepared, reference, hold))
-            .await
+        self.job(Operation::BackendSubmit(
+            client, prepared, reference, hold, activation,
+        ))
+        .await
+    }
+    pub(crate) async fn status_view(
+        &self,
+        method: &str,
+        params: &Value,
+        source: Value,
+        reference: Value,
+        activation: std::sync::Arc<crate::cases::Activation>,
+        backend: Option<crate::backend::Client>,
+    ) -> Result<Value, RpcError> {
+        self.job(Operation::StatusView(Box::new(status::Read {
+            method: method.into(),
+            params: params.clone(),
+            source,
+            reference,
+            activation,
+            backend,
+        })))
+        .await
     }
     pub(crate) async fn register(&self) -> Result<crate::cases::Registration, RpcError> {
         match self.ask(Operation::Register).await? {
@@ -343,6 +376,7 @@ impl Owner {
         signed: SignedTransaction,
         reference: Value,
         hold: std::sync::Arc<crate::cases::Hold>,
+        activation: Option<std::sync::Arc<crate::cases::Activation>>,
     ) -> Result<Value, RpcError> {
         let signature = signed.signature.clone();
         let key = signature.clone();
@@ -484,6 +518,7 @@ impl Owner {
             nonce_context,
             admission_request: reference.clone(),
         };
+        let status_stale = self.status_admit(&activation, &signature, &reference, accepted)?;
         let mut data = serde_json::to_value(&record).map_err(|_| RpcError::internal())?;
         data["preflight"] = json!("skipped");
         data["execution"] = json!("not_performed");
@@ -502,6 +537,10 @@ impl Owner {
             facts.push(crate::lab::event("fault.response_loss_selected",self.started,json!({"signature":signature,"request":reference,"policy":binding.policy,"consumed":true})));
         }
         self.append(facts).await.map_err(|_| RpcError::internal())?;
+        if status_stale && let Some(activation) = activation {
+            self.status_activations
+                .insert(signature.clone(), std::sync::Arc::downgrade(&activation));
+        }
         self.credits.insert(signature.clone(), credits);
         if selected && hold.deadline().is_none() {
             let hold_ms = binding
@@ -526,6 +565,7 @@ impl Owner {
         prepared: crate::backend::Prepared,
         reference: Value,
         hold: std::sync::Arc<crate::cases::Hold>,
+        activation: Option<std::sync::Arc<crate::cases::Activation>>,
     ) -> Result<Value, RpcError> {
         let signed = prepared.signed.ok_or_else(RpcError::internal)?;
         let signature = signed.signature.clone();
@@ -559,6 +599,17 @@ impl Owner {
             )
             .await?;
         }
+        let status_reserved = if existing.is_none() {
+            self.status_admit(
+                &activation,
+                &signature,
+                &reference,
+                self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64,
+            )?;
+            crate::cases::status::matches(&binding, &signature)
+        } else {
+            false
+        };
         let mut dispatch = crate::lab::event(
             "rpc.backend_started",
             self.started,
@@ -580,10 +631,30 @@ impl Owner {
         self.append(source)
             .await
             .map_err(|_| RpcError::internal())?;
-        let result = result?;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if status_reserved && let Some(activation) = &activation {
+                    activation
+                        .status
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&signature);
+                }
+                return Err(error);
+            }
+        };
         if result != signature {
             self.writer.fail_fatal();
             return Err(RpcError::internal());
+        }
+        let accepted_elapsed = self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64;
+        if status_reserved && let Some(activation) = &activation {
+            activation
+                .status
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .accepted(&signature, accepted_elapsed);
         }
         let mut attempt = crate::lab::event(
             "transaction.submission",
@@ -593,7 +664,7 @@ impl Owner {
         attempt.execution_mode = crate::config::Mode::Surfpool;
         let mut facts = vec![attempt];
         if existing.is_none() {
-            let data = json!({"signature":signature,"digest":signed.digest,"wire_base64":signed.wire_base64,"version":signed.version,"blockhash":signed.blockhash,"admission_request":reference,"accepted_elapsed_ns":self.started.elapsed().as_nanos().min(i64::MAX as u128)as u64,"authority":"execution_backend","source_identity":client.authority(),"next_due_ns":null,"execution":"backend_acceptance_only"});
+            let data = json!({"signature":signature,"digest":signed.digest,"wire_base64":signed.wire_base64,"version":signed.version,"blockhash":signed.blockhash,"admission_request":reference,"accepted_elapsed_ns":accepted_elapsed,"authority":"execution_backend","source_identity":client.authority(),"next_due_ns":null,"execution":"backend_acceptance_only"});
             let mut fact = crate::lab::event("transaction.accepted", self.started, data);
             fact.execution_mode = crate::config::Mode::Surfpool;
             fact.source = "surfpool".into();
@@ -691,7 +762,18 @@ impl Owner {
                 }
                 _ => return Err(JournalError::InvalidInput),
             }
-            let data = json!({"signature":record.signature,"stage":record.stage,"processed_slot":record.processed_slot,"processed_height":record.processed_height,"next_due_ns":record.next_due_ns,"scheduled_transition_ns":due,"observed_simulated_ns":self.clock.elapsed().as_nanos().min(i64::MAX as u128) as u64,"reason":reason,"nonce_advance":nonce_advance});
+            let mut data = json!({"signature":record.signature,"stage":record.stage,"processed_slot":record.processed_slot,"processed_height":record.processed_height,"next_due_ns":record.next_due_ns,"scheduled_transition_ns":due,"observed_simulated_ns":self.clock.elapsed().as_nanos().min(i64::MAX as u128) as u64,"reason":reason,"nonce_advance":nonce_advance});
+            if record.stage == Phase::Processed
+                && self.status_activations.contains_key(&record.signature)
+            {
+                let observed = data["observed_simulated_ns"].as_u64().unwrap_or(0);
+                let view = self
+                    .clock
+                    .view_at(Duration::from_nanos(observed), Commitment::Processed);
+                data["source_identity"] = json!(format!("simulator:{}", self.clock.genesis_hash()));
+                data["status_view"] = json!({"slot":record.processed_slot,"confirmations":view.block_height.saturating_sub(record.processed_height.unwrap_or(view.block_height)),"err":null,"status":{"Ok":null},"confirmationStatus":"processed"});
+            }
+            let observation = data.clone();
             let mut fact = crate::lab::event("transaction.transition", self.started, data);
             fact.source = "rpc_simulator".into();
             let reservation = self
@@ -705,7 +787,9 @@ impl Owner {
             })
             .await
             .map_err(|_| JournalError::WriterFailed)??;
-            receipt.committed().await?;
+            let transition_seq = receipt.committed().await?;
+            self.status_transition(&record, transition_seq, &observation)
+                .map_err(|_| JournalError::WriterFailed)?;
             if record.next_due_ns.is_none() {
                 self.credits.remove(&record.signature);
             }
@@ -713,8 +797,10 @@ impl Owner {
     }
     async fn query(&mut self, operation: Operation, at: Duration) -> Result<Reply, RpcError> {
         let result = match operation {
-            Operation::BackendSubmit(client, prepared, reference, hold) => {
-                self.backend_submit(client, prepared, reference, hold).await
+            Operation::StatusView(read) => self.status_view(*read).await,
+            Operation::BackendSubmit(client, prepared, reference, hold, activation) => {
+                self.backend_submit(client, prepared, reference, hold, activation)
+                    .await
             }
             Operation::Fee(message, cfg) => {
                 let view = self.clock.view_at(at, cfg.commitment.unwrap_or_default());
@@ -744,8 +830,8 @@ impl Owner {
                 let value = valid.then_some(fee);
                 Ok(json!({"context":{"slot":view.slot},"value":value}))
             }
-            Operation::Submit(signed, reference, hold) => {
-                self.submit(signed, reference, hold).await
+            Operation::Submit(signed, reference, hold, activation) => {
+                self.submit(signed, reference, hold, activation).await
             }
             Operation::Register => {
                 self.binding.registration_seq = self

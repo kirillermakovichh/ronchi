@@ -179,6 +179,12 @@ enum CaseCommand {
         max_held: u16,
         #[arg(long = "signature")]
         signatures: Vec<String>,
+        /// Lower the status Case identity ceiling (maximum 1024)
+        #[arg(long)]
+        status_max_keys: Option<u16>,
+        /// Lower the status Case serialized state budget (1024..4194304 bytes)
+        #[arg(long)]
+        status_max_snapshot_bytes: Option<usize>,
     },
     /// Disarm for later registrations; held requests retain their deadlines
     Disarm,
@@ -482,8 +488,10 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 value["rule_schema"] =
                     serde_json::to_value(schemars::schema_for!(findings::Definition))
                         .expect("typed schema serializes");
-                value["maintained_case_rules"] =
-                    serde_json::json!([cases::confirmation::finding_definition()]);
+                value["maintained_case_rules"] = serde_json::json!([
+                    cases::confirmation::finding_definition(),
+                    cases::status::finding_definition()
+                ]);
             }
             match write_output(true, &value, "", false) {
                 Ok(()) => 0,
@@ -656,12 +664,20 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     hold_ms,
                     max_held,
                     signatures,
+                    status_max_keys,
+                    status_max_snapshot_bytes,
                 } => Some(cases::Arm {
                     case_id: case,
                     hold_ms,
                     max_held,
                     signatures,
                     confirmation: None,
+                    status: (status_max_keys.is_some() || status_max_snapshot_bytes.is_some())
+                        .then(|| cases::status::Settings {
+                            max_keys: status_max_keys.unwrap_or(1024),
+                            max_snapshot_bytes: status_max_snapshot_bytes
+                                .unwrap_or(4 * 1024 * 1024),
+                        }),
                 }),
                 _ => None,
             };

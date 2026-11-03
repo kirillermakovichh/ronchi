@@ -1725,3 +1725,6 @@ async fn investigation_correlates_http_signature_lookups_and_exposes_signed_byte
         .await;
     assert!(server.stop(false).await);
 }
+
+#[path = "cases/status.rs"]
+mod status_cases;

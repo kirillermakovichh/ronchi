@@ -296,6 +296,50 @@ Findings can explain that an available source result was hidden or that an older
 They can link a later query or same-signature resubmission.
 Neither variant establishes rejection, an abandoned intent, a client retry policy, or a real consensus regression.
 
+### Verified null and stale lookup claim
+
+Task 19 implements `signature-status-null` and `stale-transaction-read-after-submission` in both modes.
+Both retain the default 10-second windows above.
+Optional typed `status` settings can lower `max_keys` from 1,024 and `max_snapshot_bytes` from 4 MiB.
+The CLI exposes the same settings as `--status-max-keys` and `--status-max-snapshot-bytes` on `case arm`.
+The byte bound charges each admitted key 1 KiB and accounts for serialized snapshot content beyond its reserved allowance.
+One captured status entry is limited to 16 KiB.
+These bounds are provisional resource defaults, not measured memory or throughput claims.
+Capacity errors occur before selecting a new Fault.
+Existing acceptance and lifecycle records remain authoritative.
+
+A registration retains its activation state until that exchange finishes.
+Replacing or disarming the Case changes later registrations.
+It does not change a registered read's selection.
+Duplicates preserve their original acceptance window.
+An identity first accepted under an older activation is not selected by rearming the Case.
+Signature filters preserve unselected entries.
+Read notifications can observe a source view but never record a changed response Fault.
+
+The simulator records its first available processed view in the committed lifecycle transition.
+Its capture timestamp is the actual simulator observation time, separate from the scheduled transition time.
+Surfpool captures only a collected `getSignatureStatuses` entry.
+A `getTransaction` result alone does not establish exact backend finality.
+Until a status snapshot exists, transaction reads keep the authoritative result and record `snapshot_unavailable`.
+If the first collected backend status is finalized, Ronchi retains that finalized view.
+It does not manufacture an earlier commitment.
+
+`rpc.lookup_source` records source authority, source identity, query context, entry index, and availability before a boundary transform.
+`fault.lookup_changed` links that source fact to the selected replacement and any captured view.
+Prepared per-entry result digests and the separate transport boundary confirm the recorded output.
+Version negotiation, transaction encoding, supported commitments, unavailable recent history, and ordinary query errors keep their base handling.
+A frozen transaction lookup is `null` until the captured view satisfies its requested commitment.
+At an eligible commitment, Ronchi uses the same signature's actual retained content.
+
+The version-1 `rpc.lookup-view.changed` Finding requires acceptance under the selected activation, an available source view, a changed lookup, its prepared digest, and a completed server boundary within the selected scope.
+A stale Finding also requires its actual captured source fact within that scope.
+The Finding does not establish client receipt, rejection, business intent, retry policy, or production consensus.
+
+Controlled-clock HTTP histories verify per-identity recovery, source progression, mixed order, unknown identities, snapshot provenance, query constraints, replacement, filtering, notifications, and resource bounds.
+A controlled backend HTTP adapter verifies a confirmed snapshot followed by a finalized source view.
+Pinned native Surfpool verification uses an explicit isolated funded snapshot.
+It verifies actual transfers during masking, recovery without window restart, missing-snapshot passthrough, genuine first finality capture, retained Findings, and owned cleanup.
+
 ### Stalled confirmation
 
 In simulator mode, `tx-confirmation-stalls` assigns a schedule to each new transaction first accepted under its activation.

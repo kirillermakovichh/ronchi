@@ -514,3 +514,234 @@ fn offline_installer_rejects_fifo_without_waiting_for_a_writer() {
     assert_eq!(output.status.code(), Some(5), "{output:?}");
     assert!(!p.path().join("ronchi").exists());
 }
+
+#[test]
+fn real_status_cases_preserve_native_execution_and_first_observed_finality() {
+    use ed25519_dalek::SigningKey;
+    use serde_json::json;
+    use std::time::{Duration, Instant};
+    let Some(archive) = archive() else {
+        eprintln!("native status evidence requires RONCHI_TEST_SURFPOOL_ARCHIVE");
+        return;
+    };
+    let p = Project::new();
+    let payer = bs58::encode(
+        SigningKey::from_bytes(&[134; 32])
+            .verifying_key()
+            .to_bytes(),
+    )
+    .into_string();
+    funded_snapshot(&p, &payer);
+    install(&p, &archive);
+    let ready = p.ok(&[
+        "up",
+        "--mode",
+        "surfpool",
+        "--rpc-listen",
+        "127.0.0.1:0",
+        "--control-listen",
+        "127.0.0.1:0",
+    ]);
+    let id = ready["lab_id"].as_str().unwrap();
+    let address = ready["result"]["rpc_address"].as_str().unwrap();
+    p.ok(&["case", "arm", "signature-status-null"]);
+    let hash = rpc(address, "getLatestBlockhash", json!([]))["result"]["value"]["blockhash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (signature, wire) = transfer(&hash, 134, [135; 32]);
+    assert_eq!(
+        rpc(
+            address,
+            "sendTransaction",
+            json!([wire,{"encoding":"base64"}])
+        )["result"],
+        signature
+    );
+    let recipient = bs58::encode([135; 32]).into_string();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if rpc(address, "getBalance", json!([recipient]))["result"]["value"] == 1_000_000u64 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let unknown = bs58::encode([136; 64]).into_string();
+    assert_eq!(
+        rpc(
+            address,
+            "getSignatureStatuses",
+            json!([[signature, unknown, signature]])
+        )["result"]["value"],
+        json!([null, null, null])
+    );
+    assert!(
+        rpc(
+            address,
+            "getTransaction",
+            json!([signature,{"commitment":"confirmed"}])
+        )["result"]
+            .is_null()
+    );
+    let duplicate = rpc(
+        address,
+        "sendTransaction",
+        json!([wire,{"encoding":"base64"}]),
+    );
+    assert!(duplicate["result"] == signature || duplicate.get("error").is_some());
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let status = rpc(address, "getSignatureStatuses", json!([[signature]]));
+        if status["result"]["value"][0].is_object() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{status}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    p.ok(&["case", "arm", "stale-transaction-read-after-submission"]);
+    let hash = rpc(address, "getLatestBlockhash", json!([]))["result"]["value"]["blockhash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (stale, wire) = transfer(&hash, 134, [137; 32]);
+    assert_eq!(
+        rpc(
+            address,
+            "sendTransaction",
+            json!([wire,{"encoding":"base64"}])
+        )["result"],
+        stale
+    );
+    let recipient = bs58::encode([137; 32]).into_string();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if rpc(address, "getBalance", json!([recipient]))["result"]["value"] == 1_000_000u64 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let transaction = rpc(
+        address,
+        "getTransaction",
+        json!([stale,{"commitment":"confirmed","encoding":"base64"}]),
+    );
+    assert!(
+        transaction["result"].is_object(),
+        "no status snapshot exists yet: {transaction}"
+    );
+    let first =
+        rpc(address, "getSignatureStatuses", json!([[stale]]))["result"]["value"][0].clone();
+    assert!(first.is_object());
+    let again = rpc(
+        address,
+        "getSignatureStatuses",
+        json!([[stale, unknown, stale]]),
+    );
+    assert_eq!(again["result"]["value"], json!([first, null, first]));
+    let finalized = rpc(
+        address,
+        "getTransaction",
+        json!([stale,{"commitment":"finalized","encoding":"base64"}]),
+    );
+    if first["confirmationStatus"] != "finalized" {
+        assert!(finalized["result"].is_null());
+    }
+    p.ok(&["case", "disarm"]);
+    assert_eq!(
+        rpc(address, "getBalance", json!([payer]))["result"]["value"],
+        997_990_000u64
+    );
+    p.ok(&["down"]);
+    let reader = ronchi::journal::JournalReader::open(
+        &p.path().join("ronchi/labs").join(id).join("journal.sqlite"),
+    )
+    .unwrap();
+    let mut source = 0;
+    let mut changed = 0;
+    let mut missing_snapshot = false;
+    for seq in 1..=reader.snapshot(false).unwrap().snapshot_seq {
+        let event = reader.event(seq).unwrap().unwrap();
+        if event.kind == "rpc.lookup_source" {
+            source += 1;
+            assert_eq!(event.source, "surfpool");
+        }
+        if event.kind == "fault.lookup_changed" {
+            changed += 1;
+            assert_eq!(event.execution_mode, ronchi::config::Mode::Surfpool);
+        }
+        if event.kind == "lookup.selection_skipped"
+            && event.data["reason"] == "snapshot_unavailable"
+        {
+            missing_snapshot = true;
+        }
+    }
+    assert!(source >= 4);
+    assert!(changed >= 3);
+    assert!(missing_snapshot);
+    let findings = p.ok(&["--lab-id", id, "investigate", "findings", "--limit", "5"]);
+    assert!(
+        findings["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["rule_id"] == "rpc.lookup-view.changed"),
+        "{findings}"
+    );
+}
+
+#[test]
+fn status_cli_limits_share_core_validation_and_leave_previous_policy_armed() {
+    let p = Project::new();
+    p.ok(&[
+        "up",
+        "--rpc-listen",
+        "127.0.0.1:0",
+        "--control-listen",
+        "127.0.0.1:0",
+    ]);
+    let armed = p.ok(&[
+        "case",
+        "arm",
+        "signature-status-null",
+        "--status-max-keys",
+        "1",
+        "--status-max-snapshot-bytes",
+        "1024",
+    ]);
+    assert_eq!(armed["result"]["active_case"]["status"]["max_keys"], 1);
+    assert_eq!(
+        armed["result"]["active_case"]["status"]["max_snapshot_bytes"],
+        1024
+    );
+    for args in [
+        vec![
+            "case",
+            "arm",
+            "signature-status-null",
+            "--status-max-keys",
+            "0",
+        ],
+        vec![
+            "case",
+            "arm",
+            "signature-status-null",
+            "--status-max-snapshot-bytes",
+            "4194305",
+        ],
+        vec!["case", "arm", "tx-response-lost", "--status-max-keys", "1"],
+    ] {
+        let out = p.run(&args);
+        assert_eq!(out.status.code(), Some(2), "{out:?}");
+        let error: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(error["error"]["code"], "invalid_argument");
+    }
+    let status = p.ok(&["status"]);
+    assert_eq!(
+        status["result"]["active_case"]["case_id"],
+        "signature-status-null"
+    );
+    assert_eq!(status["result"]["active_case"]["status"]["max_keys"], 1);
+    p.ok(&["down"]);
+}
