@@ -77,19 +77,31 @@ fn scalar(text: String, style: TScalarStyle, path: &str) -> Result<Value, Valida
             "Null scalar values are not supported",
         ));
     }
-    let digits = text.trim_start_matches(['+', '-']);
-    if !digits.is_empty()
-        && digits.bytes().all(|b| b.is_ascii_digit())
-        && text.parse::<i64>().is_err()
-    {
-        return Err(error(
-            "limit_exceeded",
-            path,
-            "Integer exceeds the bounded input range",
-        ));
+    let decimal = text.strip_prefix(['+', '-']).unwrap_or(&text);
+    let integer = if !decimal.is_empty() && decimal.bytes().all(|b| b.is_ascii_digit()) {
+        Some(text.parse::<i64>())
+    } else if let Some(digits) = text.strip_prefix("0x") {
+        (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| i64::from_str_radix(digits, 16))
+    } else if let Some(digits) = text.strip_prefix("0o") {
+        (!digits.is_empty() && digits.bytes().all(|b| matches!(b, b'0'..=b'7')))
+            .then(|| i64::from_str_radix(digits, 8))
+    } else {
+        None
+    };
+    if let Some(integer) = integer {
+        return integer.map(|number| json!(number)).map_err(|_| {
+            error(
+                "limit_exceeded",
+                path,
+                "Integer exceeds the bounded input range",
+            )
+        });
     }
     match Yaml::from_str(&text) {
-        Yaml::Integer(number) => Ok(json!(number)),
+        // The loader accepts extra Rust integer syntax, such as 0x-1 and +-1.
+        // Core YAML integer spellings were classified above.
+        Yaml::Integer(_) => Ok(Value::String(text)),
         Yaml::Boolean(value) => Ok(json!(value)),
         Yaml::String(value) => Ok(Value::String(value)),
         Yaml::Real(_) => Err(error(
@@ -643,10 +655,10 @@ fn semantics(artifact: &Artifact, mode: Mode) -> Result<(), ValidationError> {
                 "Blockhash capture requires the case state key",
             ));
         }
-        if !methods
-            .iter()
-            .any(|method| accepts_method(&step.using, method, &artifact.state.key))
-        {
+        if !methods.iter().any(|method| {
+            accepts_method(&step.using, method, &artifact.state.key)
+                && (artifact.filter.signatures.is_empty() || SIGNED_METHODS.contains(method))
+        }) {
             return Err(error(
                 "invalid_filter",
                 &format!("{path}.using"),

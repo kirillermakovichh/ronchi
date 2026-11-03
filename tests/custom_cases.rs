@@ -9,6 +9,16 @@ fn artifact() -> Value {
 fn validate(value: &Value) -> Result<custom::Plan, ValidationError> {
     custom::validate(&value.to_string(), Mode::Simulator)
 }
+fn one_step(primitive: &str, method: &str, key: &str) -> Value {
+    let mut value = artifact();
+    value["requires"] = json!({"primitives":[primitive]});
+    value["filter"]["methods"] = json!([method]);
+    value["state"]["key"] = json!(key);
+    value["sequence"] =
+        json!([{"id":"select","using":primitive,"until":{"matches":1},"next":"done"}]);
+    value.as_object_mut().unwrap().remove("findings");
+    value
+}
 #[test]
 fn resolves_inspectable_composite_plan_without_effects() {
     let plan = validate(&artifact()).unwrap();
@@ -152,6 +162,41 @@ fn rejects_yaml_features_before_they_can_change_the_artifact() {
         .is_ok()
     );
 }
+
+#[test]
+fn yaml_core_integer_forms_have_the_same_bounded_semantics() {
+    for number in [
+        "0x8000000000000000",
+        "0o1000000000000000000000",
+        "9223372036854775808",
+        "-9223372036854775809",
+    ] {
+        let source = YAML.replace("revision: \"1\"", &format!("revision: {number}"));
+        let error = custom::validate(&source, Mode::Simulator).unwrap_err();
+        assert_eq!(error.category, "limit_exceeded", "{number}: {error}");
+        assert_eq!(error.path, "revision");
+    }
+    // Several leading signs form a string under YAML 1.2, rather than an integer.
+    let source = YAML.replace("revision: \"1\"", "revision: --1");
+    assert_eq!(
+        custom::validate(&source, Mode::Simulator)
+            .unwrap()
+            .artifact
+            .revision,
+        "--1"
+    );
+    for spelling in ["0x-1", "0o+1", "+-1"] {
+        let source = format!("{YAML}\ndescription: {spelling}\n");
+        assert_eq!(
+            custom::validate(&source, Mode::Simulator)
+                .unwrap()
+                .artifact
+                .description
+                .as_deref(),
+            Some(spelling)
+        );
+    }
+}
 #[test]
 fn every_stable_validation_category_has_a_specific_bounded_failure() {
     let mut v = artifact();
@@ -255,4 +300,215 @@ fn positive_repetition_is_bounded_reachable_and_has_no_zero_time_cycle() {
     let mut invalid = artifact();
     invalid["sequence"][0]["until"] = json!({"matches":1,"elapsed_ms":1,"clock":"real"});
     failure(invalid, "invalid_sequence", "sequence[0].until");
+}
+
+#[test]
+fn every_published_primitive_resolves_catalog_defaults_and_rejects_extra_arguments() {
+    let catalog = custom::catalog();
+    let entries = catalog["primitives"].as_array().unwrap();
+    assert_eq!(entries.len(), 7);
+    for entry in entries {
+        let id = entry["id"].as_str().unwrap();
+        let method = entry["methods"][0].as_str().unwrap();
+        let value = one_step(id, method, "case");
+        let plan = validate(&value).unwrap_or_else(|error| panic!("{id}: {error}"));
+        let arguments = entry["arguments"].as_object().unwrap();
+        for (name, spec) in arguments {
+            assert_eq!(plan.artifact.sequence[0].with[name], spec["default"]);
+            let mut explicit = value.clone();
+            explicit["sequence"][0]["with"] = json!({});
+            if name == "hold_at" {
+                for hold_at in ["processed", "confirmed"] {
+                    explicit["sequence"][0]["with"][name] = json!(hold_at);
+                    assert!(validate(&explicit).is_ok(), "{id}/{name}={hold_at}");
+                }
+                explicit["sequence"][0]["with"][name] = json!("finalized");
+                failure(explicit, "invalid_sequence", "sequence[0].with.hold_at");
+            } else {
+                for bound in [1, 120000] {
+                    explicit["sequence"][0]["with"][name] = json!(bound);
+                    assert!(validate(&explicit).is_ok(), "{id}/{name}={bound}");
+                }
+                for invalid in [0, 120001] {
+                    explicit["sequence"][0]["with"][name] = json!(invalid);
+                    failure(explicit.clone(), "limit_exceeded", "sequence[0].with");
+                }
+            }
+        }
+        let mut unknown = value;
+        unknown["sequence"][0]["with"] = json!({"provider_script":"ignored"});
+        failure(unknown, "unknown_field", "sequence[0].with.provider_script");
+        assert_eq!(entry["argument_schema"]["additionalProperties"], false);
+        for (name, spec) in arguments {
+            assert_eq!(
+                entry["argument_schema"]["properties"][name]["default"],
+                spec["default"]
+            );
+        }
+    }
+}
+
+#[test]
+fn stage_filters_state_keys_and_modes_match_the_registered_capabilities() {
+    let mut composite = one_step(
+        "rpc.withhold-submission-response@1",
+        "sendTransaction",
+        "transaction_signature",
+    );
+    composite["requires"]["primitives"] =
+        json!(["rpc.withhold-submission-response@1", "observe.rpc@1"]);
+    composite["filter"]["methods"] = json!(["sendTransaction", "getTransaction"]);
+    composite["sequence"][0]["next"] = json!("lookup");
+    composite["sequence"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id":"lookup","using":"observe.rpc@1","until":{"matches":1},"next":"done"}));
+    assert!(validate(&composite).is_ok());
+    for primitive in [
+        "rpc.withhold-submission-response@1",
+        "sim.confirmation-delay@1",
+    ] {
+        failure(
+            one_step(primitive, "getTransaction", "case"),
+            "invalid_filter",
+            "sequence[0].using",
+        );
+        assert!(validate(&one_step(primitive, "sendTransaction", "case")).is_ok());
+    }
+    failure(
+        one_step(
+            "rpc.blockhash-reuse@1",
+            "getLatestBlockhash",
+            "transaction_signature",
+        ),
+        "invalid_filter",
+        "state.key",
+    );
+    failure(
+        one_step("observe.rpc@1", "getHealth", "transaction_signature"),
+        "invalid_filter",
+        "sequence[0].using",
+    );
+    for method in ["getHealth", "getGenesisHash"] {
+        let mut value = one_step("observe.rpc@1", method, "case");
+        value["filter"]["commitments"] = json!(["confirmed"]);
+        failure(value, "invalid_filter", "filter.commitments");
+    }
+    let mut unrestricted = one_step("observe.rpc@1", "getHealth", "case");
+    unrestricted["filter"]
+        .as_object_mut()
+        .unwrap()
+        .remove("methods");
+    unrestricted["filter"]["commitments"] = json!(["processed", "confirmed", "finalized"]);
+    assert!(validate(&unrestricted).is_ok());
+    for method in ["simulateTransaction", "requestAirdrop"] {
+        let mut value = one_step("observe.rpc@1", method, "case");
+        failure(value.clone(), "unsupported_mode", "filter.methods[0]");
+        value["modes"] = json!(["surfpool"]);
+        assert!(custom::validate(&value.to_string(), Mode::Surfpool).is_ok());
+    }
+    let mut surfpool = one_step("sim.confirmation-delay@1", "sendTransaction", "case");
+    surfpool["modes"] = json!(["simulator", "surfpool"]);
+    failure(surfpool, "unsupported_mode", "requires.primitives[0]");
+    let mut blocked_stage = one_step(
+        "rpc.withhold-submission-response@1",
+        "sendTransaction",
+        "case",
+    );
+    blocked_stage["requires"]["primitives"] = json!([
+        "rpc.withhold-submission-response@1",
+        "rpc.blockhash-reuse@1"
+    ]);
+    blocked_stage["filter"]["methods"] = json!(["sendTransaction", "getLatestBlockhash"]);
+    blocked_stage["filter"]["signatures"] = json!([bs58::encode([7u8; 64]).into_string()]);
+    blocked_stage["sequence"][0]["next"] = json!("blockhash");
+    blocked_stage["sequence"].as_array_mut().unwrap().push(json!({"id":"blockhash","using":"rpc.blockhash-reuse@1","until":{"matches":1},"next":"done"}));
+    failure(blocked_stage, "invalid_filter", "sequence[1].using");
+}
+
+#[test]
+fn input_ceiling_boundaries_are_enforced_before_a_plan_can_be_activated() {
+    let mut value = one_step("observe.rpc@1", "getTransaction", "transaction_signature");
+    let signature = bs58::encode([7u8; 64]).into_string();
+    value["filter"]["signatures"] = json!(vec![signature; 32]);
+    value["sequence"][0]["until"] = json!({"matches":10000});
+    value["state"]["max_keys"] = json!(1024);
+    assert!(validate(&value).is_ok());
+    let mut invalid = value.clone();
+    invalid["filter"]["signatures"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!(bs58::encode([8u8; 64]).into_string()));
+    failure(invalid, "limit_exceeded", "filter.signatures");
+    let mut invalid = value.clone();
+    invalid["filter"]["signatures"] = json!(["not-a-signature"]);
+    failure(invalid, "invalid_filter", "filter.signatures[0]");
+    for invalid in [0, 10001] {
+        let mut bad = value.clone();
+        bad["sequence"][0]["until"]["matches"] = json!(invalid);
+        failure(bad, "limit_exceeded", "sequence[0].until.matches");
+    }
+    value["sequence"][0]["until"] = json!({"elapsed_ms":120000,"clock":"real"});
+    assert!(validate(&value).is_ok());
+    value["sequence"][0]["until"]["elapsed_ms"] = json!(120001);
+    failure(
+        value.clone(),
+        "limit_exceeded",
+        "sequence[0].until.elapsed_ms",
+    );
+    value["sequence"] = Value::Array((0..8).map(|index| json!({"id":format!("step{index}"),"using":"observe.rpc@1","until":{"matches":1},"next":if index==7 {"done".into()} else {format!("step{}",index+1)}})).collect());
+    assert!(validate(&value).is_ok());
+    value["sequence"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id":"extra","using":"observe.rpc@1","until":{"matches":1},"next":"done"}));
+    failure(value, "limit_exceeded", "sequence");
+    let mut rules = artifact();
+    let rule = rules["findings"][0].clone();
+    rules["findings"] = Value::Array(
+        (0..8)
+            .map(|index| {
+                let mut rule = rule.clone();
+                rule["id"] = json!(format!("rule{index}"));
+                rule["within_ms"] = json!(300000);
+                rule
+            })
+            .collect(),
+    );
+    assert!(validate(&rules).is_ok());
+    rules["findings"].as_array_mut().unwrap().push(rule);
+    failure(rules, "limit_exceeded", "findings");
+}
+
+#[test]
+fn finding_rules_require_installed_templates_and_compatible_ordered_facts() {
+    let mut value = artifact();
+    value["findings"][0]["facts"]["hidden"]["kind"] = json!("rpc_received");
+    failure(value, "invalid_finding_rule", "findings[0]");
+    let mut value = artifact();
+    value["requires"]["primitives"][0] = json!("rpc.lookup-snapshot@1");
+    value["sequence"][0]["using"] = json!("rpc.lookup-snapshot@1");
+    // A snapshot can satisfy the hidden fact only when runtime evidence proves
+    // that an available authoritative result changed to null at the boundary.
+    assert!(validate(&value).is_ok());
+    let mut value = artifact();
+    value["findings"][0]["facts"]["hidden"]["step"] = json!("observe");
+    failure(value, "invalid_finding_rule", "findings[0]");
+    let mut value = artifact();
+    value["findings"][0]["facts"]["invented"] = json!({"kind":"lookup_received","step":"observe"});
+    failure(value, "invalid_finding_rule", "findings[0]");
+    let mut value = artifact();
+    value["findings"][0]["order"] = json!(["later", "hidden"]);
+    failure(value, "invalid_finding_rule", "findings[0]");
+    let mut value = artifact();
+    value["findings"][0]["template"] = json!("lookup-hidden-then-queried@2");
+    failure(value, "incompatible_version", "findings[0].template");
+    let mut value = artifact();
+    value["requires"]["finding_templates"] = json!([]);
+    failure(value, "incompatible_version", "findings[0].template");
+    for invalid in [0, 300001] {
+        let mut value = artifact();
+        value["findings"][0]["within_ms"] = json!(invalid);
+        failure(value, "limit_exceeded", "findings[0].within_ms");
+    }
 }
