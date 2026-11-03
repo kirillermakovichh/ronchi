@@ -1,8 +1,8 @@
 # Resource measurement harness
 
 This note describes the local harness for task 24 and ADR-0019.
-It does not contain resource measurements or new release gates.
-Task 24 remains open until the integrated executable passes the recovery checks and produces reviewed observations.
+The measurement record below contains the final local prototype observations.
+It does not define performance release gates.
 
 ## Prerequisites and commands
 
@@ -108,7 +108,85 @@ These tests preserve a failed fixture for diagnosis.
 
 ## Measurement record
 
-No final release measurement is recorded here yet.
-The coordinator must run the harness after tasks 15–23 are integrated and competing suites stop.
-The resulting note must cite its raw JSON, exact commit and commands, uncontrolled load, sampler gaps, and untested platforms.
-Keep provisional product limits unchanged unless those observations justify a separate decision.
+The final observation started at `2026-11-03T23:07:03Z`.
+The measured release source is `e82a417928d2c216f6316b5e46f1bf77d1029c2b`.
+The later documentation and harness metadata correction do not change the executable.
+The executable is 22,220,496 bytes (21.19 MiB), SHA-256 `60f4286a5e161978d1a5d76512e8dd090ffa1ef10a3f5d85ed4eb195e003b38b`.
+The harness SHA-256 is `f89032aa3a3b930d5c13e900a23be915409444dccde843a12a4eee3d7a8a96cd`.
+Raw observations are retained locally at `/private/tmp/ronchi-resource-final-e82a417-v2.json`.
+Their SHA-256 is `c6964d51d8e34219056599f3a64c02c0d02774ec3df8d0c0f3bac8986358a600`.
+
+Host: Apple M3 Pro, 11 logical CPUs, 18 GiB RAM, macOS 15.2 arm64.
+Toolchain: Rust 1.99.0 (`b940084d7`, 2026-09-28), Python 3.14.0, SQLite 3.54.1, Surfpool 1.7.0.
+Load averages at start were 3.153 / 3.002 / 3.063; at end they were 3.492 / 3.161 / 3.112.
+Agent tests and builds were stopped. Ordinary user/system load remained uncontrolled.
+An older Ronchi process, PID61600, had a deleted temporary workspace and uncorroborated ownership.
+It was left running and included in the host-load note.
+
+The exact command was:
+
+```sh
+python3 scripts/measure-resources.py \
+  --binary target/release/ronchi --build-revision e82a417 \
+  --build-command 'cargo build --release --locked' \
+  --requests 1000 --query-count 30 --concurrency 4 \
+  --idle-seconds 10 --sample-interval 0.1 \
+  --surfpool-archive /private/tmp/ronchi-surfpool-v1.7.0-darwin-arm64.tar.gz \
+  --output /private/tmp/ronchi-resource-final-e82a417-v2.json \
+  --host-load-note 'No agent tests or builds active. Ordinary user and system work uncontrolled. Pre-existing ronchi PID61600 from a deleted temporary workspace was left running because ownership could not be corroborated. Harness now verifies actual configuration.mode and records its own SHA256.'
+```
+
+Both modes completed every phase with zero sampler errors and successful owned cleanup.
+All 30 dashboard API query intervals overlapped a background RPC call in each mode.
+These API measurements exclude browser rendering.
+
+| Observation | Simulator | Surfpool mode |
+| --- | ---: | ---: |
+| Core idle RSS, MiB | 12.03 | 13.39 |
+| Core idle CPU seconds over 10 seconds | 0.00 | 0.00 |
+| Surfpool child idle / peak RSS, MiB | — | 58.88 / 59.45 |
+| Core sampled peak across this workload, MiB | 45.84 | 36.08 |
+| getSlot completed requests/s | 135.65 | 62.08 |
+| getSlot median / p95, ms | 28.05 / 43.27 | 61.19 / 82.79 |
+| Dashboard API summary median / p95 during RPC writes, ms | 25.05 / 41.73 | 8.26 / 24.75 |
+| Live CLI summary median / p95, ms | 30.77 / 31.52 | 15.29 / 19.84 |
+| Live CLI timeline median / p95, ms | 17.69 / 18.29 | 18.13 / 21.05 |
+| Live MCP summary median / p95, ms | 20.37 / 24.49 | 3.73 / 11.42 |
+| Live MCP timeline median / p95, ms | 7.49 / 8.70 | 6.87 / 11.20 |
+| Retained CLI summary median / p95, ms | 31.31 / 31.73 | 16.07 / 16.58 |
+| Retained CLI timeline median / p95, ms | 18.09 / 18.30 | 18.44 / 18.70 |
+| Retained MCP summary median / p95, ms | 20.25 / 22.43 | 3.92 / 6.90 |
+| MCP adapter sampled peak, MiB | 24.88 | 24.33 |
+| RPC-read committed events/s in the observation window | 406.03 | 309.65 |
+| Retained Lab logical size, MiB | 49.69 | 10.12 |
+| Retained Lab allocated size, MiB | 50.11 | 11.11 |
+
+The simulator includes additional Read-through and large-response phases, so its retained history is larger.
+The fake-source baseline completed 543.07 requests/s with median/p95 5.40/31.19 ms.
+The same source through Ronchi completed 67.01 requests/s with median/p95 58.04/77.77 ms.
+This path includes source transport, JSON processing, and durable evidence.
+It does not isolate the cost of any one module.
+The large-response phase used 100 responses of 260,272 bytes at concurrency four.
+Its sampled core peak was 33.17 MiB; median/p95 latency was 59.71/70.89 ms.
+
+The timeout phase made 200 calls per mode with 50 ms outage/recovery intervals and a 10 ms hold.
+The client recorded 107 disconnections in simulator mode and 11 in Surfpool mode.
+These counts reflect actual registration timing and different source latency.
+They are observations of this workload, not an expected ratio.
+The concurrent dashboard phases completed 27 simulator and 6 Surfpool-mode background RPC calls without errors.
+Late boundary events can commit after the client response, so per-phase event rates describe the recorded observation window.
+After shutdown, both retained WAL files had zero logical bytes.
+
+RSS values are sampled maxima at 100 ms intervals, not OS true peaks.
+The idle core CPU delta rounded to zero at the process CPU-time resolution.
+Surfpool child idle CPU delta was 0.01 seconds over the sampled ten-second interval.
+CLI latency includes process startup; MCP timing excludes initialization.
+Transient CLI peak RSS was not sampled.
+The run uses one host, fresh HTTP connections, bounded synthetic histories, and readiness-only warmup.
+Transaction-execution throughput, hydrated account-heavy Surfpool state, third-party applications, other platforms, and long-running growth were not measured.
+No production throughput or adoption claim follows.
+
+An earlier observation file `/private/tmp/ronchi-resource-final-e82a417.json` remains available.
+Its numerical phases completed, but `startup.execution_mode` was null because of a harness field-path error.
+The final run above reads `configuration.mode`, checks the returned mode, and records the harness digest.
+The provisional 1 GiB Lab budget, 64 MiB drain reserve, request/response limits, and concurrency defaults remain unchanged.

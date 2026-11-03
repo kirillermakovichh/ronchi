@@ -1,6 +1,6 @@
 # Remaining run assignments
 
-Status: active. Tasks18/19/21 integrated; Checkpoint D review and task22 implementation active.
+Status: authorized implementation15–24 complete and verified. Independent third-party application validation in CheckpointsC/E remains open.
 Runtime baseline at preparation: `700949e`, with a clean `main` and no remote.
 Tasks 1–14 are recorded complete in [todo.md](todo.md).
 The preparation commit is later than this runtime baseline; use actual current HEAD for new worktrees.
@@ -12,7 +12,7 @@ Read [remaining-implementation-run.md](remaining-implementation-run.md) before d
 - Coordinator checkout: `/Users/kirillermakovic/Downloads/PROJECTS/SELF/ronchi`, branch `main`.
 - Agent runtime: Codex collaboration tools (`spawn_agent`, messaging, follow-up) available.
 - Actual concurrency: one coordinator and three isolated implementation workers; no recursive delegation.
-- Current integration code HEAD: `c0e2294` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
+- Current integration code HEAD: `e82a417` (plus retained state docs; no remotes). Starting HEAD was `7b94a24`.
 
 ## Assignments
 
@@ -30,9 +30,9 @@ Record exact focused checks and their outcomes before a row becomes `verified`.
 | 19 Status views | verified | `/root/task16` | `run/20261103-a/task-19` / `.worktrees/20261103-a-task-19` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
 | 20 Confirmation stalls | verified | coordinator | `main` / coordinator checkout / `7b94a24` | `53528f7`, `b0b0eea` | 4 controlled-clock histories; combined transaction34 passed. Finding drill-down/rule cursor tests passed; native Surfpool confirmation capability rejection verified. fmt/check/Clippy passed. |
 | 21 Expired-blockhash reuse | verified | `/root/task23` | `run/20261103-a/task-21` / `.worktrees/20261103-a-task-21` / `bd3f8bf` | — | Implementation packet dispatched after verified mode + registration contracts; focused checks pending |
-| 22 Custom Cases | active | coordinator + three workers | runtime main `c0e2294`; acceptance packets below | `bfd4851`, `89d41c4`, `c0e2294` | Compiler11 + five custom RPC histories + dashboard16 passed; remaining public/native/lifecycle/template acceptance active |
+| 22 Custom Cases | verified | coordinator + three workers | runtime main `c0e2294`; acceptance packets below | `bfd4851`, `89d41c4`, `c0e2294` | Compiler11, public custom13, CLI/rmcp5, native Custom2, source/kernel checks and final Rust291/dashboard17/Chromium8 passed |
 | 23 Evidence maintenance | verified | `/root/task23` | `run/20261103-a/task-23` / `.worktrees/20261103-a-task-23` / `7b94a24` | worker `6481a7f` → main `949a7ec` | 10 maintenance process tests passed on combined main after precise process-disappearance fix 31baf3f; original first failure preserved below; accumulated checkpoint passed |
-| 24 Recovery / measurements | active | coordinator | harness integrated; final main executable required | `82258a0`, `2c12722` | Combined recovery3 + RPCbudget2 passed; simulator/native harness smoke passed in worker. Actual final measurements pending |
+| 24 Recovery / measurements | verified | coordinator | harness integrated; final main executable required | `82258a0`, `2c12722` | Combined recovery3 + RPCbudget2 passed; simulator/native harness smoke passed in worker. Final optimized simulator14/Surfpool11 phases passed; record below |
 
 ## Integration checkpoints
 
@@ -56,9 +56,14 @@ Keep lengthy logs and generated reports outside tracked task documents.
 
 ## Resume record
 
-Tasks18/19/21 active in exact worktrees above, all basebd3f8bf. Tasks15/16/17/20/23 checkboxes complete. Main clean at dispatch. No accumulated suite or resource measurement is running. Next: inspect incoming worker contracts/diffs, reconcile Arm/catalog/RPC/actor/query wiring; checkpointD then22 then24. Continue without user handoff.
-Do not discard an active worker checkout to produce a clean status.
-Do not record secrets, bootstrap tickets, signing material, or raw credential-bearing URLs.
+All tasks15–24 are complete in `todo.md`; no implementation worker remains active.
+Runtime/release source HEAD is `e82a417`; later changes are measurement harness metadata and documentation only.
+All accumulated checks passed. Final raw measurements are `/private/tmp/ronchi-resource-final-e82a417-v2.json`, SHA256 `c6964d51d8e34219056599f3a64c02c0d02774ec3df8d0c0f3bac8986358a600`.
+The measurement record contains exact commands, host/load, versions, binary/harness digests, results and gaps.
+CheckpointsC/E's independent application item remains open. A suitable third-party application was unavailable; reference/fake sources are not substituted for it.
+No remote, publication or deployment was performed.
+Uncorroborated old process61600 was deliberately left untouched. Owned verification/measurement Labs and adapters have exited.
+The final documentation commit records this state; use actual `git log -1` and status when resuming.
 
 ## Surfpool prerequisite probe
 
@@ -76,9 +81,11 @@ Do not record secrets, bootstrap tickets, signing material, or raw credential-be
 
 ## Next unblocked action
 
-Tasks18/19/21 are active. Integrate verified commits deliberately, then CheckpointD and22. Do not start measurements before15–23 combined implementation is stable. Shared runtime activation seam is implemented as08b47f6; pending cache fields will be unioned during integration.
+The implementation queue is finished. Future independent-backend validation requires an explicitly selected suitable application.
+Keep the external CheckpointC/E items open until actual workflow evidence exists.
+Do not reopen deferred SDK, replay, publication or transports as part of this completed run.
 
-## Shared Case handoff contracts and remaining module work
+## Historical shared Case handoff contracts at bd3f8bf
 
 - Worker15 will implement18 after17 integration. Target seam: prepare/validate -> timeout selection -> dispatch. Invalid/unsupported requests and notifications cannot consume a missing-response Fault. Simulator ALT/nonce capability checks currently occur inside submit and need a validate-only stage. Backend prepare currently delegates some read/simulation validation;18 must cover known argument shapes before selection.
 - Freeze activation and registration real/simulator timestamps before batch execution. Timeout phase must not drift while earlier batch elements execute.
@@ -139,3 +146,23 @@ Mainb64ac1c plus the new native-browser authoring test passed npm ci (audit0), t
 Chromium attemptA passed7/8; the new Custom authoring flow lacked the resolved plan. Original log `/private/tmp/ronchi-final-acceptance-a-chromium.log` is preserved. A subsequent HTTP-instrumented probe returned200 with the correct plan without a product change; exact cause of the first transient missing plan was not independently established.
 A controlled pending-catalog unit test then confirmed that automatic catalog loading disabled the independent YAML editor. Coordinator separated catalog loading/errors from mutation state; unit Controls5 passed RED→GREEN. Native controlled GET interception initially lost browser same-origin metadata (403) and was removed too early (`Route already handled`); fixture now sends the actual same Origin and keeps route ownership until Page closure. The controlled first browser flow passed with metadata held pending during YAML validation. Desktop1440 and narrow390 screenshots were inspected; no horizontal overflow was observed.
 AttemptB must run the accumulated current code after this UI-only correction, then build the release and measure resources with competing jobs stopped. Task22/24 remain open until their remaining acceptance completes.
+
+## Final acceptance before measurement
+
+Final code HEAD `e82a417`, clean source checkout. AttemptB passed all commands: npm ci (audit0), typecheck, dashboard17/build, fmt/check, cargo test291 (144.834s), all-target Clippy, native build, Chromium8 (32.834s), release build (29.273s). Actual pinned native14 passed in attemptA; only dashboard loading code changed afterward. Resource evidence must use the optimized executable frome82a417.
+Runtime audit found failed browser fixture process89246 at `ronchi-dashboard-HEiBpl`; exact-ID ordinary down --force corroborated its manifest identity and stopped it. An older process61600 (started2026-11-03 18:46 local) uses this repository's debug executable but its `.tmpO8zqjV` workspace is absent. Ownership is uncorroborated; it was not signaled or deleted and will be recorded as uncontrolled host load. Hardware probe: AppleM3Pro,18GiB RAM.
+All implementation workers are completed and no accumulated test/build remains active. Next: measure simulator and Surfpool separately with requests1000/query30/concurrency4/idle10s/sample0.1s, review raw gaps, update task24/E and retained resources. Raw output target `/private/tmp/ronchi-resource-final-e82a417.json`.
+
+## Resource observation A and metadata correction
+
+Initial optimized measurement completed both modes with no phase failure, zero sampler errors, cleanup true and all30 dashboard queries overlapping RPC calls in both modes. Raw `/private/tmp/ronchi-resource-final-e82a417.json`, SHA256 `de5e82a1918e68512382675ef7edd43d4b3f8b596f41e0c26317ec996e3ff781`.
+Inspection found `startup.execution_mode:null` because the harness read the old top-level path instead of `configuration.mode`. The requested mode, actual Surfpool child/version and all numerical observations were retained, but final metadata must be correct.
+Coordinator corrected this field, requires actual mode to match the requested mode, and records the harness SHA256. Python AST syntax passed. A second actual run is active (session26287, v2 output above); binary/source remains e82a417 with SHA256 `60f4286a5e161978d1a5d76512e8dd090ffa1ef10a3f5d85ed4eb195e003b38b`.
+Provisional safety limits remain unchanged. No tests/builds were started during either measurement.
+
+## Final reviewed resource evidence and closure
+
+The corrected actual measurement completed simulator14 and Surfpool11 phases; startup modes match configuration, no phase/workload failure, zero sampler errors, all30 dashboard intervals overlap RPC in each mode, and both owned cleanups are complete. Source/build e82a417, optimized binary22,220,496 bytes (21.19MiB), SHA25660f4286a5e161978d1a5d76512e8dd090ffa1ef10a3f5d85ed4eb195e003b38b. Harness SHA256f89032aa3a3b930d5c13e900a23be915409444dccde843a12a4eee3d7a8a96cd; exact raw report and full command are in the maintained measurement note.
+Final observations: core idle RSS12.03MiB simulator /13.39MiB Surfpool mode; native child58.88MiB idle/59.45MiB sampled peak, separate from core. Sampled core peaks45.84/36.08MiB across unequal histories; getSlot135.65/62.08req/s, p9543.27/82.79ms. Retained Lab logical49.69/10.12MiB. No operational defaults were changed and no production/adoption claim is made.
+All temporary verification/measurement resources from this continuation are stopped. OS audit shows only the older uncorroborated61600 process described above. Ordinary exact-ID force-stop closed failed browser fixture89246 while preserving its interrupted Journal. Diagnostic temporary fixtures/reports, the prepared archive, and main build artifacts remain local; no user Lab was deleted.
+All clean integrated development checkouts of this run were removed normally; their branches/commits remain. The coordinator checkout is the only worktree. The final closeout commit includes the task checklist, resource note, harness metadata correction and this ledger.

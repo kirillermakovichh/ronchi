@@ -460,7 +460,7 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 7, 9, 17. **Scope:** Small. **Likely files:** `src/cases/timeout.rs`, `src/findings/timeout.rs`, `tests/timeout_case.rs`.
 - **Source:** [Timeout family](../docs/product/cases.md#rpc-unavailability-or-timeout).
 
-- **Implemented / verified:** Main51cf510 implements frozen pre-dispatch outage/recovery, bounded shared holds, notifications/capability validation and later-attempt Findings. Combined `cargo test --locked` passed291 tests; explicit pinned native suite passed14. Source/dispatch boundaries remain distinct from acceptance response loss.
+- **Implemented / verified:** Commit `51cf510` implements frozen pre-dispatch outage/recovery, bounded shared holds, notifications/capability validation and later-attempt Findings. Combined `cargo test --locked` passed291 tests; explicit pinned native suite passed14. Source/dispatch boundaries remain distinct from acceptance response loss.
 
 ### 19. Null and stale status views
 
@@ -469,7 +469,7 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 9, 17. **Scope:** Medium. **Likely files:** `src/cases/status.rs`, `src/findings/status.rs`, `tests/status_cases.rs`.
 - **Source:** [Status family](../docs/product/cases.md#unavailable-or-stale-transaction-status).
 
-- **Implemented / verified:** Main7ac917b preserves authoritative lifecycle and ordered per-identity null/snapshot views. Combined transaction histories, backend source tests and explicit native status/Custom lookup histories passed within Rust291 + native14. Native first observed state can already be finalized; no prior backend state is invented.
+- **Implemented / verified:** Commit `7ac917b` preserves authoritative lifecycle and ordered per-identity null/snapshot views. Combined transaction histories, backend source tests and explicit native status/Custom lookup histories passed within Rust 291 + native 14. Native first observed state can already be finalized; no prior backend state is invented.
 
 ### 20. Bounded confirmation stalls
 
@@ -487,7 +487,7 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 6, 9, 17. **Scope:** Small. **Likely files:** `src/cases/blockhash.rs`, `src/findings/blockhash.rs`, `tests/blockhash_case.rs`.
 - **Source:** [Expired-blockhash family](../docs/product/cases.md#expired-recent-blockhash-submission).
 
-- **Implemented / verified:** Maind7503b9 reuses genuine tuples with same-authority inclusive height expiry, mode-specific outcomes and retained Findings. Combined Rust291 + explicit native14 passed, including actual backend height expiry and returned safehash admission. Durable nonce and processed-identity exclusions remain explicit.
+- **Implemented / verified:** Commit `d7503b9` reuses genuine tuples with same-authority inclusive height expiry, mode-specific outcomes and retained Findings. Combined Rust 291 + explicit native 14 passed, including actual backend height expiry and returned safehash admission. Durable nonce and processed-identity exclusions remain explicit.
 
 ### Checkpoint D
 
@@ -496,10 +496,12 @@ Checkpoints record results and do not require another approval interview.
 
 ### 22. Declarative Custom Cases
 
-- [ ] **Accept:** Validate bounded YAML v1 into an inspectable plan; activate versioned maintained primitives/templates atomically with custom provenance.
+- [x] **Accept:** Validate bounded YAML v1 into an inspectable plan; activate versioned maintained primitives/templates atomically with custom provenance.
 - **Verify:** Composite histories, validation categories, limits, digest stability, mode/version errors, batch binding, and lifetime response-loss memory across reactivation.
 - **Dependencies:** 18–21. **Scope:** Medium; split parsing from runtime if needed. **Likely files:** `src/cases/custom.rs`, `src/cases/schema.rs`, `src/cases/sequence.rs`, `tests/custom_cases.rs`, `tests/fixtures/cases/`.
 - **Source:** [Custom Cases](../docs/product/custom-cases.md).
+
+- **Implemented / verified:** Compiler commits `bfd4851`/`89d41c4`, runtime `c0e2294`, public schemas `0fcfe4a`, provenance `b64ac1c`, and UI isolation `e82a417` are integrated. Eleven YAML validation tests, thirteen public custom RPC/lifecycle histories (including 256 identities), five actual CLI/rmcp histories, source-failure/blockhash unit histories and actual native Custom Cases passed. Final combined Rust 291, dashboard 17, Chromium 8, fmt/check/Clippy and release build passed. Author provenance, scoped template evidence, immutable batch binding and Lab-lifetime response-loss memory remain explicit.
 
 ## Recovery and prototype measurements
 
@@ -514,13 +516,17 @@ Checkpoints record results and do not require another approval interview.
 
 ### 24. Recovery and resource measurements
 
-- [ ] **Accept:** Verify whole-process fail-stop, reserved drain capacity, safe orphan handling, and independent backend survival; record reproducible measurements before revising provisional limits.
+- [x] **Accept:** Verify whole-process fail-stop, reserved drain capacity, safe orphan handling, and independent backend survival; record reproducible measurements before revising provisional limits.
 - **Verify:** Writer/disk/child failure and PID reuse; measure idle, representative RPC/Case load, retained history, dashboard, and agent queries.
 - **Dependencies:** 13–23. **Scope:** Medium. **Likely files:** `tests/failure_recovery.rs`, `tests/resource_scenarios.rs`, `scripts/measure-resources.*`, a scoped measurement note under `docs/research/`.
 - **Sources:** [Resource model](../docs/adr/0019-resource-efficient-rust-core.md), [open validation](../docs/open-questions.md).
 
+- **Implemented / verified:** Harness `82258a0` and prepared-evidence fix `2c12722` passed real writer/disk fail-stop, preserved acknowledged bytes, independent reference survival, native child/orphan/identity histories and reserved drain checks. Final Rust 291, native 14, dashboard 17 / Chromium 8 and release build passed. Optimized `e82a417` measurements completed simulator 14 and Surfpool 11 phases with no sampler/workload failures and complete owned cleanup. [Measurement record](../docs/research/resource-measurement-harness.md#measurement-record) records host, commands, hashes, latency, RSS/CPU, Journal size/rate, query overhead and limitations. Provisional limits were not revised.
+
 ### Checkpoint E
 
-- [ ] Record verified capabilities and remaining gaps without claiming production fidelity or adoption.
+- [x] Record verified capabilities and remaining gaps without claiming production fidelity or adoption.
 - [ ] Validate one independent backend workflow and select the next improvement from its results.
-- [ ] Preserve deferred CI wrappers, replay, SDK, distribution, and later transports in [open questions](../docs/open-questions.md).
+- [x] Preserve deferred CI wrappers, replay, SDK, distribution, and later transports in [open questions](../docs/open-questions.md).
+
+- **Remaining external validation:** Checkpoints C/E still require a suitable independent third-party application. The bundled relayer and local fake sources do not close that criterion. No unrelated repository was searched or changed to manufacture this evidence.

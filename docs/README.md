@@ -28,6 +28,7 @@ Use the root [README](../README.md) for project stage and [AGENTS.md](../AGENTS.
 | Start that run from the Zed AI panel | [Zed launch guide](../tasks/zed-run.md) |
 | Set up build tools or select core/dashboard dependencies | [Development stack](development.md) |
 | Understand the native Rust stack and resource model | [ADR-0019](adr/0019-resource-efficient-rust-core.md) |
+| Reproduce local prototype resource observations and inspect their limits | [Measurement harness and record](research/resource-measurement-harness.md) |
 | Understand mode authority and upstream write restrictions | [ADR-0011](adr/0011-stateful-solana-rpc-simulator.md), [ADR-0012](adr/0012-read-through-upstream-with-write-firewall.md), [ADR-0013](adr/0013-managed-surfpool-execution-mode.md) |
 | Understand persistent Labs, Journal lifetime, or continuing Cases | [ADR-0015](adr/0015-persistent-lab-first.md), [ADR-0016](adr/0016-continuous-lab-journal.md), [ADR-0017](adr/0017-case-driven-fault-model.md) |
 | Implement or validate Solana RPC semantics | [Shared protocol references](../.agents/references/solana-rpc/index.md) |

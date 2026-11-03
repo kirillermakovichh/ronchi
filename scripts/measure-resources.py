@@ -211,7 +211,10 @@ class Lab:
             self.identities.update({f"surfpool_child_{i}": identity for i, identity in enumerate(value["owned_children"])})
             for identity in self.identities.values():
                 identity["sample_birth"] = process_sample(identity["pid"])["birth"]
-            self.startup = {key: value.get(key) for key in ["disk_limits", "versions", "execution_mode"]}
+            self.startup = {key: value.get(key) for key in ["disk_limits", "versions"]}
+            self.startup["execution_mode"] = value["configuration"]["mode"]
+            if self.startup["execution_mode"] != mode:
+                raise RuntimeError("Disposable Lab returned a different execution mode")
             self.token = (self.path / "ronchi/labs" / self.id / "token").read_text().strip()
         except Exception as error:
             self.startup_failure = {"type": type(error).__name__, "message": "Disposable Lab startup failed"}
@@ -456,6 +459,7 @@ def main():
     version = subprocess.run([str(args.binary), "--version"], capture_output=True, text=True, timeout=5, check=True).stdout.strip()
     compiler = subprocess.run(["rustc", "--version"], capture_output=True, text=True, timeout=5, check=True).stdout.strip()
     report = {"schema_version": 1, "classification": "harness_smoke_not_resource_evidence" if args.smoke else "resource_observations",
+        "harness": {"sha256": hashlib.file_digest(Path(__file__).open("rb"), "sha256").hexdigest()},
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "host": {"platform": platform.platform(), "machine": platform.machine(), "cpu_count": os.cpu_count(),
                  "python": platform.python_version(), "load_average_at_start": os.getloadavg(), "uncontrolled_load": args.host_load_note},

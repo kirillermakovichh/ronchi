@@ -1,13 +1,19 @@
 # Task 14 completed: embedded dashboard
 
 Task 14 and slices 14a–14f are complete. The final explicit invalid-detail recovery regression passed.
-The authorized tasks15–24 run is active. Tasks15–21 and23 are integrated. Task22 runtime is integrated and its acceptance histories are active. Task24 recovery checks pass; final accumulated checks and resource measurements remain pending. See [parallel-run-state.md](parallel-run-state.md) for current assignments, commits, checks, and remaining acceptance. The task14 evidence below remains the historical baseline.
+The authorized tasks15–24 implementation run is complete and verified on macOS arm64.
+Full Rust291, actual native Surfpool14, dashboard17/Chromium8, Clippy and release checks passed.
+Final optimized simulator/Surfpool resource observations are recorded in [the measurement note](../docs/research/resource-measurement-harness.md#measurement-record).
+Checkpoints C/E's independent third-party application validation remains open.
+See [parallel-run-state.md](parallel-run-state.md) for integrated commits, actual checks, preserved failures and retained resources.
+The task14 evidence below remains the historical baseline.
 
 ## Next session
 
 The user requested one autonomous coordinated run for tasks 15–24.
 Use [remaining-implementation-run.md](remaining-implementation-run.md) and [parallel-run-state.md](parallel-run-state.md).
-The preparation session did not start implementation workers or change runtime code. The subsequent implementation run is recorded in the assignment ledger.
+The completed implementation run is recorded in the assignment ledger.
+Do not restart the completed queue. The next external validation needs an explicitly selected independent application.
 Keep the task-14 verification and unconfirmed observation below as the recorded baseline.
 
 Existing layout, browser authentication, controls, embedded assets, and retained viewer were preserved.
