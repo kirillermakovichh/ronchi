@@ -328,6 +328,22 @@ fn large_source_results_are_preserved_in_bounded_chunks_and_byte_overflow_is_exp
         result
     );
     cli(lab.root.path(), &["--lab-id", &lab.id, "down"]);
+    let evidence = cli(
+        lab.root.path(),
+        &[
+            "--lab-id",
+            &lab.id,
+            "investigate",
+            "evidence",
+            "--kind",
+            "rpc.upstream",
+        ],
+    );
+    assert!(
+        !evidence
+            .to_string()
+            .contains(&base64::engine::general_purpose::STANDARD.encode(vec![b'x'; 252]))
+    );
     let reader = ronchi::journal::JournalReader::open(
         &lab.root
             .path()
@@ -342,7 +358,11 @@ fn large_source_results_are_preserved_in_bounded_chunks_and_byte_overflow_is_exp
         let event = reader.event(seq).unwrap().unwrap();
         assert!(serde_json::to_vec(&event).unwrap().len() <= ronchi::journal::MAX_EVENT_BYTES);
         if event.kind == "rpc.upstream"
-            && let Some(encoded) = event.data["bytes"].as_str()
+            && let Some(encoded) = event
+                .data
+                .get("payload")
+                .or_else(|| event.data.get("bytes"))
+                .and_then(Value::as_str)
         {
             assert_eq!(event.data["result_chunk"], count);
             count += 1;
@@ -355,6 +375,34 @@ fn large_source_results_are_preserved_in_bounded_chunks_and_byte_overflow_is_exp
     }
     assert!(count > 1);
     assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), result);
+    let chunk = evidence["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["payload_status"] == "available")
+        .expect("source chunks must be explicit retained payloads");
+    let seq = chunk["event_ref"]["event_seq"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let preview = cli(
+        lab.root.path(),
+        &[
+            "--lab-id",
+            &lab.id,
+            "investigate",
+            "evidence",
+            "--event-seq",
+            &seq,
+            "--include-payload",
+        ],
+    );
+    assert!(
+        preview["result"]["items"][0]["payload"]["preview"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
+
     let too_large = Source::http(
         200,
         json!({"jsonrpc":"2.0","id":"read","result":"y".repeat(ronchi::rpc::MAX_RESPONSE_BYTES)})

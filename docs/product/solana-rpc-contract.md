@@ -302,6 +302,10 @@ Changing that endpoint requires a new Lab.
 Before forwarding, Ronchi commits a `rpc.upstream_started` source fact.
 The `rpc.upstream` result fact retains source authority, request identity, context, and bounded result content separately from the prepared response and transport boundary.
 Larger source results use ordered base64-JSON chunks, with at most 24 KiB of source bytes in each chunk.
+Chunk representation2 declares `chunk_schema_version:2` and stores encoded content in the retained `payload` field.
+Normal queries and exports omit that content.
+Explicit payload selection uses the existing bounded previews and byte offsets.
+Earlier chunks with a `bytes` field remain readable in their original Journals; readers do not rewrite them.
 Endpoint and credential echoes are redacted before Journal admission.
 A redacted string or object key can omit related content explicitly.
 If the redacted result exceeds its byte budget, the evidence records an omission reason and the original result byte count.

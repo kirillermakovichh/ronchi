@@ -182,9 +182,10 @@ impl Upstream {
                     fact["result"] = safe;
                 } else {
                     fact["result_encoding"] = json!("base64-json-chunks");
+                    fact["chunk_schema_version"] = json!(2);
                     fact["result_chunks"] = json!(bytes.len().div_ceil(24 * 1024));
                     for (index, chunk) in bytes.chunks(24 * 1024).enumerate() {
-                        facts.push(json!({"source_identity":self.identity,"method":method,"authority":"read_upstream","result_chunk":index,"encoding":"base64-json","bytes":base64::engine::general_purpose::STANDARD.encode(chunk),"redacted":redacted}));
+                        facts.push(json!({"source_identity":self.identity,"method":method,"authority":"read_upstream","result_chunk":index,"encoding":"base64-json","chunk_schema_version":2,"payload":base64::engine::general_purpose::STANDARD.encode(chunk),"payload_status":if redacted {"redacted"} else {"available"},"redacted":redacted}));
                     }
                 }
             }
