@@ -133,6 +133,20 @@ async fn operation_lock(
     name: &str,
     cancellation: &mut tokio::signal::unix::Signal,
 ) -> Result<std::fs::File, LabError> {
+    operation_lock_cancellable(
+        ws,
+        name,
+        cancellation,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+async fn operation_lock_cancellable(
+    ws: &Workspace,
+    name: &str,
+    cancellation: &mut tokio::signal::unix::Signal,
+    external: &tokio_util::sync::CancellationToken,
+) -> Result<std::fs::File, LabError> {
     let lock = ws.lock(name, "operation")?;
     let deadline = Instant::now() + STARTUP;
     loop {
@@ -148,7 +162,7 @@ async fn operation_lock(
                 "Timed out waiting for the Lab operation lock",
             ));
         }
-        tokio::select! { _ = cancellation.recv()=> return Err(LabError::new(130,"cancelled","Cancelled before acquiring the Lab lock")), _ = tokio::time::sleep(Duration::from_millis(25))=>() }
+        tokio::select! { _=external.cancelled()=>return Err(LabError::new(130,"cancelled","Cancelled before acquiring the Lab lock")), _ = cancellation.recv()=> return Err(LabError::new(130,"cancelled","Cancelled before acquiring the Lab lock")), _ = tokio::time::sleep(Duration::from_millis(25))=>() }
     }
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
@@ -257,6 +271,50 @@ pub async fn up(
     explicit: Settings,
     name: &str,
 ) -> Result<LabResult, LabError> {
+    up_selected(
+        configuration,
+        explicit,
+        name,
+        false,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+/// Start only a never-used name, under the ordinary startup operation lock.
+pub(crate) async fn up_fresh(
+    configuration: EffectiveConfig,
+    external: tokio_util::sync::CancellationToken,
+) -> Result<LabResult, LabError> {
+    for index in 1..=1024 {
+        let name = if index == 1 {
+            "demo".into()
+        } else {
+            format!("demo-{index}")
+        };
+        match up_selected(
+            configuration.clone(),
+            Settings::default(),
+            &name,
+            true,
+            external.clone(),
+        )
+        .await
+        {
+            Err(error) if error.code == "name_occupied" => continue,
+            result => return result,
+        }
+    }
+    Err(LabError::conflict(
+        "Demo name allocation reached its bounded limit",
+    ))
+}
+async fn up_selected(
+    configuration: EffectiveConfig,
+    explicit: Settings,
+    name: &str,
+    fresh: bool,
+    external: tokio_util::sync::CancellationToken,
+) -> Result<LabResult, LabError> {
     use std::process::{Command, Stdio};
     if !workspace::identifier(name) {
         return Err(LabError::invalid("Invalid Lab name"));
@@ -266,8 +324,22 @@ pub async fn up(
     ws.initialize()?;
     let mut cancellation =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-    let _operation = operation_lock(&ws, name, &mut cancellation).await?;
+    let _operation = operation_lock_cancellable(&ws, name, &mut cancellation, &external).await?;
+    if external.is_cancelled() {
+        return Err(LabError::new(
+            130,
+            "cancelled",
+            "Cancelled before Lab allocation",
+        ));
+    }
     if ws.root.join("names").join(format!("{name}.json")).exists() {
+        if fresh {
+            return Err(LabError::new(
+                5,
+                "name_occupied",
+                "Fresh Lab name is already allocated",
+            ));
+        }
         let previous = ws.target(name, None)?;
         if let Ok(live) = authenticated(&ws, &previous).await {
             if live.state != Lifecycle::Ready {
@@ -340,6 +412,7 @@ pub async fn up(
         }
     }
     let id = format!("L{}", workspace::nonce()?);
+    let result=async {
     let dir = ws.lab(&id)?;
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -412,7 +485,7 @@ pub async fn up(
     let deadline = Instant::now() + STARTUP;
     loop {
         if let Ok(manifest) = ws.manifest(&id) {
-            if manifest.state == Lifecycle::Ready {
+            if manifest.state == Lifecycle::Ready && !external.is_cancelled() {
                 let gate = workspace::open_private(&dir.join("readiness.gate"), true)?;
                 if fs2::FileExt::try_lock_exclusive(&gate).is_ok() {
                     let manifest = ws.manifest(&id)?;
@@ -459,7 +532,7 @@ pub async fn up(
                 "Lab process exited before readiness; inspect retained startup metadata",
             ));
         }
-        let cancelled = tokio::select! { _=cancellation.recv()=>true, _=tokio::time::sleep(Duration::from_millis(25))=>false };
+        let cancelled = tokio::select! { _=external.cancelled()=>true, _=cancellation.recv()=>true, _=tokio::time::sleep(Duration::from_millis(25))=>false };
         if cancelled || Instant::now() >= deadline {
             // Release the startup lease before waiting for the readiness gate.
             drop(lease);
@@ -503,10 +576,17 @@ pub async fn up(
             } else {
                 "none"
             };
-            error.lab_id = Some(id);
+            error.lab_id = Some(id.clone());
             return Err(error);
         }
     }
+    }.await;
+    result.map_err(|mut error: LabError| {
+        if error.lab_id.is_none() {
+            error.lab_id = Some(id.clone());
+        }
+        error
+    })
 }
 
 pub async fn down(

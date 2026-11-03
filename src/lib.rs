@@ -2,6 +2,7 @@ pub mod cases;
 pub mod checks;
 pub mod config;
 mod control;
+pub mod demo;
 mod files;
 pub mod findings;
 pub mod journal;
@@ -45,6 +46,8 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Run an isolated bundled public-path experiment
+    Demo(demo::Args),
     /// Start a persistent Lab and wait for lifecycle readiness
     Up {
         #[arg(long, env = "RONCHI_MODE", hide_env_values = true)]
@@ -234,6 +237,21 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
         return render_lab_error(cli.json, lab::LabError::invalid("Invalid Lab name"));
     }
     match cli.command {
+        Command::Demo(args) => {
+            if cli.lab.is_some() || cli.lab_id.is_some() {
+                return render_lab_error(
+                    cli.json,
+                    lab::LabError::invalid(
+                        "Demo allocates its own fresh Lab; --lab and --lab-id are not accepted",
+                    ),
+                );
+            }
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            demo::run(root, args, cli.json)
+        }
         Command::Schema { operation } => {
             let request = match operation.as_str() {
                 op if op.starts_with("investigate.") => schemars::schema_for!(query::Request),

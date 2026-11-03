@@ -106,6 +106,14 @@ pub fn resolve_requested(
         control_listen: overrides.control_listen.or(file.control_listen),
         initial_case: overrides.initial_case.clone().or(file.initial_case.clone()),
     };
+    let configuration = from_settings(project, requested.clone())?;
+    Ok((configuration, requested))
+}
+/// Resolve explicit settings without reading project files or environment.
+pub(crate) fn from_settings(
+    project: PathBuf,
+    requested: Settings,
+) -> Result<EffectiveConfig, String> {
     let checks = requested.checks.clone().unwrap_or_default();
     checks.validate()?;
     let simulator_state = requested.simulator_state.clone().unwrap_or_default();
@@ -114,9 +122,9 @@ pub fn resolve_requested(
     if !(1..=60_000).contains(&slot_duration_ms) {
         return Err("slot_duration_ms must be between 1 and 60000".into());
     }
-    let mode = overrides.mode.or(file.mode).unwrap_or_default();
-    let read_upstream = overrides.read_upstream.or(file.read_upstream);
-    let surfpool_datasource = overrides.surfpool_datasource.or(file.surfpool_datasource);
+    let mode = requested.mode.unwrap_or_default();
+    let read_upstream = requested.read_upstream.clone();
+    let surfpool_datasource = requested.surfpool_datasource.clone();
     if (mode == Mode::Surfpool && read_upstream.is_some())
         || (mode == Mode::Simulator && surfpool_datasource.is_some())
     {
@@ -130,13 +138,11 @@ pub fn resolve_requested(
             return Err("Datasource must be an absolute HTTP or HTTPS URL".into());
         }
     }
-    let rpc_listen = overrides
+    let rpc_listen = requested
         .rpc_listen
-        .or(file.rpc_listen)
         .unwrap_or(([127, 0, 0, 1], 8899).into());
-    let control_listen = overrides
+    let control_listen = requested
         .control_listen
-        .or(file.control_listen)
         .unwrap_or(([127, 0, 0, 1], 8900).into());
     if !rpc_listen.ip().is_loopback() || !control_listen.ip().is_loopback() {
         return Err("Listeners must use loopback addresses".into());
@@ -144,7 +150,7 @@ pub fn resolve_requested(
     if rpc_listen == control_listen && rpc_listen.port() != 0 {
         return Err("RPC and control listeners must use distinct ports".into());
     }
-    let initial_case = overrides.initial_case.or(file.initial_case);
+    let initial_case = requested.initial_case.clone();
     if initial_case.as_ref().is_some_and(|s| {
         s.is_empty()
             || s.len() > 128
@@ -154,21 +160,18 @@ pub fn resolve_requested(
     }) {
         return Err("Initial Case must be a bounded identifier".into());
     }
-    Ok((
-        EffectiveConfig {
-            project,
-            checks,
-            mode,
-            read_upstream,
-            surfpool_datasource,
-            rpc_listen,
-            control_listen,
-            initial_case,
-            slot_duration_ms,
-            simulator_state,
-        },
-        requested,
-    ))
+    Ok(EffectiveConfig {
+        project,
+        checks,
+        mode,
+        read_upstream,
+        surfpool_datasource,
+        rpc_listen,
+        control_listen,
+        initial_case,
+        slot_duration_ms,
+        simulator_state,
+    })
 }
 
 fn default_slot_duration_ms() -> u64 {

@@ -13,7 +13,9 @@ ronchi demo tx-response-lost
 
 The Demo starts the default simulator and bundled [Withdrawal Relayer](reference-application.md), drives a bounded example, and produces Journal Evidence through the real core.
 It needs no existing project or cloud call.
-The human gets a localhost dashboard; the Coding Agent gets a bounded structured summary and evidence references.
+The command returns a bounded summary, Check results, Findings, and evidence references.
+It reports actual RPC/control endpoints and project-aware CLI drill-down commands.
+Dashboard and MCP interfaces remain later tasks.
 Known correlation and Checks may support stronger conclusions than a backend connected only by changing its RPC URL.
 A Control comparison is optional.
 The default profile is `resilient`; `--profile unsafe` selects the deliberate identity-replacement example.
@@ -21,6 +23,30 @@ Each Demo uses a fresh `demo` or `demo-N` Lab, fresh application storage, and fr
 After collecting Checks, the reference Workload and relayer finish, while the Lab remains available for investigation.
 The result returns its name, immutable `lab_id`, endpoints, summary, and evidence references.
 `--stop-after-demo` explicitly stops that Demo-owned Lab; `--json` changes rendering only.
+
+The native Demo allocates a never-used name under the ordinary Lab operation lock.
+It ignores project configuration and upstream environment settings for its explicit simulator startup.
+It never writes or temporarily replaces `ronchi/config.toml`.
+Its source URL uses a reserved loopback port selected before Lab startup.
+The reservation closes before normal relayer bind; a bind race is an explicit startup failure before intent submission.
+Reference storage is an atomically created new private directory under `ronchi/reference/`.
+
+The command collects the maintained `reference-intent` definition version 2 through the public control API.
+It reads the retained public definition digest and evaluates only the pinned committed prefix.
+It continues until a final observation follows a public terminal intent state.
+An early identity failure does not stop collection of the other terminal proofs.
+The application keeps its original 60-second acceptance horizon.
+The command has a separate 70-second Workload wait, bounded startup, HTTP, collection-terminal, and cleanup waits.
+A command timeout does not become an application failure.
+The HTTP-only collector, effective 32 KiB response cap, single-intent evaluation, and 512-record/4 MiB evaluation budgets remain unchanged.
+
+`--json` emits one final envelope; it does not include child output or open a browser.
+Exit 0 reports completed orchestration even when unsafe has a confirmed Check fail.
+Cancellation exits 130; operational errors report phase, effects, known IDs, resource state, and recovery argv.
+Default errors after Lab readiness retain that exact Lab.
+`--stop-after-demo` also attempts exact-ID cleanup on error and cancellation.
+The reference child is signalled and reaped before command completion.
+SIGKILL cannot guarantee cleanup.
 
 The Demo must not use canned traces or a private fault/evidence path unavailable to real applications.
 Unsafe and resilient profiles share one reference codebase; they do not implement the catalog one application at a time.

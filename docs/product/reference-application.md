@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. Demo orchestration remains task 13.
+Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. The public-path Demo is implemented; failure-path acceptance is tracked in task 13.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -69,7 +69,7 @@ State transitions and their supporting observations share one SQLite transaction
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
 The generic HTTP Check collector and deterministic evaluator are implemented separately from the relayer source.
-Demo orchestration remains task 13.
+The public-path Demo is implemented; failure-path acceptance is tracked in task 13.
 
 ### Read-only observation source
 
@@ -201,7 +201,8 @@ No reset operates on an arbitrary backend database. Without that evidence, Ronch
 The Reference Application is Rust code shipped in the same native executable as Ronchi.
 The Demo starts it as an owned child process in the executable's relayer mode.
 An ordinary Demo leaves its Lab running after the bounded reference Workload and relayer finish.
-It returns the dashboard URL, immutable `lab_id`, summary, and evidence references.
+It returns actual RPC/control endpoints, immutable `lab_id`, pinned Check results, summary, Findings, and project-aware CLI evidence commands.
+It does not return a dashboard URL before the dashboard exists.
 `--stop-after-demo` explicitly stops only the Demo-owned Lab after collecting Checks; `--json` changes rendering only.
 The Demo selects a fresh available `demo` name and free loopback ports; it never reuses or replaces the user's `default` Lab.
 If `demo` already exists, allocate `demo-2`, then the next free suffix, and return the selected name.
