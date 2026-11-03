@@ -397,6 +397,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 value["rule_schema"] =
                     serde_json::to_value(schemars::schema_for!(findings::Definition))
                         .expect("typed schema serializes");
+                value["maintained_case_rules"] =
+                    serde_json::json!([cases::confirmation::finding_definition()]);
             }
             match write_output(true, &value, "", false) {
                 Ok(()) => 0,
@@ -546,12 +548,13 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     request_id: format!("cli-{}", std::process::id()),
                     result: cases::catalog(),
                 };
-                return match write_output(
-                    cli.json,
-                    &catalog,
-                    "tx-response-lost · simulator · default hold 20000 ms",
-                    false,
-                ) {
+                let text = catalog
+                    .result
+                    .iter()
+                    .map(|entry| format!("{} · {}", entry.case_id, entry.modes.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return match write_output(cli.json, &catalog, &text, false) {
                     Ok(()) => 0,
                     Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
                     Err(_) => 6,

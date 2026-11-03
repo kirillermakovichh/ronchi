@@ -724,3 +724,49 @@ async fn transaction_lookup_alone_matches_and_unsupported_mode_is_explicit() {
         );
     }
 }
+
+#[tokio::test]
+async fn cursors_from_the_previous_rule_catalog_are_rejected_after_confirmation_rule_installation()
+{
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use sha2::{Digest, Sha256};
+    let hash = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|n| format!("{n:02x}"))
+            .collect()
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "L1").unwrap();
+    store.append(&history()).unwrap();
+    let mut request = req(Operation::Findings);
+    request.arguments.limit = 1;
+    request.normalize().unwrap();
+    let page = query(&path, request.clone()).await;
+    let cursor = page.page.next_cursor.unwrap();
+    let mut old_request = request.clone();
+    old_request.request_id.clear();
+    let old_fingerprint = hash(
+        &serde_json::to_vec(&(
+            old_request,
+            [
+                ronchi::findings::Rule::LookupAfterWithholding.definition(),
+                ronchi::findings::Rule::SubmissionAfterWithholding.definition(),
+            ],
+        ))
+        .unwrap(),
+    );
+    let body = URL_SAFE_NO_PAD
+        .decode(cursor.split_once('.').unwrap().0)
+        .unwrap();
+    let mut cursor: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    cursor["fingerprint"] = json!(old_fingerprint);
+    let body = serde_json::to_vec(&cursor).unwrap();
+    request.arguments.cursor = Some(format!("{}.{}", URL_SAFE_NO_PAD.encode(&body), hash(&body)));
+    let error = Engine::default()
+        .execute(path, false, "explicit", request, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code.as_ref(), "invalid_cursor");
+}

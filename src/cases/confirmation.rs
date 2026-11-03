@@ -3,6 +3,10 @@ use crate::rpc::RpcError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub fn finding_definition() -> serde_json::Value {
+    serde_json::json!({"rule_id":"sim.confirmation-delay.observed","version":1,"execution_mode":"simulator","required_facts":["transaction.accepted","fault.confirmation_schedule_assigned","transaction.transition:held_commitment","transaction.transition:recovery"],"order":"acceptance < assignment < held commitment < recovery","correlation_keys":["lab_id","signature","accepted_request_id"],"conclusion":"scheduled simulator commitment interval; no client or economic conclusion"})
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HoldAt {

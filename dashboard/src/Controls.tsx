@@ -7,11 +7,15 @@ interface Props {
   snapshot?: Sequence;
   changed: () => void;
 }
+interface CaseCatalog {
+  result: { case_id: string; modes: string[] }[];
+}
 export function Controls({ api, status, snapshot, changed }: Props) {
   const [inspection, setInspection] = useState<unknown>();
-  const [catalog, setCatalog] = useState<unknown>(),
+  const [catalog, setCatalog] = useState<CaseCatalog>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [selectedCase, setSelectedCase] = useState("tx-response-lost");
   const [collection, setCollection] = useState<{
       collection_id: string;
       status: string;
@@ -32,6 +36,8 @@ export function Controls({ api, status, snapshot, changed }: Props) {
   }
   const live = status.state === "ready";
   const sources = status.configuration.checks?.sources ?? [];
+  const cases = catalog?.result ?? [{ case_id: "tx-response-lost", modes: ["simulator"] }];
+  const supported = cases.some(entry => entry.case_id === selectedCase && entry.modes.includes(status.configuration.mode));
   return (
     <section className="controls" aria-label="Case and Check controls">
       <details>
@@ -43,23 +49,31 @@ export function Controls({ api, status, snapshot, changed }: Props) {
           disabled={!live || busy}
           onClick={() =>
             void run(async () =>
-              setCatalog(await api.call("api/cases", undefined)),
+              setCatalog(await api.call<CaseCatalog>("api/cases", undefined)),
             )
           }
         >
           List Cases
         </button>
         {catalog !== undefined && <pre>{JSON.stringify(catalog, null, 2)}</pre>}
+        <label>
+          Case
+          <select value={selectedCase} disabled={!live || busy} onChange={event => setSelectedCase(event.target.value)}>
+            {cases.map(entry => <option key={entry.case_id} value={entry.case_id} disabled={!entry.modes.includes(status.configuration.mode)}>
+              {entry.case_id}{entry.modes.includes(status.configuration.mode) ? "" : " · unsupported in this mode"}
+            </option>)}
+          </select>
+        </label>
         <button
-          disabled={!live || busy || status.configuration.mode !== "simulator"}
+          disabled={!live || busy || !supported}
           onClick={() =>
             void run(async () => {
-              await api.call("api/case/arm", { case_id: "tx-response-lost" });
+              await api.call("api/case/arm", { case_id: selectedCase });
               changed();
             })
           }
         >
-          Arm / replace tx-response-lost
+          Arm / replace {selectedCase}
         </button>
         <button
           disabled={!live || busy}

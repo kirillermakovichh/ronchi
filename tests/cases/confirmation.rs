@@ -96,6 +96,21 @@ async fn confirmation_schedules_progress_without_polling_and_survive_replacement
         let finding = &result.result["items"][0];
         assert_eq!(finding["rule_id"], "sim.confirmation-delay.observed");
         assert!(finding["statement"].as_str().unwrap().contains("32000 ms"));
+        let mut detail = query.clone();
+        detail.operation = ronchi::query::Operation::Evidence;
+        detail.arguments.snapshot_seq = Some(result.view.snapshot_seq);
+        detail.arguments.scope.finding_id = Some(finding["finding_id"].as_str().unwrap().into());
+        let detail = engine
+            .execute(
+                path.clone(),
+                false,
+                "explicit",
+                detail,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(detail.result["items"].as_array().unwrap().len() >= 4);
         let mut narrowed = query;
         narrowed.arguments.scope.kind = vec![
             "transaction.transition".into(),
