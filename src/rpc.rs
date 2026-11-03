@@ -870,29 +870,63 @@ impl Exchange {
             decisions.push(fact);
             boundaries.push(boundary);
         }
-        if serde_json::to_vec(&responses)
-            .expect("JSON values serialize")
-            .len()
-            > MAX_RESPONSE_BYTES
-        {
+        let evidence_fits = |facts: &[Value]| {
+            let mut remaining = crate::journal::MAX_BATCH_BYTES;
+            for fact in facts {
+                // Include all typed data, including request and Custom Case provenance.
+                // Only the generated timestamp/elapsed fields vary before writer admission.
+                let mut event =
+                    crate::lab::event("rpc.response_prepared", self.rpc.0.started, fact.clone());
+                event.recorded_at = "x".repeat(64); // Journal's maximum timestamp field width.
+                event.elapsed_ns = i64::MAX as u64;
+                if self.rpc.0.backend.is_some() {
+                    event.execution_mode = crate::config::Mode::Surfpool;
+                }
+                match crate::query::encoded_len(
+                    &event,
+                    remaining.min(crate::journal::MAX_EVENT_BYTES),
+                ) {
+                    Ok(bytes) => remaining -= bytes,
+                    Err(()) => return false,
+                }
+            }
+            true
+        };
+        let response_over_budget =
+            crate::query::encoded_len(&responses, MAX_RESPONSE_BYTES).is_err();
+        if response_over_budget || !evidence_fits(&decisions) {
             let failure = RpcError {
                 code: -32000,
-                message:
-                    "Response exceeds its byte budget; select a smaller batch or binary encoding"
-                        .into(),
+                message: "Response or its evidence exceeds its byte budget; select a smaller batch or binary encoding".into(),
                 data: Some(json!({"code":"result_too_large"})),
             };
             for response in &mut responses {
                 *response = error(response["id"].clone(), failure.clone());
             }
             for fact in &mut decisions {
-                if let Some(result) = fact
-                    .as_object_mut()
-                    .and_then(|object| object.remove("result"))
-                {
-                    fact["source_result"] = result;
+                for field in ["result", "lookup_boundary_digests"] {
+                    if let Some(value) =
+                        fact.as_object_mut().and_then(|object| object.remove(field))
+                    {
+                        let encoded = serde_json::to_vec(&value).expect("JSON values serialize");
+                        fact[format!("omitted_{field}")] = json!({
+                            "availability":"omitted_by_policy",
+                            "reason":if response_over_budget {"rpc_response_budget"} else {"rpc_evidence_budget"},
+                            "value_role":if field=="result" {"prepared_rpc_result"} else {"prepared_lookup_digests"},
+                            "encoded_bytes":encoded.len(),
+                            "sha256":crate::query::digest(&encoded),
+                        });
+                        fact["payload_status"] = json!("omitted_by_policy");
+                    }
                 }
-                fact["prepared_error_code"] = json!(-32000);
+                // Invalid envelopes can require a response even without an input ID.
+                // Valid notifications retain their no-response boundary without an invented error.
+                if boundaries.iter().any(|boundary| {
+                    boundary["request_id"] == fact["request_id"]
+                        && boundary["rpc_response"] != "notification_no_response"
+                }) {
+                    fact["prepared_error_code"] = json!(-32000);
+                }
             }
             for boundary in &mut boundaries {
                 if boundary["rpc_response"] != "notification_no_response" {
