@@ -361,3 +361,79 @@ mod session_tests {
         assert_eq!(sessions.ticket(), Err(StatusCode::TOO_MANY_REQUESTS));
     }
 }
+
+/// Validate bookmark query data before minting a ticket or binding a viewer.
+pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
+    let invalid = || {
+        crate::lab::LabError::invalid(
+            "Invalid dashboard selection; use a credential-free pinned bookmark query",
+        )
+    };
+    if input.len() > 8192 {
+        return Err(invalid());
+    }
+    let query = input.strip_prefix('?').unwrap_or(input);
+    let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
+    if pairs.len() > 200 {
+        return Err(invalid());
+    }
+    let mut singleton = std::collections::HashSet::new();
+    let mut snapshot = false;
+    let mut finding = false;
+    let mut event = false;
+    for (key, value) in &pairs {
+        if !matches!(
+            key.as_ref(),
+            "signature" | "rpc_method" | "kind" | "case_activation_id"
+        ) && !singleton.insert(key.as_ref())
+        {
+            return Err(invalid());
+        }
+        match key.as_ref() {
+            "snapshot" | "event" | "from_seq" | "to_seq" | "case_activation_id" => {
+                let number = value.parse::<u64>().map_err(|_| invalid())?;
+                if number > i64::MAX as u64
+                    || value.is_empty()
+                    || !value.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(invalid());
+                }
+                if key == "snapshot" {
+                    snapshot = true
+                }
+                if key == "event" {
+                    if number == 0 {
+                        return Err(invalid());
+                    }
+                    event = true
+                }
+            }
+            "finding" => {
+                if value.len() != 67
+                    || !value.starts_with("f1-")
+                    || !value[3..].bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Err(invalid());
+                }
+                finding = true
+            }
+            "signature" | "rpc_method" | "kind" | "since" | "until" => {
+                if value.is_empty() || value.len() > 256 {
+                    return Err(invalid());
+                }
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    if (finding || event) && !snapshot || finding && event {
+        return Err(invalid());
+    }
+    Ok(query.into())
+}
+pub fn with_selection(launch: &str, query: &str) -> String {
+    let mut url = url::Url::parse(launch).expect("owned dashboard URL");
+    if !query.is_empty() {
+        url.set_query(Some(query));
+    }
+    url.into()
+}

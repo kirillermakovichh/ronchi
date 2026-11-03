@@ -52,6 +52,9 @@ enum Command {
         /// Serve a retained Journal read-only in the foreground until Ctrl-C
         #[arg(long)]
         serve: bool,
+        /// Restore the query from a credential-free pinned dashboard bookmark
+        #[arg(long, default_value = "")]
+        selection: String,
     },
     /// Run an isolated bundled public-path experiment
     Demo(demo::Args),
@@ -365,9 +368,13 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             };
             query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
         }
-        Command::Dashboard { serve } => {
+        Command::Dashboard { serve, selection } => {
             let root = match project(cli.project.as_deref()) {
                 Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            let selection = match dashboard::bookmark_query(&selection) {
+                Ok(query) => query,
                 Err(error) => return render_lab_error(cli.json, error),
             };
             if serve {
@@ -376,6 +383,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     name,
                     cli.lab_id.as_deref(),
                     cli.json,
+                    &selection,
                 )) {
                     Ok(()) => 0,
                     Err(error) => render_lab_error(cli.json, error),
@@ -383,7 +391,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             }
             match run_async(dashboard::launch(root, name, cli.lab_id.as_deref())) {
                 Err(error) => render_lab_error(cli.json, error),
-                Ok(result) => {
+                Ok(mut result) => {
+                    result.launch_url = dashboard::with_selection(&result.launch_url, &selection);
                     let text = result.launch_url.clone();
                     let envelope = serde_json::json!({"contract_version":1,"request_id":format!("cli-{}",std::process::id()),"result":result});
                     match write_output(cli.json, &envelope, &text, false) {

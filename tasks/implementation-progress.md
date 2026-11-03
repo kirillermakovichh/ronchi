@@ -36,3 +36,18 @@ No browser blocker exists.
 
 Do not close Checkpoint C's external-backend item.
 Keep the HTTP-only collector, 32 KiB source cap, and existing evaluation budgets.
+
+## Current continuation slice
+
+Findings pagination and event/Finding bookmarks now have focused native coverage.
+The tests generate real signed transactions with Node crypto and send them through public HTTP RPC.
+They do not write Journal evidence or inject Findings.
+The bookmark tests cover fresh tickets, retained endpoint changes, and name reuse.
+`--selection` restores a credential-free bookmark query for live or retained launch.
+Unsafe integer coordinates preserve exact decimal tokens; fact strings remain strings.
+Findings continuation failure has a controlled transport/renderer test.
+
+A real-process stdout-closure viewer test is also written and passed once.
+It verifies exit, listener release, unchanged Journal bytes, and another Lab's survival.
+It belongs to the next verification slice.
+The broader cancellation/payload/state acceptance still remains.

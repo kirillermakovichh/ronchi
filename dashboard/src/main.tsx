@@ -1,3 +1,4 @@
+import type { Sequence } from "./wire";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -8,8 +9,10 @@ import {
   type Scope,
   type Status,
 } from "./api";
-import { selection, bookmark } from "./selection";
+import { selection, bookmark, type DetailSelection } from "./selection";
 import "./style.css";
+import {StateNotice} from "./StateNotice";
+import { Findings } from "./Findings";
 import { Controls } from "./Controls";
 const initial = selection(location.search);
 function Facts({ value }: { value: unknown }) {
@@ -23,16 +26,20 @@ function App() {
   const [selectionValid, setSelectionValid] = useState(!initial.error);
   const [status, setStatus] = useState<Status>(),
     [scope, setScope] = useState<Scope>(initial.scope),
-    [snapshot, setSnapshot] = useState<number | undefined>(initial.snapshot);
+    [snapshot, setSnapshot] = useState<Sequence | undefined>(initial.snapshot);
   const [summary, setSummary] = useState<QueryReply>(),
     [timeline, setTimeline] = useState<QueryReply>(),
     [detail, setDetail] = useState<QueryReply>(),
     [finding, setFinding] = useState<Record<string, Json>>();
+  const [detailError, setDetailError] = useState("");
+  const [selectedDetail, setSelectedDetail] = useState<
+    DetailSelection | undefined
+  >(initial.detail);
   const evidenceRequest = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => evidenceRequest.current?.abort(), [api, scope]);
   async function loadEvidence(
     selected: Scope,
-    seq: number,
+    seq: Sequence,
     extra: Record<string, unknown> = {},
   ) {
     evidenceRequest.current?.abort();
@@ -46,12 +53,21 @@ function App() {
       extra,
       controller.signal,
     );
-    if (!controller.signal.aborted) setDetail(response);
+    if (!controller.signal.aborted) {
+      if (!response.result.items?.length)
+        throw new Error(
+          "Detail reference is unavailable in the selected Lab and snapshot.",
+        );
+      setDetail(response);
+      setDetailError("");
+    }
+    return response;
   }
   const [busy, setBusy] = useState(false),
     [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let active = true;
+    if(!labId)return;
     bootstrap(api)
       .then(() => {
         if (active) setAuthorized(true);
@@ -63,6 +79,54 @@ function App() {
       active = false;
     };
   }, [api]);
+  useEffect(() => {
+    if (
+      !authorized ||
+      !selectionValid ||
+      !initial.detail ||
+      initial.snapshot === undefined
+    )
+      return;
+    const target = initial.detail;
+    if (target.finding_id) setFinding({ finding_id: target.finding_id });
+    const selected: Scope = target.finding_id
+      ? { ...initial.scope, finding_id: target.finding_id }
+      : {
+          ...initial.scope,
+          event_refs: [{ lab_id: labId, event_seq: target.event_seq! }],
+        };
+    void loadEvidence(selected, initial.snapshot)
+      .then(async (response) => {
+        if (!target.finding_id) return;
+        const controller = evidenceRequest.current;
+        const metadata = await api.query(
+          "findings",
+          {
+            ...initial.scope,
+            event_refs: response.result.items?.map(
+              (item) =>
+                item.event_ref as { lab_id: string; event_seq: Sequence },
+            ),
+          },
+          initial.snapshot,
+          undefined,
+          { limit: 50, fields: ["statement", "guidance"] },
+          controller?.signal,
+        );
+        if (!controller?.signal.aborted)
+          setFinding(
+            metadata.result.items?.find(
+              (item) => item.finding_id === target.finding_id,
+            ) ?? { finding_id: target.finding_id },
+          );
+      })
+      .catch((e) => {
+        if (!(e instanceof DOMException && e.name === "AbortError"))
+          setDetailError(
+            `Invalid or unavailable detail bookmark: ${String(e)}`,
+          );
+      });
+  }, [authorized, api]);
   useEffect(() => {
     if (!authorized || !selectionValid) return;
     const controller = new AbortController();
@@ -164,10 +228,15 @@ function App() {
     setSnapshot(seq);
     setFinding(isFinding ? item : undefined);
     const ref = item.event_ref as
-      { lab_id: string; event_seq: number } | undefined;
+      { lab_id: string; event_seq: Sequence } | undefined;
     const selected: Scope = isFinding
       ? { ...scope, finding_id: String(item.finding_id) }
       : { event_refs: ref ? [ref] : [] };
+    setSelectedDetail(
+      isFinding
+        ? { finding_id: String(item.finding_id) }
+        : { event_seq: ref?.event_seq },
+    );
     await loadEvidence(selected, seq);
   }
   return (
@@ -187,6 +256,7 @@ function App() {
         </div>
       </header>
       <main>
+        <StateNotice labId={labId} status={status} analysis={summary?.result.analysis} error={error}/>
         <section className="lab-head">
           <div>
             <p className="eyebrow">
@@ -215,6 +285,27 @@ function App() {
             </dd>
           </dl>
         </section>
+        {summary && (
+          <details>
+            <summary>Open this pinned selection after Lab stop</summary>
+            <p>
+              Start a read-only viewer for the exact Lab. Its new endpoint
+              replaces the old live endpoint.
+            </p>
+            <code>
+              ronchi dashboard --serve --lab-id {labId} --selection '
+              {new URL(
+                bookmark(
+                  labId,
+                  scope,
+                  summary.view.snapshot_seq,
+                  selectedDetail,
+                ),
+              ).search.slice(1)}
+              '
+            </code>
+          </details>
+        )}
         {error && (
           <div role="alert" className="error">
             {error}
@@ -242,6 +333,7 @@ function App() {
                 onClick={() => {
                   setSnapshot(undefined);
                   setDetail(undefined);
+                  setSelectedDetail(undefined);
                   setFinding(undefined);
                   setRefresh((x) => x + 1);
                 }}
@@ -251,7 +343,12 @@ function App() {
               <button
                 onClick={() =>
                   void navigator.clipboard.writeText(
-                    bookmark(labId, scope, summary.view.snapshot_seq),
+                    bookmark(
+                      labId,
+                      scope,
+                      summary.view.snapshot_seq,
+                      selectedDetail,
+                    ),
                   )
                 }
               >
@@ -268,7 +365,16 @@ function App() {
               )}
               . No Finding alone does not prove resilience.
             </p>
-            <dl className="counts">{Object.entries((summary.result.counts ?? {}) as Record<string,Json>).map(([key,value])=><div key={key}><dt>{key.replaceAll('_',' ')}</dt><dd>{String(value)}</dd></div>)}</dl>
+            <dl className="counts">
+              {Object.entries(
+                (summary.result.counts ?? {}) as Record<string, Json>,
+              ).map(([key, value]) => (
+                <div key={key}>
+                  <dt>{key.replaceAll("_", " ")}</dt>
+                  <dd>{String(value)}</dd>
+                </div>
+              ))}
+            </dl>
             <p className="boundary">
               Observation Boundary:{" "}
               {summary.view.observation_boundary.join(" · ")}
@@ -282,16 +388,16 @@ function App() {
                 <strong>Evidence Gap / {g.code}</strong> — {g.message}
               </p>
             ))}
-            <div className="findings">
-              {summary.result.findings?.map((item) => (
-                <button
-                  key={String(item.finding_id)}
-                  onClick={() => void act(() => evidence(item, true))}
-                >
-                  {String(item.rule_id)} ↗
-                </button>
-              ))}
-            </div>
+            <Findings
+              key={`${summary.view.snapshot_seq}:${JSON.stringify(scope)}`}
+              api={api}
+              scope={scope}
+              snapshot={summary.view.snapshot_seq}
+              items={summary.result.findings ?? []}
+              more={summary.result.findings_more === true}
+              pin={() => setSnapshot(summary.view.snapshot_seq)}
+              select={(item) => void act(() => evidence(item, true))}
+            />
           </section>
         )}
         {status && (
@@ -318,6 +424,7 @@ function App() {
             setSelectionValid(true);
             setScope(next.scope);
             setDetail(undefined);
+            setSelectedDetail(undefined);
             setFinding(undefined);
           }}
         >
@@ -403,6 +510,7 @@ function App() {
           </section>
           <aside aria-label="Supporting evidence">
             <h2>Supporting evidence</h2>
+            {detailError && <p role="alert">{detailError}</p>}
             {!detail && (
               <p>
                 Select a Finding or event. Its evidence will remain pinned while
@@ -412,7 +520,12 @@ function App() {
             {finding && (
               <>
                 <h3>Observed statement</h3>
-                <Facts value={finding.statement ?? finding} />
+                <Facts
+                  value={
+                    finding.statement ??
+                    "Statement is not loaded in this bookmarked Evidence Slice."
+                  }
+                />
                 <h3>Developer guidance</h3>
                 <Facts
                   value={
@@ -451,7 +564,10 @@ function App() {
                     void act(async () => {
                       const refs = detail.result.items?.map(
                         (i) =>
-                          i.event_ref as { lab_id: string; event_seq: number },
+                          i.event_ref as {
+                            lab_id: string;
+                            event_seq: Sequence;
+                          },
                       );
                       await loadEvidence(
                         { event_refs: refs },
@@ -469,6 +585,7 @@ function App() {
                   if (payload?.next_offset == null) return null;
                   return (
                     <button
+                      disabled={busy}
                       key={JSON.stringify(item.event_ref)}
                       onClick={() =>
                         void act(async () => {
@@ -477,7 +594,7 @@ function App() {
                               event_refs: [
                                 item.event_ref as {
                                   lab_id: string;
-                                  event_seq: number;
+                                  event_seq: Sequence;
                                 },
                               ],
                             },

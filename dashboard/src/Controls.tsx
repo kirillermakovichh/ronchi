@@ -1,9 +1,10 @@
+import type { Sequence } from "./wire";
 import { useState } from "react";
 import { Api, type Status, type Json } from "./api";
 interface Props {
   api: Api;
   status: Status;
-  snapshot?: number;
+  snapshot?: Sequence;
   changed: () => void;
 }
 export function Controls({ api, status, snapshot, changed }: Props) {
@@ -13,7 +14,7 @@ export function Controls({ api, status, snapshot, changed }: Props) {
   const [collection, setCollection] = useState<{
       collection_id: string;
       status: string;
-      snapshot_seq: number;
+      snapshot_seq: Sequence;
       [key: string]: Json;
     }>(),
     [evaluation, setEvaluation] = useState<unknown>();

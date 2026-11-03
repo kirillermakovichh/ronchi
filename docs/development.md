@@ -129,3 +129,29 @@ Ticket-capacity or launch transport failure does not undo a successful Lab start
 Run the exact-ID dashboard command for a fresh link if launch metadata is absent.
 No command opens a browser automatically.
 Closing the browser leaves the persistent Lab running.
+
+### Pinned dashboard links and Findings pages
+
+Summary exposes at most five Findings.
+`Next Findings` uses `investigate.findings` with five-item pages and an opaque cursor.
+The first continuation resolves the same first page to acquire its cursor.
+It then requests one next page.
+Later clicks request one page each; they never fetch all Findings.
+Changing scope or snapshot discards the incompatible continuation.
+A failed continuation keeps the previous valid page visible.
+
+Copied links retain the immutable Lab ID, snapshot, semantic scope, and selected event or Finding.
+They omit the bootstrap ticket, credentials, and cursor.
+Bootstrap removes only the ticket fragment.
+Integer coordinates retain the full signed SQLite integer range without conversion through an imprecise JavaScript number.
+Invalid or unavailable references display an error rather than selecting the latest snapshot.
+To move a bookmark to a new live session or retained endpoint, pass its query to the launch command:
+
+```bash
+ronchi dashboard --lab-id <id> --selection 'snapshot=42&event=7'
+ronchi dashboard --serve --lab-id <id> --selection 'snapshot=42&event=7'
+```
+
+The CLI rejects credential, cursor, unknown, and oversized selection fields before requesting a ticket or binding a viewer.
+A live endpoint does not survive Lab stop.
+The interface shows exact-ID retained viewer instructions for its current selection.

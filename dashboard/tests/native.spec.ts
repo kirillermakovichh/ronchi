@@ -127,9 +127,9 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await page.locator('aside pre').scrollIntoViewIfNeeded();
-    await expect(page.locator('aside pre')).toContainText('items');
-    await page.screenshot({path:info.outputPath('narrow-evidence.png')});
+    await page.locator("aside pre").scrollIntoViewIfNeeded();
+    await expect(page.locator("aside pre")).toContainText("items");
+    await page.screenshot({ path: info.outputPath("narrow-evidence.png") });
     expect(errors).toEqual([]);
     await context.addCookies([
       { ...session, expires: Math.floor(Date.now() / 1000) - 1 },
@@ -348,25 +348,252 @@ test("response-loss Findings, public collection and explicit evaluation use real
       .getByRole("button", { name: "Load raw payload preview" })
       .click();
     await expect(page.locator("aside pre").last()).toContainText("payload");
-    child.kill('SIGINT');await new Promise<void>(r=>child!.once('exit',()=>r()));child=undefined;
-    cli(project,'--lab-id',report.lab_id,'down','--force');
-    child=spawn(binary,['--project',project,'--json','--lab-id',report.lab_id,'dashboard','--serve'],{stdio:['ignore','pipe','pipe']});
-    const retained=await new Promise<{result:{launch_url:string}}>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Retained readiness timeout')),5000);let text='';child!.stdout!.on('data',chunk=>{text+=String(chunk);if(text.includes('\n')){clearTimeout(timer);resolve(JSON.parse(text.split('\n')[0]))}});child!.once('exit',code=>{clearTimeout(timer);reject(new Error(`Viewer exited ${code}`))})});
-    const retainedUrl=new URL(retained.result.launch_url);retainedUrl.searchParams.set('snapshot',String(report.snapshot_seq));
+    child.kill("SIGINT");
+    await new Promise<void>((r) => child!.once("exit", () => r()));
+    child = undefined;
+    cli(project, "--lab-id", report.lab_id, "down", "--force");
+    child = spawn(
+      binary,
+      [
+        "--project",
+        project,
+        "--json",
+        "--lab-id",
+        report.lab_id,
+        "dashboard",
+        "--serve",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const retained = await new Promise<{ result: { launch_url: string } }>(
+      (resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Retained readiness timeout")),
+          5000,
+        );
+        let text = "";
+        child!.stdout!.on("data", (chunk) => {
+          text += String(chunk);
+          if (text.includes("\n")) {
+            clearTimeout(timer);
+            resolve(JSON.parse(text.split("\n")[0]));
+          }
+        });
+        child!.once("exit", (code) => {
+          clearTimeout(timer);
+          reject(new Error(`Viewer exited ${code}`));
+        });
+      },
+    );
+    const retainedUrl = new URL(retained.result.launch_url);
+    retainedUrl.searchParams.set("snapshot", String(report.snapshot_seq));
     await page.goto(retainedUrl.toString());
-    await expect(page.getByRole('heading',{name:'Timeline',exact:true})).toBeVisible();
-    await page.getByText('Application Checks',{exact:true}).click();
-    await page.getByLabel('Intent identity',{exact:true}).fill(report.intent_id);
-    await expect(page.getByRole('button',{name:'Collect observations',exact:true})).toBeDisabled();
-    await page.getByRole('button',{name:/Evaluate pinned snapshot/}).click();
-    await expect(page.getByLabel('Explicit Check evaluation')).toContainText('"verdict": "fail"');
-
+    await expect(
+      page.getByRole("heading", { name: "Timeline", exact: true }),
+    ).toBeVisible();
+    await page.getByText("Application Checks", { exact: true }).click();
+    await page
+      .getByLabel("Intent identity", { exact: true })
+      .fill(report.intent_id);
+    await expect(
+      page.getByRole("button", { name: "Collect observations", exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole("button", { name: /Evaluate pinned snapshot/ })
+      .click();
+    await expect(page.getByLabel("Explicit Check evaluation")).toContainText(
+      '"verdict": "fail"',
+    );
   } finally {
     if (child) {
       child.kill("SIGINT");
       await new Promise<void>((r) => child!.once("exit", () => r()));
     }
-    if (labId && cli(project,"--lab-id",labId,"status").result.state === "ready") cli(project, "--lab-id", labId, "down", "--force");
+    if (
+      labId &&
+      cli(project, "--lab-id", labId, "status").result.state === "ready"
+    )
+      cli(project, "--lab-id", labId, "down", "--force");
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("real Findings continue at a pinned prefix and restore an event bookmark", async ({
+  page,
+  context,
+}) => {
+  const project = mkdtempSync(join(tmpdir(), "ronchi-findings-"));
+  let id: string | undefined;
+  try {
+    const lab = cli(
+      project,
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    id = lab.lab_id;
+    cli(project, "case", "arm", "tx-response-lost", "--hold-ms", "30");
+    const { incident } = await import("./incidents");
+    for (let seed = 1; seed <= 4; seed++) await incident(lab.rpc_address, seed);
+    const expected = cli(project, "investigate", "findings", "--limit", "5");
+    const next = cli(
+      project,
+      "investigate",
+      "findings",
+      "--limit",
+      "5",
+      "--cursor",
+      expected.page.next_cursor,
+    );
+    expect(next.result.items.length).toBeGreaterThan(0);
+    const launch = cli(project, "dashboard").result.launch_url;
+    const url = new URL(launch);
+    url.searchParams.set("snapshot", String(expected.view.snapshot_seq));
+    await page.goto(url.toString());
+    await expect(page.locator(".findings button")).toHaveCount(5);
+    await page
+      .getByRole("button", { name: "Next Findings", exact: true })
+      .click();
+    await expect(page.locator(".findings button")).toHaveCount(
+      next.result.items.length,
+    );
+    // Later real incidents cannot enter the pinned page.
+    await incident(lab.rpc_address, 5);
+    expect(await page.locator(".findings button").count()).toBe(
+      next.result.items.length,
+    );
+    await page.getByRole("button", { name: /^#/ }).first().focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "Load raw payload preview" }),
+    ).toBeVisible();
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "Copy evidence link" }).click();
+    const saved = await page.evaluate(() => navigator.clipboard.readText());
+    expect(saved).toContain("event=");
+    expect(saved).not.toContain("ticket");
+    expect(saved).not.toContain("cursor");
+    const fresh = new URL(cli(project, "dashboard").result.launch_url);
+    fresh.search = new URL(saved).search;
+    await page.goto(fresh.toString());
+    await expect(
+      page.getByRole("button", { name: "Load raw payload preview" }),
+    ).toBeVisible();
+    expect(page.url()).toContain("event=");
+    expect(page.url()).not.toContain("ticket");
+  } finally {
+    if (id) cli(project, "--lab-id", id, "down", "--force");
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("a Finding bookmark survives a new retained endpoint and name reuse", async ({
+  page,
+  context,
+}) => {
+  const project = mkdtempSync(join(tmpdir(), "ronchi-finding-link-"));
+  let id: string | undefined,
+    newId: string | undefined,
+    viewer: ReturnType<typeof spawn> | undefined;
+  try {
+    const lab = cli(
+      project,
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    id = lab.lab_id;
+    cli(project, "case", "arm", "tx-response-lost", "--hold-ms", "30");
+    await (await import("./incidents")).incident(lab.rpc_address, 9);
+    await page.goto(cli(project, "dashboard").result.launch_url);
+    await page.locator(".findings button").first().click();
+    await expect(
+      page.getByRole("heading", { name: "Observed statement" }),
+    ).toBeVisible();
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("button", { name: "Copy evidence link" }).click();
+    const saved = new URL(
+      await page.evaluate(() => navigator.clipboard.readText()),
+    );
+    expect(saved.searchParams.get("finding")).toMatch(/^f1-/);
+    const fresh = cli(
+      project,
+      "dashboard",
+      "--selection",
+      saved.search.slice(1),
+    ).result.launch_url;
+    await page.goto(fresh);
+    await expect(page.locator("aside pre").first()).toContainText("Ronchi");
+    cli(project, "--lab-id", id, "down");
+    newId = cli(
+      project,
+      "up",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result.lab_id;
+    viewer = spawn(
+      binary,
+      [
+        "--project",
+        project,
+        "--json",
+        "--lab-id",
+        id,
+        "dashboard",
+        "--serve",
+        "--selection",
+        saved.search.slice(1),
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const ready = await new Promise<{ result: { launch_url: string } }>(
+      (resolve, reject) => {
+        let text = "";
+        const timer = setTimeout(
+          () => reject(new Error("Viewer readiness timeout")),
+          5000,
+        );
+        viewer!.stdout!.on("data", (c) => {
+          text += String(c);
+          if (text.includes("\n")) {
+            clearTimeout(timer);
+            resolve(JSON.parse(text.split("\n")[0]));
+          }
+        });
+        viewer!.once("exit", (code) => {
+          clearTimeout(timer);
+          reject(new Error(`Viewer exited ${code}`));
+        });
+      },
+    );
+    await page.goto(ready.result.launch_url);
+    await expect(page.locator("aside pre").first()).toContainText("Ronchi");
+    await expect(
+      page.getByRole("button", { name: id, exact: true }),
+    ).toBeVisible();
+    expect(page.url()).toContain(
+      `finding=${saved.searchParams.get("finding")}`,
+    );
+    expect(page.url()).not.toContain("ticket");
+  } finally {
+    if (viewer) {
+      viewer.kill("SIGINT");
+      await new Promise<void>((resolve) =>
+        viewer!.once("exit", () => resolve()),
+      );
+    }
+    for (const known of [newId, id])
+      if (
+        known &&
+        cli(project, "--lab-id", known, "status").result.state === "ready"
+      )
+        cli(project, "--lab-id", known, "down", "--force");
     rmSync(project, { recursive: true, force: true });
   }
 });

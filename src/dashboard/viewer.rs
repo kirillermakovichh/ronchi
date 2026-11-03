@@ -145,6 +145,7 @@ pub async fn serve(
     name: &str,
     id: Option<&str>,
     json: bool,
+    selection: &str,
 ) -> Result<(), LabError> {
     use std::io::Write;
     let mut manifest = crate::lab::status(project.clone(), name, id)
@@ -183,7 +184,10 @@ pub async fn serve(
         .sessions
         .ticket()
         .map_err(|_| LabError::internal("Cannot create viewer ticket"))?;
-    let url = format!("http://{address}/ui/{}/#ticket={ticket}", v.manifest.lab_id);
+    let url = with_selection(
+        &format!("http://{address}/ui/{}/#ticket={ticket}", v.manifest.lab_id),
+        selection,
+    );
     let api = Router::new()
         .route("/ui/{id}/api/status", get(status))
         .route("/ui/{id}/api/investigate", post(investigate))

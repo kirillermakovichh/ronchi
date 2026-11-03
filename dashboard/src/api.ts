@@ -1,3 +1,4 @@
+import { requestJson, type Sequence } from "./wire";
 import { parseEvidence } from "./json";
 export type Json =
   null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -5,13 +6,13 @@ export interface Scope {
   signature?: string[];
   rpc_method?: string[];
   kind?: string[];
-  case_activation_id?: number[];
-  from_seq?: number;
-  to_seq?: number;
+  case_activation_id?: Sequence[];
+  from_seq?: Sequence;
+  to_seq?: Sequence;
   since?: string;
   until?: string;
   finding_id?: string;
-  event_refs?: { lab_id: string; event_seq: number }[];
+  event_refs?: { lab_id: string; event_seq: Sequence }[];
 }
 export interface QueryReply {
   contract_version: number;
@@ -22,7 +23,7 @@ export interface QueryReply {
     [key: string]: Json | undefined;
   };
   view: {
-    snapshot_seq: number;
+    snapshot_seq: Sequence;
     journal_state: string;
     observation_boundary: string[];
     evidence_gaps: { code: string; message: string }[];
@@ -46,7 +47,7 @@ export interface Status {
     mode: string;
     checks?: { sources: { check_id: string; version: number }[] };
   };
-  snapshot_seq: number;
+  snapshot_seq: Sequence;
 }
 export class ApiError extends Error {
   constructor(
@@ -66,7 +67,7 @@ export class Api {
         credentials: "same-origin",
         headers:
           body === undefined ? {} : { "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : requestJson(body),
         signal,
       },
     );
@@ -110,11 +111,11 @@ export class Api {
     }
     if (!response.ok) {
       const error = (
-        value as { error?: { message?: string; effects?: string } }
+        value as { error?: { code?:string;message?: string; effects?: string } }
       ).error;
       throw new ApiError(
         response.status,
-        `${error?.message ?? `HTTP ${response.status}`} · effects: ${error?.effects ?? "unknown"}`,
+        `${error?.code??"operation_error"}: ${error?.message ?? `HTTP ${response.status}`} · effects: ${error?.effects ?? "unknown"}`,
       );
     }
     return value as T;
@@ -122,7 +123,7 @@ export class Api {
   query(
     operation: string,
     scope: Scope,
-    snapshot?: number,
+    snapshot?: Sequence,
     cursor?: string | null,
     extra: Record<string, unknown> = {},
     signal?: AbortSignal,
