@@ -1,6 +1,6 @@
 # Reference Application: Withdrawal Relayer
 
-Status: initial implementation contract for the Demo consumer. Runtime code and verification do not yet exist.
+Status: task 10 implementation in progress. Durable intake and the foreground process are implemented; submission, observations, and recovery acceptance remain in the task queue.
 See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
 The defaults below are reversible choices for the first implementation.
 
@@ -11,6 +11,42 @@ Simulator-mode outcomes never claim that a withdrawal executed economically.
 The Reference Application is bundled with Ronchi but is not the product core. It is an example consumer, the System Under Test for the self-contained Demo, and an acceptance harness that prevents the product from becoming a fault generator with no proof of application-level value.
 
 The Demo must exercise the Reference Application through the same external RPC, control, evidence, Check, dashboard, CLI, and MCP-facing behavior used by real applications. It must not depend on canned Journal Evidence or a private shortcut unavailable to users.
+
+## Implemented entry point (slice 10a)
+
+```bash
+ronchi --project /path/to/project --lab-id L1 reference relayer --profile resilient --name reference --listen 127.0.0.1:0 --json
+```
+
+This foreground process never starts or stops a Lab.
+It prints one readiness line with its loopback HTTP address and remains running until SIGINT or SIGTERM.
+The immutable Lab ID is required; the default reference workspace name is `reference`.
+The process uses `ronchi/reference/<name>/relayer.sqlite` in the selected Project Workspace.
+Its separate owner lock prevents two relayer processes from writing this database.
+One bounded 16-command storage owner serializes reads and writes outside Tokio workers.
+SQLite uses version 1, WAL, FULL synchronization, foreign keys, short transactions, and automatic checkpoints.
+The database has a 64 MiB page ceiling and retains at most 128 intents with one active intent.
+A private 32-byte demo seed lives in `signing.seed` with mode `0600` inside a `0700` reference directory.
+The public readiness signer is only its public key.
+
+`POST /intents` accepts `intent_id`, a base58 32-byte `recipient`, and positive integer `amount_lamports`.
+Unknown keys are rejected.
+The canonical payload digest covers recipient and amount.
+Concurrent identical IDs return the same durable intent; another payload returns HTTP 409.
+A second active intent returns HTTP 409 instead of creating an unbounded queue.
+`GET /intents/{intent_id}` returns committed application state with explicit signature/collection availability.
+An absent intent returns `availability:unavailable`.
+The request body limit is 8 KiB; responses are bounded to 256 KiB.
+The loopback listener accepts at most 64 connections and rejects browser Origin headers.
+
+Initialization obtains the exact Lab through authenticated public status and pins the public RPC `getGenesisHash` identity.
+It does not inspect the Lab Journal or simulator state.
+The database persists profile, Lab, local genesis identity, RPC endpoint, and horizon configuration.
+`--horizon-seconds` accepts 1..300 (initial default 60); recovery cannot change the stored value.
+Profile changes are rejected before serving requests.
+At this slice boundary, readiness explicitly says `submission:not_implemented`.
+An accepted intent is durable intake only; it is not transaction acceptance or success.
+The generic Check collector, Verdict evaluator, and Demo remain tasks 11–13.
 
 ## Reference Behavior Profiles
 

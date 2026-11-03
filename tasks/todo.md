@@ -263,6 +263,29 @@ Checkpoints record results and do not require another approval interview.
 - **Dependencies:** 5, 7. **Scope:** Medium. **Likely files:** `src/reference.rs`, `src/reference/store.rs`, `src/reference/sender.rs`, `src/reference/http.rs`, `tests/reference_recovery.rs`.
 - **Source:** [Reference Application](../docs/product/reference-application.md).
 
+#### 10a. Process and durable intent storage
+
+- [x] Add foreground `reference relayer`, separate private workspace/database ownership, immutable Lab/network/profile binding, and idempotent bounded intent intake.
+- **Verify:** Concurrent intake/conflict, reopen/profile mismatch, private signing key, isolated public Lab identity checks.
+
+- **Verified 10a:** `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (115 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed. File-backed storage and native HTTP/process histories cover concurrent identical intake, changed-payload conflict, reopen, immutable profile, seed/directory permissions, public status/genesis binding, and relayer-only shutdown. Existing Lab/RPC/Findings histories remain green.
+- **Self-review:** One storage owner, 16-command admission, one active intent, 128 retained intents, bounded HTTP, WAL/FULL/FK readback, atomic schema/config initialization, private signing seed, and no Lab Journal access. This slice explicitly advertises unimplemented submission; worker and active recovery checks remain below.
+
+#### 10b. Submission, reconciliation, and profiles
+
+- [ ] Commit signed identities and attempt-start before HTTP, implement finalized reconciliation and bounded unsafe replacement, and persist client/status observations.
+- **Verify:** Real RPC response loss, one resilient identity/two unsafe identities, no false failure from null/missing response, and identity-commit failure.
+
+#### 10c. Application observation endpoint
+
+- [ ] Add read-only `POST /checks/observe` with explicit scope, availability, source revision, requested facts, deadline, and consistent application snapshot.
+- **Verify:** Unknown facts, absent intents, bounded input/output, no worker effects, and no private signing material.
+
+#### 10d. Crash recovery and completion review
+
+- [ ] Verify prepared, attempt-start, accepted-before-result, replacement-prepared, and terminal crash boundaries with new processes; preserve horizons and Lab identity.
+- **Verify:** Profile mismatch, unavailable/replaced Lab, graceful relayer-only shutdown, all four locked checks, scoped self-review, and current implementation docs.
+
 ### 11. Public Check collection
 
 - [ ] **Accept:** Implement configured read-only HTTP observation and public `check.observe`; commit validated facts with source, explicit scope, deadlines, and bounded polling.

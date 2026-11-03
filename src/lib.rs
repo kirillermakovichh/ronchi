@@ -9,6 +9,7 @@ mod network;
 pub mod process;
 pub mod protocol;
 pub mod query;
+pub mod reference;
 pub mod rpc;
 pub mod simulator;
 pub mod workspace;
@@ -67,6 +68,11 @@ enum Command {
     },
     /// Query one bounded page of existing Journal evidence
     Investigate(query::cli::Selection),
+    /// Run the standalone bundled reference application
+    Reference {
+        #[command(subcommand)]
+        operation: ReferenceCommand,
+    },
     /// Inspect a live or retained Lab
     Status,
     /// Stop the current named Lab and retain evidence
@@ -81,6 +87,11 @@ enum Command {
         #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "case.list", "case.arm", "case.disarm", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings"])]
         operation: String,
     },
+}
+#[derive(Subcommand)]
+enum ReferenceCommand {
+    /// Serve a durable foreground relayer; requires --lab-id
+    Relayer(reference::Args),
 }
 #[derive(Subcommand)]
 enum CaseCommand {
@@ -240,6 +251,39 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Ok(()) => 0,
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => 0,
                 Err(_) => 6,
+            }
+        }
+        Command::Reference {
+            operation: ReferenceCommand::Relayer(args),
+        } => {
+            let Some(id) = cli.lab_id.as_deref() else {
+                return failure(
+                    cli.json,
+                    2,
+                    "invalid_argument",
+                    "reference relayer requires an explicit --lab-id".into(),
+                    "reference",
+                    "Select the immutable local Lab ID",
+                );
+            };
+            let root = match project(cli.project.as_deref()) {
+                Ok(root) => root,
+                Err(error) => return render_lab_error(cli.json, error),
+            };
+            match run_async(async {
+                reference::run(root, id, args, cli.json)
+                    .await
+                    .map_err(|error| lab::LabError {
+                        code: error.code(),
+                        message: error.to_string(),
+                        phase: "reference",
+                        effects: "unknown",
+                        exit: error.exit(),
+                        lab_id: Some(id.into()),
+                    })
+            }) {
+                Ok(()) => 0,
+                Err(error) => render_lab_error(cli.json, error),
             }
         }
         Command::Investigate(selection) => {
