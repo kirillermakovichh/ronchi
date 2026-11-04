@@ -4,7 +4,11 @@ describe("semantic selection", () => {
   it("pins a snapshot without preserving a pagination cursor or ticket", () => {
     expect(
       selection("?snapshot=41&signature=abc&cursor=temporary&ticket=secret"),
-    ).toEqual({ snapshot: 41, scope: { signature: ["abc"] } });
+    ).toEqual({
+      snapshot: 41,
+      scope: { signature: ["abc"] },
+      page: "overview",
+    });
   });
   it("rejects malformed sequence values without widening the selection", () => {
     expect(selection("?from_seq=bad&kind=rpc.boundary")).toEqual({
@@ -32,4 +36,16 @@ it("preserves full Journal integer coordinates without rounding", () => {
   expect(selection("?snapshot=9007199254740993").snapshot).toBe(
     "9007199254740993",
   );
+});
+
+it("preserves navigation and exact request filters in a saved selection", () => {
+  const value = selection(
+    "?page=traffic&snapshot=5&request_id=r1%3A0&request_id=r1%3A1&event=2",
+  );
+  expect(value.page).toBe("traffic");
+  expect(value.scope.request_id).toEqual(["r1:0", "r1:1"]);
+  expect(value.detail).toEqual({ event_seq: 2 });
+  expect(selection("?page=unknown").error).toBeTruthy();
+  expect(selection("?page=traffic&page=case").error).toBeTruthy();
+  expect(selection("?snapshot=2&event=1").page).toBe("journal");
 });

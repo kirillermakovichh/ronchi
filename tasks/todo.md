@@ -552,3 +552,42 @@ Checkpoints record results and do not require another approval interview.
 - **Sources:** [Access decision](plan.md#lab-lifetime-dashboard-access), [browser contract](../docs/development.md#dashboard-build-and-launch), and [lifecycle](../docs/product/lab-lifecycle.md).
 
 - **Implemented / verified:** One reusable launch key and one distinct browser key per live Lab or retained viewer, held only in runtime memory. Launch metadata reports null seconds and an explicit stop boundary. Native HTTP tests cover 40 repeated launches/exchanges, bearer/Host/Origin separation, and old-link/cookie rejection after a same-port name reuse. All 301 Rust tests, 17 UI tests, 8 native Chromium flows, fmt/check/Clippy, frontend production build and release build passed. A release smoke check confirmed the original link and cookie still work after 62 seconds, then stopped its isolated Lab normally. Browser flows reopen the original link after cookie removal. The former 30-minute server timer was removed; no 30-minute wall-clock soak was performed.
+
+## Human dashboard navigation
+
+### 27. Guided overview, observation detail and RPC inspector
+
+Dependencies: tasks 8, 9, 14, 22 and 26. Preserve open Checkpoints C/E.
+
+#### 27a. Bounded RPC exchange projection
+
+- [x] Add `investigate.requests` and normalized `request_id` selection across shared queries and CLI.
+- [x] Project same-snapshot related RPC facts through the existing index without raw-body reads or schema changes.
+- [x] Verify pagination during appends, missing boundary, batch identity, scope/cursor isolation and response budgets.
+
+#### 27b. Navigation and overview
+
+- [x] Add Overview, Observations, Traffic, Case and Checks navigation with readable Lab state and first-use instructions.
+- [x] Preserve filters, exact coordinates, detail bookmarks, Back navigation and retained recovery.
+- [x] Verify onboarding, no-match, hidden-tab polling, stale-response cancellation and error recovery.
+
+#### 27c. Observation investigation
+
+- [x] Present readable Finding titles, statements, guidance, unknowns and linked evidence with source labels.
+- [x] Keep Findings/evidence pagination and explicit bounded payload continuation.
+- [x] Verify same-snapshot drill-down, exact signature links, unknown rules and unavailable evidence.
+
+#### 27d. RPC inspector and controls
+
+- [x] Add request list/detail tabs and an advanced Journal view with visible filters and paging.
+- [x] Keep Case and Check actions on their own pages, including independent Custom YAML validation and collection cancellation.
+- [x] Verify live and retained operation, current versus historical policy and preservation of form state on navigation.
+
+#### 27e. Completion
+
+- [x] Update the maintained interface contract and relevant usage guidance.
+- [x] Pass UI typecheck/tests/build, native browser flows, Rust fmt/check/tests/Clippy and release build.
+- [x] Inspect desktop/narrow screenshots and commit only implementation, tests and maintained documentation.
+
+- **Implemented / verified:** Five-page navigation, guided first connection, readable Findings, same-snapshot RPC exchange projection and request-ID filtering. Existing bounded queries, Custom Case authoring, Check collection/evaluation, retained recovery and payload byte continuation remain available. Full Rust suite: 303 tests. After boxing the expanded CLI selection, 37 affected CLI/query/MCP/session tests were repeated. UI typecheck, 21 UI tests, 9 native Chromium flows, fmt/check/Clippy with `-D warnings`, production assets and release build passed.
+- **Visual and release checks:** Reviewed desktop and narrow Overview, RPC inspector and Finding detail, plus Case/Checks screens from the release Demo. Verified long-signature wrapping, saved Findings page on Back, same-tab launch reauthorization after cookie loss, preserved YAML/intent forms, exact CLI request filtering and offline schema. Temporary verification Labs were stopped and removed. Research, mockups and screenshots remain local and excluded from commits. Checkpoints C/E remain open.

@@ -11,7 +11,15 @@ it("keeps the valid Findings page when bounded continuation fails", async () => 
       new Response(
         JSON.stringify({
           contract_version: 1,
-          result: { items: [{ finding_id: "old", rule_id: "Observed rule" }] },
+          result: {
+            items: [
+              {
+                finding_id: "old",
+                rule_id: "Observed rule",
+                statement: "Observed readable fact",
+              },
+            ],
+          },
           view: { snapshot_seq: 9 },
           page: { next_cursor: "opaque" },
         }),
@@ -24,7 +32,13 @@ it("keeps the valid Findings page when bounded continuation fails", async () => 
         api={new Api("L1")}
         scope={{}}
         snapshot={9}
-        items={[{ finding_id: "old", rule_id: "Observed rule" }]}
+        items={[
+          {
+            finding_id: "old",
+            rule_id: "Observed rule",
+            statement: "Observed readable fact",
+          },
+        ]}
         more
         pin={() => {}}
         select={() => {}}
@@ -37,7 +51,9 @@ it("keeps the valid Findings page when bounded continuation fails", async () => 
       "textContent",
       expect.stringContaining("previous Findings page remains visible"),
     );
-    expect(screen.getByRole("button", { name: /Observed rule/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Observed readable fact/ }),
+    ).toBeTruthy();
     expect(fetcher).toHaveBeenCalledTimes(2);
     const first = JSON.parse(String(fetcher.mock.calls[0][1]?.body)),
       next = JSON.parse(String(fetcher.mock.calls[1][1]?.body));

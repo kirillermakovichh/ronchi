@@ -216,6 +216,11 @@ fn tools() -> &'static [Tool] {
             true,
         ),
         tool::<Query>(
+            "ronchi_investigate_requests",
+            "Read one bounded page of received RPC requests and same-snapshot related exchange facts. Missing boundaries remain unknown. Payloads are excluded.",
+            true,
+        ),
+        tool::<Query>(
             "ronchi_investigate_timeline",
             "Read one pinned Timeline page. Filters, projection and cursor share CLI semantics. Limit 1..200, request 64 KiB, response 256 KiB.",
             true,

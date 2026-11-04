@@ -39,6 +39,13 @@ impl Selection {
                 .collect(),
         );
         value.list(
+            "q.request_id",
+            s.request_id.iter().cloned().map(SqlValue::Text).collect(),
+        );
+        if request.operation == Operation::Requests {
+            value.sql.push_str(" AND q.kind='rpc.registered'");
+        }
+        value.list(
             "q.activation_id",
             s.case_activation_id
                 .iter()
@@ -98,6 +105,65 @@ impl Selection {
     }
 }
 impl JournalReader {
+    /// Read only payload-free projections for one received request at the pinned watermark.
+    fn rpc_exchange(
+        &self,
+        cte: &str,
+        lab: &str,
+        request: &Value,
+        snapshot: u64,
+    ) -> Result<Value, Error> {
+        let Some(request) = request.as_str() else {
+            return Ok(Value::Null);
+        };
+        let mut exchange = serde_json::Map::new();
+        for (key, kind) in [
+            ("boundary", "rpc.boundary"),
+            ("prepared", "rpc.response_prepared"),
+            ("acceptance", "transaction.accepted"),
+            ("withholding", "fault.withholding_started"),
+            ("dispatch", "rpc.dispatch_prevented"),
+        ] {
+            let fields: &[&str] = match key {
+                "boundary" => &[
+                    "rpc_response",
+                    "transport",
+                    "client_receipt",
+                    "shared_withholding",
+                    "prepared_response",
+                ],
+                "prepared" => &["error_code"],
+                "acceptance" => &["duplicate"],
+                "withholding" => &["hold_ms", "fault"],
+                "dispatch" => &["dispatch", "authority"],
+                _ => unreachable!("fixed exchange projection"),
+            };
+            let data = fields
+                .iter()
+                .map(|field| format!("'{field}',json_extract(metadata_json,'$.data.{field}')"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "{cte} SELECT json_object('event_ref',json_object('lab_id',?1,'event_seq',event_seq),'kind',kind,'source',source,'elapsed_ns',json_extract(metadata_json,'$.elapsed_ns'),'transaction_signature',json_extract(metadata_json,'$.transaction_signature'),'data',json_object({data})) FROM q WHERE request_id=?2 AND kind=?3 AND event_seq<=?4 ORDER BY event_seq DESC LIMIT 1"
+            );
+            let text: Option<String> = self
+                .connection
+                .query_row(
+                    &sql,
+                    rusqlite::params![lab, request, kind, snapshot as i64],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| Error::storage())?;
+            exchange.insert(
+                key.into(),
+                text.map(|s| serde_json::from_str(&s).map_err(|_| Error::storage()))
+                    .transpose()?
+                    .unwrap_or(Value::Null),
+            );
+        }
+        Ok(Value::Object(exchange))
+    }
     pub(crate) fn connection_for_query_progress(
         &mut self,
         deadline: Instant,
@@ -463,6 +529,9 @@ impl JournalReader {
                 "'source',q.source".into(),
             ];
             for field in fields {
+                if field == "exchange" {
+                    continue;
+                }
                 properties.push(if field == "rpc_method" {
                     "'rpc_method',q.rpc_method".into()
                 } else {
@@ -494,6 +563,20 @@ impl JournalReader {
                     ));
                 }
                 let mut item: Value = serde_json::from_str(&text).map_err(|_| Error::storage())?;
+                if request.operation == Operation::Requests
+                    && request
+                        .arguments
+                        .fields
+                        .iter()
+                        .any(|field| field == "exchange")
+                {
+                    item["exchange"] = self.rpc_exchange(
+                        &cte,
+                        &request.lab_id,
+                        &item["request_id"],
+                        cursor.snapshot,
+                    )?;
+                }
                 if request.arguments.include_payload {
                     let sql = format!(
                         "{cte} SELECT q.payload_bytes,q.payload_encoding,CASE WHEN json_extract(q.metadata_json,'$.payload_status')='available' THEN substr(CAST({payload_value} AS BLOB),?3+1,?2) ELSE NULL END FROM q JOIN events e ON e.event_seq=q.event_seq WHERE q.event_seq=?1",

@@ -391,7 +391,7 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
     for (key, value) in &pairs {
         if !matches!(
             key.as_ref(),
-            "signature" | "rpc_method" | "kind" | "case_activation_id"
+            "signature" | "rpc_method" | "request_id" | "kind" | "case_activation_id"
         ) && !singleton.insert(key.as_ref())
         {
             return Err(invalid());
@@ -424,7 +424,21 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
                 }
                 finding = true
             }
-            "signature" | "rpc_method" | "kind" | "since" | "until" => {
+            "page" => {
+                if ![
+                    "overview",
+                    "observations",
+                    "traffic",
+                    "journal",
+                    "case",
+                    "checks",
+                ]
+                .contains(&value.as_ref())
+                {
+                    return Err(invalid());
+                }
+            }
+            "signature" | "rpc_method" | "request_id" | "kind" | "since" | "until" => {
                 if value.is_empty() || value.len() > 256 {
                     return Err(invalid());
                 }

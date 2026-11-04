@@ -1,4 +1,23 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+async function journal(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Traffic", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Journal records", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Journal", exact: true }),
+  ).toBeVisible();
+}
+async function checks(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Checks", exact: true })
+    .click();
+}
+
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -104,11 +123,12 @@ test("public collection cancels on confirmed status and Unicode payload follows 
     ).result.lab_id;
     await page.goto(cli(project, "dashboard").result.launch_url);
     await expect(
-      page.getByRole("heading", { name: "Timeline", exact: true }),
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
     ).toBeVisible();
     expect(app.calls()).toBe(0);
+    await journal(page);
     await page.getByRole("button", { name: /^#/ }).first().click(); // UI polling is pinned; server work remains independent.
-    await page.getByText("Application Checks", { exact: true }).click();
+    await checks(page);
     await page.getByLabel("Intent identity", { exact: true }).fill("W1");
     await page.getByLabel("Explicit bounded polling (60 seconds)").check();
     let submissions = 0;
@@ -121,7 +141,7 @@ test("public collection cancels on confirmed status and Unicode payload follows 
     await page
       .getByRole("button", { name: "Collect observations", exact: true })
       .click();
-    await expect(page.locator(".controls pre").first()).toContainText(
+    await expect(page.locator(".collection-result")).toContainText(
       "outcome_unknown",
     );
     await expect(page.locator(".controls [role=alert]")).toBeVisible();
@@ -134,7 +154,7 @@ test("public collection cancels on confirmed status and Unicode payload follows 
     await page
       .getByRole("button", { name: "Refresh collection status" })
       .click();
-    await expect(page.locator(".controls pre").first()).toContainText(
+    await expect(page.locator(".collection-result")).toContainText(
       '"status": "running"',
     );
     await page
@@ -182,13 +202,17 @@ test("public collection cancels on confirmed status and Unicode payload follows 
       await expect
         .poll(async () => {
           const value = JSON.parse(
-            (await page.locator("aside pre").last().textContent()) ?? "{}",
+            (await page
+              .getByLabel("Payload response JSON", { exact: true })
+              .textContent()) ?? "{}",
           );
           return value.items?.[0]?.payload?.offset;
         })
         .toBe(offset);
       const value = JSON.parse(
-          (await page.locator("aside pre").last().textContent()) ?? "{}",
+          (await page
+            .getByLabel("Payload response JSON", { exact: true })
+            .textContent()) ?? "{}",
         ),
         payload = value.items[0].payload;
       expect(value.items[0].event_ref).toEqual({
@@ -240,7 +264,10 @@ test("obsolete native reads cannot replace a new scope and UI polling preserves 
     ).result.lab_id;
     await page.clock.install();
     await page.goto(cli(project, "dashboard").result.launch_url);
+    await journal(page);
     await expect(page.locator(".event")).toHaveCount(2);
+    await page.getByText("Filter this investigation", { exact: true }).click();
+    await page.getByText("More filters", { exact: true }).click();
     let started: () => void = () => {};
     const observed = new Promise<void>((r) => (started = r)),
       barrier = new Promise<void>((r) => (release = r));
@@ -265,10 +292,13 @@ test("obsolete native reads cannot replace a new scope and UI polling preserves 
       .fill("rpc.boundary");
     await page.getByRole("button", { name: "Apply filters" }).click();
     await observed;
+    await page
+      .getByText("Investigation context and recovery", { exact: true })
+      .click();
     await page.getByText("Committed scope", { exact: true }).click();
     await expect(
       page
-        .locator(".summary details")
+        .locator(".summary details.raw")
         .filter({ hasText: "Committed scope" })
         .locator("pre"),
     ).toHaveText("{}");
@@ -280,7 +310,7 @@ test("obsolete native reads cannot replace a new scope and UI polling preserves 
     await expect(page.locator(".event")).toContainText("lab.ready");
     await expect(
       page
-        .locator(".summary details")
+        .locator(".summary details.raw")
         .filter({ hasText: "Committed scope" })
         .locator("pre"),
     ).toContainText("lab.ready");
@@ -313,7 +343,7 @@ test("obsolete native reads cannot replace a new scope and UI polling preserves 
     await expect(page.locator(".event")).toHaveCount(1);
     await expect(page.locator(".event")).toContainText("lab.ready");
     await expect(apply).toBeFocused();
-    expect(polls).toBe(2);
+    expect(polls).toBe(1);
     expect(
       await apply.evaluate((el) => getComputedStyle(el).outlineStyle),
     ).not.toBe("none");
@@ -368,23 +398,27 @@ test("connection loss preserves the pinned view and offers exact retained recove
       "127.0.0.1:0",
     ).result.lab_id;
     await page.goto(cli(project, "dashboard").result.launch_url);
+    await journal(page);
     await page.getByRole("button", { name: /^#/ }).first().click();
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
     ).toBeVisible();
     const prefix = await page
-      .locator(".summary .section-title span")
+      .locator(".summary .section-title > span")
       .textContent();
     cli(project, "--lab-id", id, "down");
     await expect(page.getByRole("alert").first()).toContainText("Connection", {
       timeout: 10000,
     });
     expect(
-      await page.locator(".summary .section-title span").textContent(),
+      await page.locator(".summary .section-title > span").textContent(),
     ).toBe(prefix);
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
     ).toBeVisible();
+    await page
+      .getByText("Investigation context and recovery", { exact: true })
+      .click();
     await page
       .getByText("Open this pinned selection after Lab stop", { exact: true })
       .click();

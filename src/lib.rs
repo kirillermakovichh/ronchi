@@ -108,7 +108,7 @@ enum Command {
         operation: CaseCommand,
     },
     /// Query one bounded page of existing Journal evidence
-    Investigate(query::cli::Selection),
+    Investigate(Box<query::cli::Selection>),
     /// Collect application observations into the live Journal
     Check {
         #[command(subcommand)]
@@ -133,7 +133,7 @@ enum Command {
     },
     /// Show version-1 request and response schemas without accessing a project
     Schema {
-        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "case.validate", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
+        #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "case.validate", "investigate.summary", "investigate.timeline", "investigate.requests", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
         operation: String,
     },
 }
@@ -597,7 +597,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Ok(root) => root,
                 Err(error) => return render_lab_error(cli.json, error),
             };
-            query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), selection)
+            query::cli::run(cli.json, root, name, cli.lab_id.as_deref(), *selection)
         }
         Command::Dashboard { serve, selection } => {
             let root = match project(cli.project.as_deref()) {

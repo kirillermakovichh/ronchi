@@ -5,6 +5,7 @@ export type Json =
 export interface Scope {
   signature?: string[];
   rpc_method?: string[];
+  request_id?: string[];
   kind?: string[];
   case_activation_id?: Sequence[];
   from_seq?: Sequence;

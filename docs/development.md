@@ -173,7 +173,10 @@ Changing filters or refreshing a snapshot aborts obsolete reads.
 The interface retains the last committed scope while another selection is loading or fails.
 A late old response cannot replace a newer selection.
 Opening a detail pins its snapshot and updates the credential-free URL for reload.
-The evidence panel is a non-modal `aside`; keyboard activation keeps normal document focus.
+The evidence panel is a non-modal `aside` without a focus trap.
+Selecting a record focuses its heading. Narrow layouts scroll that heading into view.
+Overview provides first-connection guidance. Observations, Traffic, Case and Checks have separate navigation entries.
+Traffic has a bounded RPC inspector and an advanced Journal view.
 
 A collection start stores its client-generated identity before sending HTTP.
 If the response is lost, the UI labels its outcome unknown.

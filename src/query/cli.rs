@@ -9,12 +9,15 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Default)]
 pub struct Selection {
-    #[arg(value_parser=["summary","timeline","evidence","findings"])]
+    #[arg(value_parser=["summary","timeline","requests","evidence","findings"])]
     operation: String,
     #[arg(long = "signature")]
     signatures: Vec<String>,
     #[arg(long = "rpc-method")]
     methods: Vec<String>,
+    /// Select exact received RPC request identities
+    #[arg(long = "request-id")]
+    requests: Vec<String>,
     #[arg(long = "case-activation")]
     activations: Vec<u64>,
     #[arg(long = "kind")]
@@ -108,6 +111,7 @@ async fn execute(
             scope: Scope {
                 signature: selection.signatures,
                 rpc_method: selection.methods,
+                request_id: selection.requests,
                 case_activation_id: selection.activations,
                 kind: selection.kinds,
                 event_refs: refs,

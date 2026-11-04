@@ -1,4 +1,23 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+async function journal(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Traffic", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Journal records", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Journal", exact: true }),
+  ).toBeVisible();
+}
+async function checks(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Checks", exact: true })
+    .click();
+}
+
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -75,10 +94,13 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto(launch);
     await expect(
-      page.getByRole("heading", { name: "Timeline", exact: true }),
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText("no_rpc_traffic.", { exact: false }),
+      page.getByRole("heading", {
+        name: "Ronchi is ready. No RPC calls yet.",
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(page).not.toHaveURL(/ticket/);
     const endpoint = new URL(launch);
@@ -115,7 +137,7 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
         cli(project, "--lab-id", second.lab_id, "dashboard").result.launch_url,
       );
       await expect(
-        secondPage.getByRole("heading", { name: "Timeline", exact: true }),
+        secondPage.getByRole("heading", { name: "Lab overview", exact: true }),
       ).toBeVisible();
       expect(
         (await context.cookies()).filter((c) => c.name.startsWith("ronchi_"))
@@ -123,58 +145,112 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       ).toBe(2);
       await page.reload();
       await expect(
-        page.getByRole("heading", { name: "Timeline", exact: true }),
+        page.getByRole("heading", { name: "Lab overview", exact: true }),
       ).toBeVisible();
     } finally {
       await secondPage.close();
       cli(project, "--lab-id", second.lab_id, "down", "--force");
     }
 
-    let releaseCatalog:()=>void=()=>{};
-    const catalogGate=new Promise<void>(resolve=>{releaseCatalog=resolve;});
-    let catalogFinished:()=>void=()=>{};
-    const catalogDone=new Promise<void>(resolve=>{catalogFinished=resolve;});
-    await page.route("**/api/cases",async route=>{
-      try{
-        const response=await route.fetch({headers:{...await route.request().allHeaders(),origin:endpoint.origin}});
-        expect(response.status(),await response.text()).toBe(200);
-        await catalogGate;
-        await route.fulfill({response});
-      }finally{catalogFinished();}
+    let releaseCatalog: () => void = () => {};
+    const catalogGate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
     });
-    await page.getByText("Case controls", { exact: false }).click();
-    const customArtifact = {schema:"ronchi.case/v1",id:"custom.browser",revision:"1",requires:{primitives:["observe.rpc@1"]},modes:["simulator"],filter:{methods:["getHealth"],transaction_origin:"known_local"},state:{key:"case",scope:"activation",max_keys:1,on_exhausted:"error"},sequence:[{id:"observe",using:"observe.rpc@1",until:{matches:1},next:"done"}]};
+    let catalogFinished: () => void = () => {};
+    const catalogDone = new Promise<void>((resolve) => {
+      catalogFinished = resolve;
+    });
+    await page.route("**/api/cases", async (route) => {
+      try {
+        const response = await route.fetch({
+          headers: {
+            ...(await route.request().allHeaders()),
+            origin: endpoint.origin,
+          },
+        });
+        expect(response.status(), await response.text()).toBe(200);
+        await catalogGate;
+        await route.fulfill({ response });
+      } finally {
+        catalogFinished();
+      }
+    });
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: "Case", exact: true })
+      .click();
+    await page.getByText("Custom Case authoring", { exact: true }).click();
+    const customArtifact = {
+      schema: "ronchi.case/v1",
+      id: "custom.browser",
+      revision: "1",
+      requires: { primitives: ["observe.rpc@1"] },
+      modes: ["simulator"],
+      filter: { methods: ["getHealth"], transaction_origin: "known_local" },
+      state: {
+        key: "case",
+        scope: "activation",
+        max_keys: 1,
+        on_exhausted: "error",
+      },
+      sequence: [
+        {
+          id: "observe",
+          using: "observe.rpc@1",
+          until: { matches: 1 },
+          next: "done",
+        },
+      ],
+    };
     try {
-    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill(JSON.stringify(customArtifact));
-    const [validationResponse]=await Promise.all([
-      page.waitForResponse(response=>response.url().endsWith("/api/case/validate")),
-      page.getByRole("button",{name:"Validate Custom Case"}).click(),
-    ]);
-    expect(validationResponse.status(),await validationResponse.text()).toBe(200);
-    expect(await validationResponse.json()).toMatchObject({result:{digest:expect.any(String)}});
-    await expect(page.getByLabel("Resolved Custom Case plan")).toContainText('"digest"');
-    }finally{
+      await page
+        .getByRole("textbox", { name: "Custom Case YAML" })
+        .fill(JSON.stringify(customArtifact));
+      const [validationResponse] = await Promise.all([
+        page.waitForResponse((response) =>
+          response.url().endsWith("/api/case/validate"),
+        ),
+        page.getByRole("button", { name: "Validate Custom Case" }).click(),
+      ]);
+      expect(validationResponse.status(), await validationResponse.text()).toBe(
+        200,
+      );
+      expect(await validationResponse.json()).toMatchObject({
+        result: { digest: expect.any(String) },
+      });
+      await expect(page.getByLabel("Resolved Custom Case plan")).toContainText(
+        '"digest"',
+      );
+    } finally {
       releaseCatalog();
       await catalogDone;
     }
-    await page.getByRole("button",{name:"Activate Custom Case"}).click();
-    await expect.poll(()=>cli(project,"status").result.active_case?.case_id).toBe("custom.browser");
-    const customRevision=cli(project,"status").result.active_case.revision;
-    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill(JSON.stringify({...customArtifact,schema:"ronchi.case/v2"}));
-    await expect(page.getByRole("button",{name:"Activate Custom Case"})).toBeDisabled();
-    await page.getByRole("button",{name:"Validate Custom Case"}).click();
-    await expect(page.locator(".controls [role=alert]")).toContainText("unsupported_schema");
-    expect(cli(project,"status").result.active_case.revision).toBe(customRevision);
-    await page.getByRole("textbox",{name:"Custom Case YAML"}).fill("");
+    await page.getByRole("button", { name: "Activate Custom Case" }).click();
+    await expect
+      .poll(() => cli(project, "status").result.active_case?.case_id)
+      .toBe("custom.browser");
+    const customRevision = cli(project, "status").result.active_case.revision;
+    await page
+      .getByRole("textbox", { name: "Custom Case YAML" })
+      .fill(JSON.stringify({ ...customArtifact, schema: "ronchi.case/v2" }));
+    await expect(
+      page.getByRole("button", { name: "Activate Custom Case" }),
+    ).toBeDisabled();
+    await page.getByRole("button", { name: "Validate Custom Case" }).click();
+    await expect(page.locator(".controls [role=alert]")).toContainText(
+      "unsupported_schema",
+    );
+    expect(cli(project, "status").result.active_case.revision).toBe(
+      customRevision,
+    );
+    await page.getByRole("textbox", { name: "Custom Case YAML" }).fill("");
     await page
       .getByRole("button", { name: "Arm / replace tx-response-lost" })
       .click();
     await expect
       .poll(() => cli(project, "status").result.active_case?.case_id)
       .toBe("tx-response-lost");
-    await expect(
-      page.getByText("waiting_for_match.", { exact: false }),
-    ).toBeVisible();
+    await expect(page.locator(".current-case h2")).toBeVisible();
     await page
       .getByRole("button", { name: "Disarm Case", exact: true })
       .click();
@@ -186,8 +262,11 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       path: info.outputPath("desktop.png"),
       fullPage: true,
     });
+    await journal(page);
     await page.getByRole("button", { name: /^#/ }).first().click();
-    await expect(page.getByText(/Pinned view/)).toBeVisible();
+    await expect(
+      page.locator(".snapshot-bar .section-title > span"),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
     ).toBeVisible();
@@ -201,8 +280,10 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await page.locator("aside pre").scrollIntoViewIfNeeded();
-    await expect(page.locator("aside pre")).toContainText("items");
+    await page.locator(".evidence-detail").scrollIntoViewIfNeeded();
+    await expect(page.locator(".evidence-detail")).toContainText(
+      "Recorded facts",
+    );
     await page.screenshot({ path: info.outputPath("narrow-evidence.png") });
     expect(errors).toEqual([]);
     await context.addCookies([
@@ -214,9 +295,13 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     ).toContainText("401");
     // The original launch URL remains reusable after the browser loses its cookie.
     await page.goto(launch);
-    await expect(page.getByRole("heading", { name: "Timeline", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
+    ).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Timeline", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
+    ).toBeVisible();
     expect(cli(project, "dashboard").result.launch_url).toBe(launch);
 
     cli(
@@ -299,15 +384,19 @@ test("retained viewer reads the original immutable Journal without restarting a 
     );
     await page.goto(ready.result.launch_url);
     await expect(
-      page.getByRole("heading", { name: "Timeline", exact: true }),
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByText("stopped · healthy", { exact: true }),
     ).toBeVisible();
-    await page.getByText("Case controls", { exact: false }).click();
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: "Case", exact: true })
+      .click();
     await expect(
       page.getByRole("button", { name: "Disarm Case", exact: true }),
     ).toBeDisabled();
+    await journal(page);
     await page.getByRole("button", { name: /^#/ }).first().click();
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
@@ -327,6 +416,7 @@ test("retained viewer reads the original immutable Journal without restarting a 
     try {
       expect(replacement.lab_id).not.toBe(lab.lab_id);
       await page.reload();
+      await page.getByText("Lab identity", { exact: true }).click();
       await expect(
         page.getByRole("button", { name: lab.lab_id, exact: true }),
       ).toBeVisible();
@@ -403,19 +493,38 @@ test("response-loss Findings, public collection and explicit evaluation use real
     await page.goto(
       cli(project, "--lab-id", report.lab_id, "dashboard").result.launch_url,
     );
-    await expect(page.locator(".findings button").first()).toBeVisible();
-    await page.locator(".findings button").first().click();
+    await expect(
+      page.locator(".findings:visible button").first(),
+    ).toBeVisible();
+    await page.locator(".findings:visible button").first().click();
     await expect(
       page.getByRole("heading", { name: "Observed statement" }),
     ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Developer guidance" }),
     ).toBeVisible();
-    await expect(page.getByText(/Pinned view/)).toBeVisible();
+    await expect(
+      page.locator(".snapshot-bar .section-title > span"),
+    ).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath("observation-desktop.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("observation-narrow.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
     const pinned = await page
-      .locator(".summary .section-title span")
+      .locator(".summary .section-title > span")
       .textContent();
-    await page.getByText("Application Checks", { exact: true }).click();
+    await checks(page);
     await page
       .getByLabel("Intent identity", { exact: true })
       .fill(report.intent_id);
@@ -430,7 +539,7 @@ test("response-loss Findings, public collection and explicit evaluation use real
       .click();
     // Collection does not silently move an open evidence detail to a new prefix.
     expect(
-      await page.locator(".summary .section-title span").textContent(),
+      await page.locator(".summary .section-title > span").textContent(),
     ).toBe(pinned);
     await page
       .getByRole("button", { name: /Evaluate pinned snapshot/ })
@@ -442,9 +551,15 @@ test("response-loss Findings, public collection and explicit evaluation use real
       "prepared",
     );
     await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: /^Observations/ })
+      .click();
+    await page
       .getByRole("button", { name: "Load raw payload preview" })
       .click();
-    await expect(page.locator("aside pre").last()).toContainText("payload");
+    await expect(
+      page.getByLabel("Payload response JSON", { exact: true }),
+    ).toContainText("payload");
     child.kill("SIGINT");
     await new Promise<void>((r) => child!.once("exit", () => r()));
     child = undefined;
@@ -486,9 +601,9 @@ test("response-loss Findings, public collection and explicit evaluation use real
     retainedUrl.searchParams.set("snapshot", String(report.snapshot_seq));
     await page.goto(retainedUrl.toString());
     await expect(
-      page.getByRole("heading", { name: "Timeline", exact: true }),
+      page.getByRole("heading", { name: "Lab overview", exact: true }),
     ).toBeVisible();
-    await page.getByText("Application Checks", { exact: true }).click();
+    await checks(page);
     await page
       .getByLabel("Intent identity", { exact: true })
       .fill(report.intent_id);
@@ -550,19 +665,41 @@ test("real Findings continue at a pinned prefix and restore an event bookmark", 
     const url = new URL(launch);
     url.searchParams.set("snapshot", String(expected.view.snapshot_seq));
     await page.goto(url.toString());
-    await expect(page.locator(".findings button")).toHaveCount(5);
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: /^Observations/ })
+      .click();
+    await expect(page.locator(".findings:visible button")).toHaveCount(5);
     await page
       .getByRole("button", { name: "Next Findings", exact: true })
       .click();
-    await expect(page.locator(".findings button")).toHaveCount(
+    await expect(page.locator(".findings:visible button")).toHaveCount(
       next.result.items.length,
     );
     // Later real incidents cannot enter the pinned page.
     await incident(lab.rpc_address, 5);
-    expect(await page.locator(".findings button").count()).toBe(
+    expect(await page.locator(".findings:visible button").count()).toBe(
       next.result.items.length,
     );
-    await page.getByRole("button", { name: /^#/ }).first().focus();
+    const selectedStatement = await page
+      .locator(".findings:visible .description")
+      .first()
+      .innerText();
+    await page.locator(".findings:visible button").first().click();
+    await expect(
+      page.getByRole("heading", { name: "Observed statement" }),
+    ).toBeVisible();
+    await page.goBack();
+    await expect(page.locator(".findings:visible button")).toHaveCount(
+      next.result.items.length,
+    );
+    await expect(
+      page.locator(".findings:visible .description").first(),
+    ).toHaveText(selectedStatement);
+    await journal(page);
+    const firstRecord = page.getByRole("button", { name: /^#/ }).first();
+    await expect(firstRecord).toBeEnabled();
+    await firstRecord.focus();
     await page.keyboard.press("Enter");
     await expect(
       page.getByRole("button", { name: "Load raw payload preview" }),
@@ -613,7 +750,7 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
     cli(project, "case", "arm", "tx-response-lost", "--hold-ms", "30");
     await (await import("./incidents")).incident(lab.rpc_address, 9);
     await page.goto(cli(project, "dashboard").result.launch_url);
-    await page.locator(".findings button").first().click();
+    await page.locator(".findings:visible button").first().click();
     await expect(
       page.getByRole("heading", { name: "Observed statement" }),
     ).toBeVisible();
@@ -630,7 +767,7 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
       saved.search.slice(1),
     ).result.launch_url;
     await page.goto(fresh);
-    await expect(page.locator("aside pre").first()).toContainText("Ronchi");
+    await expect(page.locator(".evidence-detail")).toContainText("Ronchi");
     cli(project, "--lab-id", id, "down");
     newId = cli(
       project,
@@ -677,7 +814,8 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
       },
     );
     await page.goto(ready.result.launch_url);
-    await expect(page.locator("aside pre").first()).toContainText("Ronchi");
+    await expect(page.locator(".evidence-detail")).toContainText("Ronchi");
+    await page.getByText("Lab identity", { exact: true }).click();
     await expect(
       page.getByRole("button", { name: id, exact: true }),
     ).toBeVisible();
@@ -698,6 +836,149 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
         cli(project, "--lab-id", known, "status").result.state === "ready"
       )
         cli(project, "--lab-id", known, "down", "--force");
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("guided overview and bounded RPC inspector share exact requests, Back navigation and bookmarks", async ({
+  page,
+  context,
+}, info) => {
+  const project = mkdtempSync(join(tmpdir(), "ronchi-inspector-"));
+  let id: string | undefined;
+  try {
+    const lab = cli(
+      project,
+      "up",
+      "--detach",
+      "--rpc-listen",
+      "127.0.0.1:0",
+      "--control-listen",
+      "127.0.0.1:0",
+    ).result;
+    id = lab.lab_id;
+    const operations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/investigate"))
+        operations.push(request.postDataJSON().operation);
+    });
+    await page.goto(cli(project, "dashboard").result.launch_url);
+    await expect(
+      page.getByRole("heading", { name: "Ronchi is ready. No RPC calls yet." }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Copy RPC URL", exact: true }),
+    ).toBeVisible();
+    expect(operations).not.toContain("investigate.requests");
+    expect(operations).not.toContain("investigate.timeline");
+    await page.screenshot({
+      path: info.outputPath("overview-desktop.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: info.outputPath("overview-narrow.png"),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 960 });
+    for (let n = 0; n < 55; n++) {
+      const result = await fetch(`http://${lab.rpc_address}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", connection: "close" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: n, method: "getHealth" }),
+      });
+      expect((await result.json()).result).toBe("ok");
+    }
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: "Traffic", exact: true })
+      .click();
+    await expect(page.locator(".request-row")).toHaveCount(50);
+    await page.locator(".request-row").first().click();
+    await expect(
+      page.getByRole("tab", { name: "Response", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "Request", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toContainText(
+      "does not retain the original RPC request body",
+    );
+    await page.getByRole("tab", { name: "Response", exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toContainText("RPC boundary");
+    await expect(page.getByRole("tabpanel")).toContainText("unknown");
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await page.screenshot({
+      path: info.outputPath("inspector-desktop.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: info.outputPath("inspector-narrow.png"),
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 960 });
+    const pinned = page.url();
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: "Checks", exact: true })
+      .click();
+    await page.goBack();
+    expect(page.url()).toBe(pinned);
+    await expect(
+      page.getByRole("tab", { name: "Response", exact: true }),
+    ).toBeVisible();
+    const extra = await fetch(`http://${lab.rpc_address}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", connection: "close" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "getHealth" }),
+    });
+    await extra.json();
+    await page
+      .getByRole("button", { name: "Next 50 requests", exact: true })
+      .click();
+    await expect(page.locator(".request-row")).toHaveCount(5);
+    await page
+      .getByRole("button", { name: "Previous page", exact: true })
+      .click();
+    await expect(page.locator(".request-row")).toHaveCount(50);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page
+      .getByRole("button", { name: "Copy evidence link", exact: true })
+      .click();
+    const saved = new URL(
+      await page.evaluate(() => navigator.clipboard.readText()),
+    );
+    expect(saved.searchParams.get("page")).toBe("traffic");
+    expect(saved.searchParams.get("event")).toBeTruthy();
+    const fresh = new URL(cli(project, "dashboard").result.launch_url);
+    fresh.search = saved.search;
+    await context.clearCookies();
+    await page.goto(fresh.toString());
+    await expect(
+      page.getByRole("tab", { name: "Response", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".evidence-detail [role=alert]")).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Submissions", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: "No RPC requests in this selection",
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(page.url()).toContain("rpc_method=sendTransaction");
+  } finally {
+    if (id) cli(project, "--lab-id", id, "down", "--force");
     rmSync(project, { recursive: true, force: true });
   }
 });

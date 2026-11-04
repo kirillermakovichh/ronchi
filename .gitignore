@@ -14,6 +14,11 @@ node_modules/
 /dashboard/test-results/
 /dashboard/playwright-report/
 
+# Local dashboard research and concept previews
+/docs/research/dashboard-usability-study.md
+/docs/research/dashboard-concepts.html
+/docs/research/dashboard-concepts/
+
 # Local environment and operating-system files
 .env
 .env.*

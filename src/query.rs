@@ -26,6 +26,8 @@ pub enum Operation {
     Findings,
     #[serde(rename = "investigate.timeline")]
     Timeline,
+    #[serde(rename = "investigate.requests")]
+    Requests,
     #[serde(rename = "investigate.evidence")]
     Evidence,
 }
@@ -36,6 +38,7 @@ impl Operation {
             "summary" | "investigate.summary" => Ok(Self::Summary),
             "findings" | "investigate.findings" => Ok(Self::Findings),
             "timeline" | "investigate.timeline" => Ok(Self::Timeline),
+            "requests" | "investigate.requests" => Ok(Self::Requests),
             "evidence" | "investigate.evidence" => Ok(Self::Evidence),
             _ => Err(Error::capability(
                 "This Investigation operation is not implemented",
@@ -54,6 +57,8 @@ pub struct EventRef {
 pub struct Scope {
     pub signature: Vec<String>,
     pub rpc_method: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub request_id: Vec<String>,
     pub case_activation_id: Vec<u64>,
     pub kind: Vec<String>,
     pub event_refs: Vec<EventRef>,
@@ -398,6 +403,7 @@ impl Request {
         }
         let count = s.signature.len()
             + s.rpc_method.len()
+            + s.request_id.len()
             + s.case_activation_id.len()
             + s.kind.len()
             + s.event_refs.len()
@@ -408,7 +414,12 @@ impl Request {
         if count > 200 || a.cursor.as_ref().is_some_and(|s| s.len() > 4096) {
             return Err(Error::invalid("Query exceeds its filter/cursor budget"));
         }
-        for values in [&mut s.signature, &mut s.rpc_method, &mut s.kind] {
+        for values in [
+            &mut s.signature,
+            &mut s.rpc_method,
+            &mut s.request_id,
+            &mut s.kind,
+        ] {
             if values.iter().any(|s| s.is_empty() || s.len() > 256) {
                 return Err(Error::invalid(
                     "Filter values must contain 1..256 UTF-8 bytes",
@@ -465,7 +476,7 @@ impl Request {
                 "Payload offset requires one explicit Evidence event and include_payload; maximum offset is 65536",
             ));
         }
-        let defaults = if self.operation == Operation::Findings {
+        let mut defaults = if self.operation == Operation::Findings {
             vec!["statement", "guidance", "limitations"]
         } else if self.operation == Operation::Summary {
             vec!["counts", "traffic_state"]
@@ -481,6 +492,9 @@ impl Request {
                 "block_height",
             ]
         };
+        if self.operation == Operation::Requests {
+            defaults.push("exchange");
+        }
         if a.fields.is_empty() {
             a.fields = defaults.into_iter().map(String::from).collect();
         }
@@ -509,6 +523,7 @@ impl Request {
                 .contains(&field.as_str())
             } else {
                 EVENT_FIELDS.contains(&field.as_str())
+                    || (self.operation == Operation::Requests && field == "exchange")
             };
             if !allowed {
                 return Err(Error::new("invalid_field", "Unknown typed projection path"));

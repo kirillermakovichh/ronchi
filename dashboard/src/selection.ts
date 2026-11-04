@@ -1,5 +1,14 @@
 import { coordinate, type Sequence } from "./wire";
 import type { Scope } from "./api";
+export const pages = [
+  "overview",
+  "observations",
+  "traffic",
+  "journal",
+  "case",
+  "checks",
+] as const;
+export type Page = (typeof pages)[number];
 export interface DetailSelection {
   finding_id?: string;
   event_seq?: Sequence;
@@ -9,9 +18,16 @@ export function selection(search: string): {
   snapshot?: Sequence;
   error?: string;
   detail?: DetailSelection;
+  page?: Page;
 } {
   const params = new URLSearchParams(search),
     scope: Scope = {};
+  const page = params.get("page");
+  if (
+    params.getAll("page").length > 1 ||
+    (page && !pages.includes(page as Page))
+  )
+    return { scope: {}, error: "Unknown dashboard page." };
   for (const key of [
     "from_seq",
     "to_seq",
@@ -29,7 +45,12 @@ export function selection(search: string): {
         error: `Invalid ${key}. Use a decimal integer within the Journal range.`,
       };
   }
-  for (const key of ["signature", "rpc_method", "kind"] as const) {
+  for (const key of [
+    "signature",
+    "rpc_method",
+    "request_id",
+    "kind",
+  ] as const) {
     const values = params.getAll(key);
     if (values.length) scope[key] = values;
   }
@@ -63,6 +84,9 @@ export function selection(search: string): {
   return {
     scope,
     ...(detail ? { detail } : {}),
+    page:
+      (page as Page) ||
+      (finding ? "observations" : event ? "journal" : "overview"),
     snapshot: snapshot ? coordinate(snapshot) : undefined,
   };
 }
@@ -71,6 +95,7 @@ export function bookmark(
   scope: Scope,
   snapshot: Sequence,
   detail?: DetailSelection,
+  page?: Page,
 ): string {
   const params = new URLSearchParams({ snapshot: String(snapshot) });
   for (const [key, value] of Object.entries(scope)) {
@@ -79,6 +104,7 @@ export function bookmark(
         params.append(key, String(entry));
     }
   }
+  if (page) params.set("page", page);
   if (detail?.finding_id) params.set("finding", detail.finding_id);
   if (detail?.event_seq !== undefined)
     params.set("event", String(detail.event_seq));

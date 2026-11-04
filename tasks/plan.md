@@ -172,3 +172,38 @@ Stop invalidates access; a new Lab or viewer gets fresh keys.
 Retained viewers apply the same rule for their own process lifetime and keep their read-only boundary.
 Preserve Host, Origin, bearer separation, fragment removal, and credential-free evidence bookmarks.
 The trade-off is explicit: a copied full launch URL grants access until its Lab stops.
+
+## Human dashboard navigation
+
+The user approved one interface combining a guided Lab overview, readable Finding investigation, and an RPC inspector.
+Task 27 extends the implementation queue without closing independent-backend validation in Checkpoints C/E.
+The product UI remains English.
+Research notes, source studies, concept HTML and preview screenshots remain local and are excluded from commits.
+
+Navigation has five destinations: Overview, Observations, Traffic, Case and Checks.
+The Journal is an advanced Traffic view.
+Overview explains first connection, current traffic, continuing Case state and the next investigation action.
+Finding detail separates supported facts, unknown application outcome, developer guidance and supporting evidence.
+Traffic lists RPC exchanges with observed boundary results and opens Overview, Request, Response and Records tabs.
+Raw request bodies were not retained and must never be reconstructed as observed wire content.
+Raw payloads require explicit selection and retain bounded byte continuation.
+
+Extend the shared query core with investigate.requests and a request_id filter.
+Each list row anchors one rpc.registered event and projects bounded related metadata at the same watermark.
+Use the existing request index, response limits, cancellation and opaque cursor binding.
+Missing boundary evidence means unknown, not pending, success or client receipt.
+The projection adds no storage schema or writer work.
+
+Page links preserve Lab identity, filters, snapshot and selected event or Finding.
+Old bookmarks remain valid.
+Back navigation restores the previous selection.
+Opening detail or continuing a page pins the view; refreshing explicitly returns to the latest snapshot.
+Hidden pages do not initiate background Investigation queries.
+Hidden browser tabs suspend polling.
+A current runtime Case is labelled separately from historical Case context.
+Case authoring remains independent of catalog loading.
+Retained Journals allow reading and Check evaluation, with live mutations disabled.
+
+Implementation order: bounded core, navigation/overview, observation detail, inspector/controls, verification.
+Check each slice through focused tests.
+Finish with native browser flows, full Rust/UI checks, visual desktop/narrow review and an embedded release build.

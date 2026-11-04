@@ -1,35 +1,57 @@
 import type { Sequence } from "./wire";
 import { useRef, useState } from "react";
 import { Api, type Status, type Json } from "./api";
+import { caseInfo } from "./presentation";
+import { Fields, Raw } from "./components";
 interface Props {
   api: Api;
   status: Status;
   snapshot?: Sequence;
   changed: () => void;
+  view?: "case" | "checks";
+  active?: boolean;
 }
 interface CaseCatalog {
   result: { case_id: string; modes: string[] }[];
 }
-export function Controls({ api, status, snapshot, changed }: Props) {
+export function Controls({
+  api,
+  status,
+  snapshot,
+  changed,
+  view,
+  active = true,
+}: Props) {
   const [inspection, setInspection] = useState<unknown>();
   const [catalog, setCatalog] = useState<CaseCatalog>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [selectedCase, setSelectedCase] = useState("tx-response-lost");
   const [catalogVisible, setCatalogVisible] = useState(false);
-  const [catalogLoading,setCatalogLoading]=useState(false);
-  const [catalogError,setCatalogError]=useState("");
-  const catalogPending=useRef(false);
-  async function loadCatalog(show=false){
-    if(show)setCatalogVisible(true);
-    if(catalogPending.current)return;
-    catalogPending.current=true;setCatalogLoading(true);setCatalogError("");
-    try{setCatalog(await api.call<CaseCatalog>("api/cases",undefined));}
-    catch(error){setCatalogError(String(error));}
-    finally{catalogPending.current=false;setCatalogLoading(false);}
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const catalogPending = useRef(false);
+  async function loadCatalog(show = false) {
+    if (show) setCatalogVisible(true);
+    if (catalogPending.current) return;
+    catalogPending.current = true;
+    setCatalogLoading(true);
+    setCatalogError("");
+    try {
+      setCatalog(await api.call<CaseCatalog>("api/cases", undefined));
+    } catch (error) {
+      setCatalogError(String(error));
+    } finally {
+      catalogPending.current = false;
+      setCatalogLoading(false);
+    }
   }
-  const [customYaml,setCustomYaml]=useState("");
-  const [customPlan,setCustomPlan]=useState<{yaml:string;mode:string;plan:unknown}>();
+  const [customYaml, setCustomYaml] = useState("");
+  const [customPlan, setCustomPlan] = useState<{
+    yaml: string;
+    mode: string;
+    plan: unknown;
+  }>();
   const [collection, setCollection] = useState<{
       collection_id: string;
       status: string;
@@ -37,7 +59,10 @@ export function Controls({ api, status, snapshot, changed }: Props) {
       [key: string]: Json;
     }>(),
     [evaluation, setEvaluation] = useState<unknown>();
+  const operationPending = useRef(false);
   async function run(work: () => Promise<void>) {
+    if (operationPending.current) return;
+    operationPending.current = true;
     setBusy(true);
     try {
       await work();
@@ -45,6 +70,7 @@ export function Controls({ api, status, snapshot, changed }: Props) {
     } catch (e) {
       setError(String(e));
     } finally {
+      operationPending.current = false;
       setBusy(false);
     }
   }
@@ -52,13 +78,22 @@ export function Controls({ api, status, snapshot, changed }: Props) {
   const sources = status.configuration.checks?.sources ?? [];
   const cases = catalog?.result ?? [];
   const supported = cases.some(
-    (entry) => entry.case_id === selectedCase && entry.modes.includes(status.configuration.mode),
+    (entry) =>
+      entry.case_id === selectedCase &&
+      entry.modes.includes(status.configuration.mode),
   );
   return (
     <section className="controls" aria-label="Case and Check controls">
       <details
+        open={view ? active && view === "case" : undefined}
+        hidden={view === "checks"}
         onToggle={(event) => {
-          if (event.currentTarget.open && live && catalog === undefined) {
+          if (
+            active &&
+            event.currentTarget.open &&
+            live &&
+            catalog === undefined
+          ) {
             void loadCatalog();
           }
         }}
@@ -73,7 +108,9 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         >
           List Cases
         </button>
-        {catalogVisible && catalog !== undefined && <pre>{JSON.stringify(catalog, null, 2)}</pre>}
+        {catalogVisible && catalog !== undefined && (
+          <Raw value={catalog} label="Case catalog metadata" />
+        )}
         <label>
           Case
           <select
@@ -81,15 +118,19 @@ export function Controls({ api, status, snapshot, changed }: Props) {
             disabled={!live || busy || catalog === undefined}
             onChange={(event) => setSelectedCase(event.target.value)}
           >
-            {catalog === undefined && <option value="">Case catalog not loaded</option>}
+            {catalog === undefined && (
+              <option value="">Case catalog not loaded</option>
+            )}
             {cases.map((entry) => (
               <option
                 key={entry.case_id}
                 value={entry.case_id}
                 disabled={!entry.modes.includes(status.configuration.mode)}
               >
-                {entry.case_id}
-                {entry.modes.includes(status.configuration.mode) ? "" : " · unsupported in this mode"}
+                {caseInfo({ case_id: entry.case_id }).title}
+                {entry.modes.includes(status.configuration.mode)
+                  ? ""
+                  : " · unsupported in this mode"}
               </option>
             ))}
           </select>
@@ -105,23 +146,66 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         >
           Arm / replace {selectedCase}
         </button>
-        <label>
-          Custom Case YAML
-          <textarea value={customYaml} maxLength={65536} disabled={!live || busy}
-            onChange={(event)=>{setCustomYaml(event.target.value);setCustomPlan(undefined);}} />
-        </label>
-        <button disabled={!live || busy || customYaml.length===0}
-          onClick={()=>void run(async()=>{
-            setCustomPlan(undefined);
-            const reply=await api.call<{result:unknown}>("api/case/validate",{yaml:customYaml});
-            setCustomPlan({yaml:customYaml,mode:status.configuration.mode,plan:reply.result});
-          })}>Validate Custom Case</button>
-        {customPlan!==undefined && <pre aria-label="Resolved Custom Case plan">{JSON.stringify(customPlan.plan,null,2)}</pre>}
-        <button disabled={!live || busy || customPlan===undefined || customPlan.yaml!==customYaml || customPlan.mode!==status.configuration.mode}
-          onClick={()=>void run(async()=>{
-            await api.call("api/case/arm",{case_id:"custom",custom_yaml:customYaml});
-            changed();
-          })}>Activate Custom Case</button>
+        <p>{caseInfo({ case_id: selectedCase }).description}</p>
+        <details className="custom-case">
+          <summary>Custom Case authoring</summary>
+          <label>
+            Custom Case YAML
+            <textarea
+              value={customYaml}
+              maxLength={65536}
+              disabled={!live || busy}
+              onChange={(event) => {
+                setCustomYaml(event.target.value);
+                setCustomPlan(undefined);
+              }}
+            />
+          </label>
+          <button
+            disabled={!live || busy || customYaml.length === 0}
+            onClick={() =>
+              void run(async () => {
+                setCustomPlan(undefined);
+                const reply = await api.call<{ result: unknown }>(
+                  "api/case/validate",
+                  { yaml: customYaml },
+                );
+                setCustomPlan({
+                  yaml: customYaml,
+                  mode: status.configuration.mode,
+                  plan: reply.result,
+                });
+              })
+            }
+          >
+            Validate Custom Case
+          </button>
+          {customPlan !== undefined && (
+            <pre aria-label="Resolved Custom Case plan">
+              {JSON.stringify(customPlan.plan, null, 2)}
+            </pre>
+          )}
+          <button
+            disabled={
+              !live ||
+              busy ||
+              customPlan === undefined ||
+              customPlan.yaml !== customYaml ||
+              customPlan.mode !== status.configuration.mode
+            }
+            onClick={() =>
+              void run(async () => {
+                await api.call("api/case/arm", {
+                  case_id: "custom",
+                  custom_yaml: customYaml,
+                });
+                changed();
+              })
+            }
+          >
+            Activate Custom Case
+          </button>
+        </details>
         <button
           disabled={!live || busy}
           onClick={() =>
@@ -134,17 +218,21 @@ export function Controls({ api, status, snapshot, changed }: Props) {
           Disarm Case
         </button>
       </details>
-      <details>
+      <details
+        open={view ? active && view === "checks" : undefined}
+        hidden={view === "case"}
+      >
         <summary>Application Checks</summary>
         <p>
           Collection writes application-source observations to the Journal.
-          Evaluation reads the pinned evidence only. HTTP sources only · 32 KiB
-          response cap · one intent or signature.
+          Evaluation reads the pinned evidence only. Select one explicit intent
+          for this form.
         </p>
         {sources.length === 0 ? (
           <p>
             No configured Check source. Configure a named source before
-            collection. RPC-only Investigation has no formal Verdict.
+            collection. Add it to the project’s ronchi/config.toml. RPC-only
+            Investigation has no formal Verdict.
           </p>
         ) : (
           <form
@@ -245,7 +333,17 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         )}
         {collection && (
           <>
-            <pre>{JSON.stringify(collection, null, 2)}</pre>
+            <div className="collection-result">
+              <h3>Collection status</h3>
+              <Fields
+                value={{
+                  status: collection.status,
+                  collection_id: collection.collection_id,
+                  snapshot_seq: collection.snapshot_seq,
+                }}
+              />
+              <Raw value={collection} label="Collection metadata JSON" />
+            </div>
             <button
               disabled={busy}
               onClick={() =>
@@ -284,7 +382,11 @@ export function Controls({ api, status, snapshot, changed }: Props) {
         )}
         {evaluation !== undefined && (
           <div aria-label="Explicit Check evaluation">
-            <pre>{JSON.stringify(evaluation, null, 2)}</pre>
+            <h3>Check evaluation</h3>
+            <Fields
+              value={(evaluation as { result?: unknown }).result ?? evaluation}
+            />
+            <Raw value={evaluation} label="Evaluation metadata JSON" />
           </div>
         )}
       </details>
@@ -308,8 +410,8 @@ export function Controls({ api, status, snapshot, changed }: Props) {
       )}
       {(error || catalogError) && (
         <p role="alert">
-          {error || catalogError}. Inspect current state before repeating a mutation with
-          unknown effects.
+          {error || catalogError}. Inspect current state before repeating a
+          mutation with unknown effects.
         </p>
       )}
     </section>

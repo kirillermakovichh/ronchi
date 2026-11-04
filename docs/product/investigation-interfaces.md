@@ -8,7 +8,7 @@ All three interfaces call the same core operations against one Lab Journal.
 
 ## Implemented Investigation surface
 
-The Rust query core supports finite summary, Timeline, Evidence Slice, and Findings queries.
+The Rust query core supports finite summary, RPC request, Timeline, Evidence Slice, and Findings queries.
 Schema 6 stores indexed navigation metadata in the same transaction as each Journal event.
 Signed bytes remain in the original event storage.
 Queries use one read-only connection per page and release its SQLite snapshot before returning.
@@ -16,11 +16,11 @@ Cursors bind the immutable Lab, committed watermark, normalized selection, proje
 Older Journals use a read-only SQL adapter with an explicit correlation gap.
 The core limits concurrent readers to four and cancels SQLite VM work at its deadline.
 Summary executes the versioned Findings rules and reports their evaluation states and Evidence Gaps.
-CLI exposes `investigate summary|timeline|evidence|findings` with `--signature`, `--rpc-method`, `--case-activation`, `--kind`, `--event-seq`, `--event-ref LAB_ID:EVENT_SEQ`, `--from-seq`, `--to-seq`, `--since`, `--until`, `--fields`, `--limit`, and `--cursor`.
+CLI exposes `investigate summary|requests|timeline|evidence|findings` with `--signature`, `--rpc-method`, `--request-id`, `--case-activation`, `--kind`, `--event-seq`, `--event-ref LAB_ID:EVENT_SEQ`, `--from-seq`, `--to-seq`, `--since`, `--until`, `--fields`, `--limit`, and `--cursor`.
 Each invocation returns one page and never follows a stream or fetches all pages.
 Live CLI queries use authenticated `POST /v1/labs/{id}/investigate` with the typed core request.
 Retained CLI queries open the exact Journal read-only without starting a Lab.
-`schema investigate.summary|investigate.timeline|investigate.evidence|investigate.findings` exposes shared request and success/error models offline.
+`schema investigate.summary|investigate.requests|investigate.timeline|investigate.evidence|investigate.findings` exposes shared request and success/error models offline.
 JSON mode emits one envelope; text mode escapes terminal controls in untrusted values.
 Evidence accepts `--include-payload` and returns a SQL-bounded preview of the selected retained payload.
 The preview ceiling is 4096 UTF-8 bytes before JSON escaping; the core can reduce it further to fit the full envelope.
@@ -70,6 +70,7 @@ The sections below retain the full accepted contract.
 | `check.observe` | `ronchi check observe <check-id>` | `ronchi_check_observe` | Collect bounded observations from a configured source into a live Journal |
 | `check.evaluate` | `ronchi check evaluate <check-id>` | `ronchi_check_evaluate` | Evaluate retained evidence at a pinned snapshot without contacting the source |
 | `investigate.summary` | `ronchi investigate summary` | `ronchi_investigate_summary` | Return compact counts, up to five Findings, gaps, and drill-down references |
+| `investigate.requests` | `ronchi investigate requests` | `ronchi_investigate_requests` | Return a bounded page of received RPC requests with related exchange facts |
 | `investigate.timeline` | `ronchi investigate timeline` | `ronchi_investigate_timeline` | Return a bounded Timeline page |
 | `investigate.evidence` | `ronchi investigate evidence` | `ronchi_investigate_evidence` | Resolve selected evidence references or an explicit payload projection |
 | `investigate.findings` | `ronchi investigate findings` | `ronchi_investigate_findings` | Return a bounded page of deterministic Findings |
@@ -175,29 +176,48 @@ Unknown mutation outcomes retain an identity for public status inspection.
 See the [acceptance coverage](../development.md#dashboard-cancellation-and-acceptance-coverage) for native and controlled renderer test boundaries.
 
 
-The first dashboard has a Lab header, a compact Investigation summary, a Timeline, and an evidence detail panel.
-The header shows mode, RPC URL, Lab status, Journal health, Observation Boundary, and active Case.
-Case controls list mode requirements and expose arm, replace, and disarm actions.
-Changing the Case retains the selected Investigation and the Journal.
-The summary shows counts, bounded Findings, Evidence Gaps, and whether the selected scope is still open.
-Selecting a Finding opens its supporting Evidence Slice and highlights the related Timeline entries.
-Selecting a Fault or transaction signature narrows the same Investigation.
-The first filters are Case activation, signature, RPC method, event kind, and time or sequence interval.
-The Timeline distinguishes request receipt, simulator/backend decisions, Fault application, RPC Boundary Result, and later observations.
-The detail panel labels every observation's source and follows its correlation and causal references.
-It shows the evidence-backed Finding and suggested backend checks in separate blocks.
-Raw payloads are collapsed and fetched only on explicit selection.
-Configured Checks expose separate collect and evaluate actions under the same public operation contract.
-Collect requires a live Lab; evaluate can use retained evidence after stop.
-The dashboard polls bounded summaries while live; opening a detail freezes its snapshot until the user selects refresh.
+The dashboard has five destinations: Overview, Observations, Traffic, Case and Checks.
+Overview explains the current state and the next useful action.
+With no RPC traffic, it shows the RPC URL and instructions for the independently started backend.
+With evidence, it shows readable Findings and direct access to Traffic.
+The header shows current Lab state and the current runtime Case.
+Overview labels historical Case context separately at the selected snapshot.
+Full Lab identity, analysis metadata and retained-viewer recovery stay available in expandable details.
+
+Observations presents Findings with readable titles, statements and linked supporting records.
+A selected Finding separates observed facts, unknown application outcomes, developer guidance and evidence.
+Record order is not presented as application causality.
+Traffic lists received RPC requests with observed boundary results.
+Its detail tabs are Overview, Request, Response and Records.
+Request shows retained metadata and explicitly states that the original request body was not retained.
+Prepared content, HTTP transport outcome and unknown client receipt remain separate facts.
+The advanced Journal view preserves access to Lab, Case, Fault and application records without a Finding.
+
+Shared filters cover signature, RPC method, request ID, Case activation, record kind and time or sequence interval.
+Applied filters are visible and removable.
+A request detail follows its exact request ID at the pinned snapshot, including related records outside the list filters.
+Links retain page, exact Lab identity, filters, snapshot and selected event or Finding.
+Older links without a page still open the corresponding Finding or Journal detail.
+Browser Back restores the previous selection.
+Case and Check forms retain their state across navigation.
+
+Case controls expose catalog capabilities, arm, replace, disarm and independently validated Custom YAML.
+Changing a Case preserves the Lab, Journal and pinned Investigation.
+Check collection and evaluation remain explicit separate actions.
+Collect requires a live Lab; evaluate reads the selected retained snapshot.
+Payload previews are fetched only by explicit action and retain byte-offset continuation.
+The dashboard polls bounded summaries while live and suspends polling in a hidden browser tab.
+Hidden pages do not initiate Investigation list queries.
+Opening detail or continuing a page pins the snapshot; Refresh explicitly selects the latest evidence.
+A pinned view polls only current runtime status and labels possible newer Journal records without shifting the selected evidence.
 
 | State | Visible behavior |
 | --- | --- |
 | No Lab | Show startup options; do not imply a running capture |
 | Starting | Show readiness phase and bounded startup progress |
 | Ready, no traffic | Show the RPC URL and the instruction to drive the independently running backend |
-| Armed, no match | Show `waiting_for_match`; do not show a resilience success |
-| Traffic, no Finding | Show the Timeline and `no_finding`; do not invent a defect or Verdict |
+| Armed, no traffic | Explain that the continuing Case is waiting for matching calls; do not show a resilience success |
+| Traffic, no Finding | Offer Traffic and Journal with a clear no-Finding explanation; do not invent a defect or Verdict |
 | Evidence Gap | Show the missing source and the conclusions it prevents |
 | Stopped/interrupted | Keep retained evidence readable and label Journal state and last committed sequence |
 | Core failure | Show a product failure separately from an injected RPC Fault or an observed application action |
@@ -207,7 +227,7 @@ The dashboard polls bounded summaries while live; opening a detail freezes its s
 Requests use `contract_version:1`, a transport-specific `request_id`, an operation, and typed arguments.
 Lab-scoped requests include the resolved `lab_id`; bootstrap exceptions follow the identity rules above.
 Investigation arguments contain `scope`, `limit`, `cursor`, `fields`, and `include_payload`; omitted scope means the selected Lab.
-`scope` accepts event references, `finding_id`, transaction `signature`, `rpc_method`, `case_activation_id`, event `kind`, `from_seq`, `to_seq`, `since`, and `until`.
+`scope` accepts event references, `finding_id`, transaction `signature`, `rpc_method`, `request_id`, `case_activation_id`, event `kind`, `from_seq`, `to_seq`, `since`, and `until`.
 Lists within one filter use OR; different filters use AND.
 Sequence bounds are inclusive; UTC RFC 3339 time bounds use `[since,until)` over recorded time.
 Recorded time is a filter, not proof of causal order.
@@ -229,6 +249,25 @@ Projection always retains identity, kind, source, necessary correlation referenc
 If a payload cannot fit, return its bounded preview, retained byte length, and `payload_truncated:true`; never imply that preview is complete.
 If one projected item still cannot fit, return `result_too_large` with a smaller projection or interval as the recovery step.
 Exhaustive evidence retrieval is an explicit client traversal of bounded pages, not an unbounded response.
+
+### RPC request projection
+
+`investigate.requests` returns one item for each selected `rpc.registered` record.
+It uses the same ordering, scope, watermark, cursor, response budget and cancellation rules as Timeline.
+`request_id` is an OR-list filter within the shared scope and intersects other filters.
+The CLI spelling is `--request-id`.
+Requests always select registered requests; a conflicting record-kind filter yields an empty page.
+
+Default request fields include `exchange`.
+Its `boundary`, `prepared`, `acceptance`, `withholding` and `dispatch` entries contain the latest retained record of each supported kind for that exact request ID through the watermark, or null.
+Each entry retains its event reference, kind, source, elapsed coordinate, signature and compact kind-specific facts.
+Boundary facts include transport, prepared-result class, shared withholding and client receipt.
+Prepared content is excluded from the list projection and stays available through Evidence Slice.
+The projection uses the existing request index and does not read original event bodies or create a new Journal schema.
+Explicit field selection can omit `exchange` to reduce response size.
+Missing records remain unknown, including incomplete legacy correlation and shared withholding not attached to a particular batch item.
+These summaries do not infer client receipt, timeout, retries or business completion.
+Use the Evidence Slice with the same `request_id` to page through all related retained records.
 
 ### Implemented projection paths
 
@@ -300,7 +339,7 @@ The adapter contains no model, registration, cloud call, or remote transport req
 
 ### Implemented stdio adapter
 
-`ronchi --project <directory> mcp stdio` serves the thirteen tools in the operation table with official `rmcp` 3.8.0.
+`ronchi --project <directory> mcp stdio` serves the fourteen tools in the operation table with official `rmcp` 3.8.0.
 The adapter selects only a Project Workspace.
 Global `--lab` and `--lab-id` are rejected; each scoped tool requires its own immutable `lab_id`.
 `lab.up` accepts `name` and typed configuration `arguments`.
