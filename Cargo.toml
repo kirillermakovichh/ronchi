@@ -7,6 +7,8 @@ publish = false
 [dependencies]
 rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io"] }
 clap = { version = "4", features = ["derive", "env"] }
+console = { version = "0.16", default-features = false, features = ["std", "ansi-parsing", "unicode-width"] }
+indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 toml = "0.9"
@@ -40,3 +42,4 @@ yaml-rust2 = { version = "0.13.0", default-features = false }
 [dev-dependencies]
 rmcp = { version = "=3.8.0", default-features = false, features = ["client"] }
 tempfile = "3"
+vt100 = "0.16"

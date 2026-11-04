@@ -33,6 +33,10 @@ Ronchi prints its RPC URL and dashboard link after readiness.
 Keep this terminal open and start your backend in another terminal with that RPC URL.
 Press Ctrl-C to stop the Lab and retain its Journal.
 Ronchi does not stop your backend.
+In an interactive terminal, Ronchi shows an animated Lab panel with the current Case and Journal watermark.
+Use `ronchi up --no-animation` for a static panel.
+Set `NO_COLOR=1` to disable color and emphasis.
+JSON, CI, and redirected output stay plain.
 
 For scripts or background use, select `--detach` explicitly:
 

@@ -128,6 +128,11 @@ The band motif can appear in the wordmark, documentation dividers, dashboard Tim
 The dashboard should not require a Control-versus-Chaos split view. Its primary composition is the Continuous Lab Journal with clear visual deformation around a fault, plus filtered Investigations and Findings. Optional comparisons may use aligned side-by-side views when Comparability is established.
 
 The CLI should remain sparse and structured. The visual identity must not add decorative output that wastes terminal space or Coding Agent tokens.
+Interactive foreground startup uses a compact band mark and a bounded inline status animation.
+The terminal supplies its own background and monospace font.
+Use theme-native body text, muted labels, and a coral accent for held RPC Faults.
+Keep JSON and noninteractive output free of the visual panel.
+The [terminal presentation contract](investigation-interfaces.md#foreground-terminal-presentation) defines motion, opt-outs, status authority, and completion labels.
 
 ## Naming system
 

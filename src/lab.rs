@@ -14,6 +14,7 @@ use std::{
 
 pub mod daemon;
 pub(crate) mod foreground;
+mod terminal;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StartMode {

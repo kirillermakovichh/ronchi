@@ -117,3 +117,45 @@ Use an ADR when the decision warrants one under the project `domain-modeling` gu
 Update the open questions when a choice is resolved or deliberately deferred.
 Mark development tasks complete only after their acceptance and verification steps pass.
 Design completion does not imply runtime verification or product demand.
+
+## Foreground terminal experience
+
+The user requested a polished animated terminal after verifying foreground `up` and Ctrl-C.
+Implement this as task 25 in [todo.md](todo.md).
+Keep the open third-party validation in Checkpoints C/E unchanged.
+
+The terminal should resemble a small optical instrument panel.
+Use the existing parallel-band identity, theme-native text, muted labels, and one coral Fault accent.
+Use the terminal's own monospace typeface and background.
+Keep the layout left aligned, with a compact wordmark and no full-screen takeover.
+Body text inherits the terminal foreground; previews use warm white `#E8E4DF` on `#1B1D21`.
+Muted labels use ANSI 245 (`#8A8A8A`); the Fault signal uses ANSI 209 (`#FF875F`).
+The background is never painted by Ronchi.
+
+1. Add a TTY-only Ronchi header, startup spinner, readable RPC URL, and short dashboard hyperlink.
+2. Show elapsed time, the committed Journal watermark, the current Case, and held RPC requests from authenticated status.
+3. Animate shutdown until the owned Lab exits, then show actual Journal completion or interruption.
+4. Verify native PTY lifecycle, narrow widths, reduced motion, plain output, and JSON compatibility.
+
+Use Console for terminal width and styling.
+Use Indicatif for bounded inline redraws.
+Drive animation from the existing Tokio runtime, without a separate ticker thread.
+Poll authenticated status at most once per second, without running Findings or scanning the Journal.
+Status-display failures do not change Lab health; terminal disconnection follows normal ownership shutdown.
+Missing status must appear as unavailable rather than a zero count or a healthy state.
+
+TTY detection selects presentation only.
+JSON, detached startup, redirected output, `TERM=dumb`, and CI retain simple output.
+`NO_COLOR` suppresses color and emphasis.
+`up --no-animation` keeps a static styled introduction and completion message.
+Never use raw mode, capture normal keyboard input, clear scrollback, or enter an alternate screen.
+Dashboard links retain their existing single-use, 60-second lifetime; show the command for obtaining a fresh link.
+
+Sources inspected before implementation:
+
+- [Console](https://github.com/console-rs/console): terminal styles, width measurement, and ANSI handling.
+- [Indicatif](https://github.com/console-rs/indicatif): inline progress and spinners.
+- [Ratatui](https://github.com/ratatui/ratatui): broader terminal UI alternative, unnecessary for this scoped panel.
+- [CLI Guidelines](https://clig.dev/#output): TTY-aware animation and intentional color.
+- [NO_COLOR](https://no-color.org/): opt-out convention.
+- [Terminal hyperlinks](https://iterm2.com/feature-reporting/Hyperlinks_in_Terminal_Emulators.html): OSC 8 hyperlink format and compatibility.

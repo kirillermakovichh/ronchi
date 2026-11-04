@@ -23,6 +23,7 @@ An unresolved application lockfile is implementation work, not a missing stack d
 | Loopback control and dashboard serving | Axum |
 | Journal and reference database | `rusqlite` with bundled SQLite; WAL and a dedicated writer |
 | CLI | `clap` |
+| Human foreground terminal | `console` styles/width and Tokio-driven `indicatif` redraws; no raw mode |
 | Local MCP | Official `rmcp` |
 | Typed JSON and configuration | `serde`, `serde_json`, `toml` |
 | Custom Case parsing | `yaml-rust2` with the bounded YAML subset enforced by Ronchi validation |

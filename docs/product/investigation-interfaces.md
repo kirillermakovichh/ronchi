@@ -82,6 +82,7 @@ Foreground `--json` flushes one readiness envelope, then waits for shutdown with
 Normal shutdown adds no stdout record.
 If the Lab fails after readiness, the CLI emits a structured error on a subsequent JSON line and exits nonzero.
 The `lab.up` schema describes core startup settings; `--detach` is a CLI lifetime option.
+
 Schemas and help also need no Lab.
 Bootstrap responses expose the resolved identity when one exists.
 CLI `--lab <name>` resolves the human Lab name and returns the resolved `lab_id`.
@@ -95,6 +96,34 @@ A Finding scope uses `signature` and `accepted_request_id` for an accepted trans
 A request-based scope uses `request_id`, `rpc_method`, and an optional known `signature` without asserting acceptance.
 Existing accepted-transaction Findings preserve their wire fields and semantic IDs.
 An Investigation has query state, not a separate start, capture, or stop lifecycle.
+
+### Foreground terminal presentation
+
+Interactive `up` uses an inline Ronchi panel with the parallel-band identity.
+It retains scrollback and normal terminal input; it does not use raw mode or an alternate screen.
+The panel shows the RPC URL and a short OSC 8 dashboard hyperlink.
+The hyperlink retains its single-use, 60-second lifetime.
+`ronchi dashboard` obtains a fresh link; use the same project and Lab selectors for a non-default Lab.
+Terminals without hyperlink support can use that command to print the full launch URL.
+
+Startup and normal shutdown animate at most eight times per second.
+Ready-state motion runs twice per second and indicates the running Lab, not RPC traffic or a Finding.
+One authenticated status request at a time updates the Case, held RPC count, and committed Journal watermark.
+Requests start no more than once per second and never evaluate Findings or scan Journal history.
+The panel validates the returned Lab ID, process identity, and contract version.
+Missing status appears as unavailable, with any old watermark marked as last observed.
+Held RPC requests use the coral signal accent; they do not imply an application failure or a Verdict.
+
+`up --no-animation` keeps a static styled panel and disables live polling.
+It conflicts with `--detach`.
+Nonempty `NO_COLOR` and `CLICOLOR=0` suppress color and emphasis.
+JSON, redirected stdout, CI, and absent or `dumb` TERM use the existing plain renderer.
+These presentation choices do not change foreground ownership or Ctrl-C behavior.
+Normal terminal completion reports the verified finalized Journal watermark.
+An interrupted or unconfirmed completion never receives a finalized success label.
+
+Native PTY tests cover live Case changes, a paused status source, resize, actual Ctrl-C input,
+external stop, static/color opt-outs, JSON/CI/dumb output, and abrupt daemon death.
 
 ### Implemented Case operations
 

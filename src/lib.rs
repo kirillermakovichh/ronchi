@@ -84,6 +84,9 @@ enum Command {
         /// Run in the background and return after readiness
         #[arg(long)]
         detach: bool,
+        /// Keep terminal styling without animated progress or live polling
+        #[arg(long, conflicts_with = "detach")]
+        no_animation: bool,
         #[arg(long, env = "RONCHI_MODE", hide_env_values = true)]
         mode: Option<Mode>,
         #[arg(long, env = "RONCHI_READ_UPSTREAM", hide_env_values = true)]
@@ -633,6 +636,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
         }
         Command::Up {
             detach,
+            no_animation,
             mode,
             read_upstream,
             surfpool_datasource,
@@ -675,6 +679,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                     settings,
                     name,
                     cli.json,
+                    no_animation,
                 )) {
                     Ok(exit) => exit,
                     Err(error) => render_lab_error(cli.json, error),

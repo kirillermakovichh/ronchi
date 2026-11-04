@@ -530,3 +530,16 @@ Checkpoints record results and do not require another approval interview.
 - [x] Preserve deferred CI wrappers, replay, SDK, distribution, and later transports in [open questions](../docs/open-questions.md).
 
 - **Remaining external validation:** Checkpoints C/E still require a suitable independent third-party application. The bundled relayer and local fake sources do not close that criterion. No unrelated repository was searched or changed to manufacture this evidence.
+
+## Foreground terminal experience
+
+### 25. Branded inline Lab panel
+
+- [x] **25a:** TTY-only branded startup, bounded inline animation, readable endpoints, and a short dashboard hyperlink. Plain and JSON output retain their contracts.
+- [x] **25b:** Authenticated live Case, Journal watermark, and held-request status; normal animated shutdown; truthful completion and unavailable states. No Findings polling or raw terminal mode.
+- [x] **25c:** Native PTY verification for Ctrl-C, external stop, narrow resize, `NO_COLOR`, `--no-animation`, interrupted evidence, and machine output. Rebuild the release executable.
+- **Dependencies:** Existing foreground lifecycle. **Scope:** `src/lab/terminal.rs`, `src/lab/foreground.rs`, CLI parsing, dependencies, and focused process tests.
+- **Sources:** [Concept and implementation plan](plan.md#foreground-terminal-experience), [CLI interfaces](../docs/product/investigation-interfaces.md), and [brand](../docs/product/positioning-and-brand.md#visual-identity).
+
+- **Implemented / verified:** Console/Indicatif inline panel with Tokio-driven animation, one bounded authenticated status request at a time, short dashboard hyperlinks, opt-outs, and verified completion labels. `cargo fmt --check`, `cargo check --locked`, 300 Rust tests, Clippy with `-D warnings`, and release build passed. Five native PTY tests verify live Case and missing-status behavior, 36/88-column layouts, actual Ctrl-C, external stop, static/NO_COLOR/JSON/CI/dumb output, real held-RPC Fault color and drain, and interrupted completion. Release PTY smoke checks passed in simulator and real pinned Surfpool, including owned-child cleanup.
+- **Visual verification:** Reviewed rendered VT100 screens from actual PTY output. Resize synchronizes pending frames with the emulator width; it does not emulate a particular window manager's scrollback reflow. Actual Zed rendering and hyperlink clicks were not automated. No frontend application changes or new business Verdicts were added. Checkpoints C/E remain open.

@@ -59,6 +59,7 @@ pub(crate) async fn run(
     explicit: Settings,
     name: &str,
     json: bool,
+    no_animation: bool,
 ) -> Result<i32, LabError> {
     // Install all terminal handlers before allocating a Lab, including while startup holds a lock.
     let mut interrupt = signal(SignalKind::interrupt())?;
@@ -68,6 +69,10 @@ pub(crate) async fn run(
         tokio::select! { _ = interrupt.recv() => (), _ = terminate.recv() => (), _ = hangup.recv() => () }
     };
     tokio::pin!(stop);
+    let mut panel = super::terminal::Panel::start(json, no_animation);
+    let animate = panel.as_ref().is_some_and(|p| p.animated());
+    let mut ticks = tokio::time::interval(Duration::from_millis(125));
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let cancel = CancellationToken::new();
     let project = configuration.project.clone();
     let startup = up_selected(
@@ -78,28 +83,102 @@ pub(crate) async fn run(
         cancel.clone(),
     );
     tokio::pin!(startup);
-    let started = tokio::select! {
-        result = &mut startup => result,
-        _ = &mut stop => { cancel.cancel(); startup.await }
-    }?;
+    let started = loop {
+        tokio::select! {
+            result = &mut startup => break result,
+            _ = &mut stop => { cancel.cancel(); break startup.await; }
+            _ = ticks.tick(), if animate => { if let Some(p) = &panel { p.tick(); } }
+        }
+    };
+    let started = match started {
+        Ok(started) => started,
+        Err(error) => {
+            if let Some(p) = &mut panel {
+                p.startup_failed(error.exit == 130);
+            }
+            return Err(error);
+        }
+    };
     let mut owner = started
         .owner
         .ok_or_else(|| LabError::internal("Foreground Lab owner is absent"))?;
     let id = started.result.manifest.lab_id.clone();
+    let manifest = started.result.manifest.clone();
     let launch = crate::dashboard::launch(project.clone(), name, Some(&id))
         .await
         .ok();
-    let rendered = crate::render_lab_dashboard(json, Ok(started.result), launch, true);
+    let rendered = if let Some(p) = &mut panel {
+        p.ready(&manifest, launch.as_ref());
+        0
+    } else {
+        crate::render_lab_dashboard(json, Ok(started.result), launch, true)
+    };
     let flushed = std::io::stdout().flush();
+    // One bounded status request at a time; animation does not execute Journal queries or Findings.
+    let ws = Workspace::new(&project);
+    let (updates, mut latest) = tokio::sync::watch::channel(Some(manifest.clone()));
+    let polling = async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            updates.send_replace(
+                crate::control::request(&ws, &manifest, false, false)
+                    .await
+                    .ok()
+                    .filter(|live| {
+                        live.lab_id == manifest.lab_id
+                            && live.process == manifest.process
+                            && live.contract_version == 1
+                    }),
+            );
+        }
+    };
+    tokio::pin!(polling);
+    let mut ready_ticks = tokio::time::interval(Duration::from_millis(500));
+    ready_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     if rendered == 0 && flushed.is_ok() {
-        tokio::select! {
-            result = owner.wait(&project, &id) => { result?; return Ok(0); },
-            _ = &mut stop => (),
-            _ = crate::query::cli::stdout_closed() => (),
+        loop {
+            tokio::select! {
+                result = owner.wait(&project, &id) => {
+                    finish_panel(&mut panel, &ws, &id, result.is_ok());
+                    result?;
+                    return Ok(0);
+                }
+                _ = &mut stop => break,
+                _ = crate::query::cli::stdout_closed() => break,
+                _ = &mut polling, if animate => (),
+                _ = latest.changed(), if animate => {
+                    if let Some(p) = &mut panel { p.observe(latest.borrow().clone()); }
+                }
+                _ = ready_ticks.tick(), if animate => { if let Some(p) = &panel { p.tick(); } }
+            }
         }
     }
-    owner.shutdown(&project, &id).await?;
+    if let Some(p) = &mut panel {
+        p.stopping();
+    }
+    ticks.reset();
+    let shutdown = owner.shutdown(&project, &id);
+    tokio::pin!(shutdown);
+    let result = loop {
+        tokio::select! {
+            result = &mut shutdown => break result,
+            _ = ticks.tick(), if animate => { if let Some(p) = &panel { p.tick(); } }
+        }
+    };
+    finish_panel(&mut panel, &ws, &id, result.is_ok());
+    result?;
     Ok(rendered)
+}
+
+fn finish_panel(
+    panel: &mut Option<super::terminal::Panel>,
+    ws: &Workspace,
+    id: &str,
+    success: bool,
+) {
+    if let Some(p) = panel {
+        p.finish(ws.manifest(id).ok().as_ref(), success);
+    }
 }
 
 /// The owner passes a private socket as stdin. EOF also covers SIGKILL and terminal loss.
