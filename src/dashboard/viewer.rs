@@ -64,7 +64,7 @@ async fn exchange(
         .header(
             "set-cookie",
             format!(
-                "{}={session}; HttpOnly; SameSite=Strict; Path=/ui/{id}/; Max-Age=1800",
+                "{}={session}; HttpOnly; SameSite=Strict; Path=/ui/{id}/",
                 cookie(&v)
             ),
         )
@@ -207,7 +207,7 @@ pub async fn serve(
             post(exchange).layer(axum::extract::DefaultBodyLimit::max(256)),
         )
         .with_state(v.clone());
-    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("viewer-{}",std::process::id()),"lab_id":v.manifest.lab_id,"result":{"state":"ready","read_only":true,"launch_url":url,"expires_in_seconds":60}});
+    let envelope = serde_json::json!({"contract_version":1,"request_id":format!("viewer-{}",std::process::id()),"lab_id":v.manifest.lab_id,"result":{"state":"ready","read_only":true,"launch_url":url,"expires_in_seconds":null,"expires_on":LaunchExpiry::ViewerStop}});
     let ready = if json {
         serde_json::to_string(&envelope).unwrap()
     } else {

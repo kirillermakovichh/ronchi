@@ -352,14 +352,14 @@ function App() {
               <code>
                 {commandPrefix} dashboard --lab-id {labId}
               </code>{" "}
-              for a new session. A lost connection does not prove that the Lab
+              to print this Lab’s link. A lost connection does not prove that the Lab
               stopped.
             </p>
           </div>
         )}
         {labId && !authorized && (
           <p>
-            Exchange the single-use launch ticket to open this Investigation.
+            Open this Lab’s dashboard link to access this Investigation.
           </p>
         )}
         {summary && (

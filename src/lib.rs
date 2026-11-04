@@ -68,7 +68,7 @@ enum Command {
         #[command(subcommand)]
         transport: McpTransport,
     },
-    /// Print a single-use browser launch URL for a ready Lab
+    /// Print the reusable dashboard URL for a ready Lab
     Dashboard {
         /// Serve a retained Journal read-only in the foreground until Ctrl-C
         #[arg(long)]

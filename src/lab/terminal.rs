@@ -161,11 +161,11 @@ impl Panel {
             };
             let _ = self.line(&format!(
                 "  {}",
-                self.muted("Dashboard link expires in 60s.")
+                self.muted("Available until this Lab stops.")
             ));
             let _ = self.term.write_line(&format!(
                 "  {}",
-                self.muted(&format!("Fresh link: {command}"))
+                self.muted(&format!("Show link: {command}"))
             ));
         } else {
             let _ = self.line("  Dashboard unavailable; run ronchi dashboard");

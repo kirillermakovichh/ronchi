@@ -7,7 +7,7 @@ The native stack remains defined by [ADR-0019](../adr/0019-resource-efficient-ru
 ## Ownership and identity
 
 `ronchi up` runs in the terminal until Ctrl-C.
-After readiness, it prints the RPC URL and a single-use dashboard link.
+After readiness, it prints the RPC URL and a reusable dashboard link valid until Lab stop.
 The developer starts their backend in another terminal.
 Ctrl-C requests normal shutdown and waits for the owned Lab to terminate.
 SIGTERM, terminal closure, a closed stdout pipe, or owner-process death also request normal shutdown.
@@ -124,7 +124,7 @@ If its bind loses a port race, fail startup and clean up the owned child.
 
 The control API requires a per-Lab random bearer token stored in an owner-readable workspace file.
 Do not put that token in a URL, Journal, or diagnostic log.
-The dashboard exchanges a short-lived, single-use bootstrap ticket for an HttpOnly, SameSite=Strict session cookie.
+The dashboard exchanges a reusable Lab-lifetime access key for an HttpOnly, SameSite=Strict browser cookie.
 Validate the dashboard Host and Origin against its actual loopback endpoint.
 Permit no cross-origin control access.
 The application-facing RPC endpoint needs no control token.
@@ -212,9 +212,12 @@ A lost stop response triggers bounded status inspection, without resending the m
 
 Control uses a loopback-only address, an exact Host check, and the per-Lab bearer token.
 Bearer routes reject Origin headers.
-Browser routes use a separate single-use ticket exchange and scoped session cookie.
-Tickets live for 60 seconds; sessions live for 30 minutes.
-Each Lab bounds unexpired tickets to 16 and sessions to 32.
+Browser routes use a reusable access-key exchange and a scoped browser cookie.
+One launch key and one distinct browser key remain in memory until the Lab stops.
+Neither key has a time-based expiry; repeated link requests and exchanges reuse those keys.
+The cookie has no Max-Age or Expires; reopening the same link restores access if the browser discards it.
+A stopped Lab accepts no further requests, and a replacement Lab never accepts its old keys.
+Retained viewers keep their own keys only until the viewer process exits.
 Browser Host and Origin checks use the actual bound address.
 The cookie name includes the Lab ID and port; its path includes the immutable Lab ID.
 `ronchi dashboard` prints a finite live launch link.

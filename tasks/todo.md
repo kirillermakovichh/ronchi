@@ -543,3 +543,12 @@ Checkpoints record results and do not require another approval interview.
 
 - **Implemented / verified:** Console/Indicatif inline panel with Tokio-driven animation, one bounded authenticated status request at a time, short dashboard hyperlinks, opt-outs, and verified completion labels. `cargo fmt --check`, `cargo check --locked`, 300 Rust tests, Clippy with `-D warnings`, and release build passed. Five native PTY tests verify live Case and missing-status behavior, 36/88-column layouts, actual Ctrl-C, external stop, static/NO_COLOR/JSON/CI/dumb output, real held-RPC Fault color and drain, and interrupted completion. Release PTY smoke checks passed in simulator and real pinned Surfpool, including owned-child cleanup.
 - **Visual verification:** Reviewed rendered VT100 screens from actual PTY output. Resize synchronizes pending frames with the emulator width; it does not emulate a particular window manager's scrollback reflow. Actual Zed rendering and hyperlink clicks were not automated. No frontend application changes or new business Verdicts were added. Checkpoints C/E remain open.
+
+
+### 26. Dashboard link for the Lab lifetime
+
+- [x] **Accept:** Repeated dashboard commands return the same link; that link and browser authorization remain reusable until Lab stop. Viewer access lasts until viewer exit.
+- [x] **Verify:** Repeated native HTTP exchanges, real browser reopen after cookie removal, stale-key rejection after same-port Lab restart, former-timeout smoke check, terminal copy, full checks and release build.
+- **Sources:** [Access decision](plan.md#lab-lifetime-dashboard-access), [browser contract](../docs/development.md#dashboard-build-and-launch), and [lifecycle](../docs/product/lab-lifecycle.md).
+
+- **Implemented / verified:** One reusable launch key and one distinct browser key per live Lab or retained viewer, held only in runtime memory. Launch metadata reports null seconds and an explicit stop boundary. Native HTTP tests cover 40 repeated launches/exchanges, bearer/Host/Origin separation, and old-link/cookie rejection after a same-port name reuse. All 301 Rust tests, 17 UI tests, 8 native Chromium flows, fmt/check/Clippy, frontend production build and release build passed. A release smoke check confirmed the original link and cookie still work after 62 seconds, then stopped its isolated Lab normally. Browser flows reopen the original link after cookie removal. The former 30-minute server timer was removed; no 30-minute wall-clock soak was performed.

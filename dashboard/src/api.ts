@@ -107,7 +107,7 @@ export class Api {
     } catch {
       throw new ApiError(
         response.status,
-        `HTTP ${response.status}. Open a new dashboard launch link if the session expired.`,
+        `HTTP ${response.status}. Open this Lab's dashboard link to reconnect.`,
       );
     }
     if (!response.ok) {

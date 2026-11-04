@@ -52,24 +52,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Clone, Default)]
-pub struct Sessions(Arc<Mutex<Pool>>);
-#[derive(Default)]
-struct Pool {
-    tickets: HashMap<String, Instant>,
-    sessions: HashMap<String, Instant>,
-}
-impl Pool {
-    fn prune(&mut self) {
-        let now = Instant::now();
-        self.tickets.retain(|_, expiry| *expiry > now);
-        self.sessions.retain(|_, expiry| *expiry > now);
-    }
+pub struct Sessions(Arc<Mutex<Option<Credentials>>>);
+struct Credentials {
+    ticket: String,
+    session: String,
 }
 fn nonce() -> Result<String, StatusCode> {
     let mut bytes = [0u8; 32];
@@ -78,34 +69,33 @@ fn nonce() -> Result<String, StatusCode> {
 }
 impl Sessions {
     pub fn ticket(&self) -> Result<String, StatusCode> {
-        let mut pool = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        pool.prune();
-        if pool.tickets.len() >= 16 {
-            return Err(StatusCode::TOO_MANY_REQUESTS);
+        let mut credentials = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if credentials.is_none() {
+            *credentials = Some(Credentials {
+                ticket: nonce()?,
+                session: nonce()?,
+            });
         }
-        let token = nonce()?;
-        pool.tickets
-            .insert(token.clone(), Instant::now() + Duration::from_secs(60));
-        Ok(token)
+        Ok(credentials
+            .as_ref()
+            .expect("initialized credentials")
+            .ticket
+            .clone())
     }
     fn exchange(&self, ticket: &str) -> Result<String, StatusCode> {
-        let mut pool = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        pool.prune();
-        if pool.tickets.remove(ticket).is_none() {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        if pool.sessions.len() >= 32 {
-            return Err(StatusCode::TOO_MANY_REQUESTS);
-        }
-        let session = nonce()?;
-        pool.sessions
-            .insert(session.clone(), Instant::now() + Duration::from_secs(1800));
-        Ok(session)
+        let credentials = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        credentials
+            .as_ref()
+            .filter(|c| c.ticket == ticket)
+            .map(|c| c.session.clone())
+            .ok_or(StatusCode::UNAUTHORIZED)
     }
     fn valid(&self, session: &str) -> bool {
-        let mut pool = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        pool.prune();
-        pool.sessions.contains_key(session)
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|c| c.session == session)
     }
 }
 fn same_origin(
@@ -144,7 +134,15 @@ struct Exchange {
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Launch {
     pub launch_url: String,
-    pub expires_in_seconds: u32,
+    pub expires_in_seconds: Option<u32>,
+    #[serde(default)]
+    pub expires_on: Option<LaunchExpiry>,
+}
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchExpiry {
+    LabStop,
+    ViewerStop,
 }
 
 pub async fn ticket(
@@ -163,7 +161,8 @@ pub async fn ticket(
                 .ok_or(StatusCode::SERVICE_UNAVAILABLE)?,
             manifest.lab_id
         ),
-        expires_in_seconds: 60,
+        expires_in_seconds: None,
+        expires_on: Some(LaunchExpiry::LabStop),
     }))
 }
 async fn exchange(
@@ -184,7 +183,7 @@ async fn exchange(
         .header(
             "set-cookie",
             format!(
-                "{}={session}; HttpOnly; SameSite=Strict; Path=/ui/{id}/; Max-Age=1800",
+                "{}={session}; HttpOnly; SameSite=Strict; Path=/ui/{id}/",
                 cookie_name(&control)
             ),
         )
@@ -352,30 +351,21 @@ pub async fn launch(
 mod session_tests {
     use super::*;
     #[test]
-    fn ticket_and_session_expiry_and_capacity_are_bounded() {
+    fn reusable_access_is_bounded_and_new_runtimes_reject_old_credentials() {
         let sessions = Sessions::default();
         let ticket = sessions.ticket().unwrap();
-        sessions
-            .0
-            .lock()
-            .unwrap()
-            .tickets
-            .insert(ticket.clone(), Instant::now() - Duration::from_secs(1));
-        assert_eq!(sessions.exchange(&ticket), Err(StatusCode::UNAUTHORIZED));
-        let ticket = sessions.ticket().unwrap();
-        let session = sessions.exchange(&ticket).unwrap();
-        assert!(sessions.valid(&session));
-        sessions
-            .0
-            .lock()
-            .unwrap()
-            .sessions
-            .insert(session.clone(), Instant::now() - Duration::from_secs(1));
-        assert!(!sessions.valid(&session));
-        for _ in 0..16 {
-            sessions.ticket().unwrap();
+        let cookie = sessions.exchange(&ticket).unwrap();
+        for _ in 0..100 {
+            assert_eq!(sessions.ticket().unwrap(), ticket);
+            assert_eq!(sessions.exchange(&ticket).unwrap(), cookie);
+            assert!(sessions.valid(&cookie));
         }
-        assert_eq!(sessions.ticket(), Err(StatusCode::TOO_MANY_REQUESTS));
+        assert!(!sessions.valid(&ticket));
+        assert_eq!(sessions.exchange("invalid"), Err(StatusCode::UNAUTHORIZED));
+        let next = Sessions::default();
+        assert_ne!(next.ticket().unwrap(), ticket);
+        assert_eq!(next.exchange(&ticket), Err(StatusCode::UNAUTHORIZED));
+        assert!(!next.valid(&cookie));
     }
 }
 

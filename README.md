@@ -30,6 +30,7 @@ ronchi up
 ```
 
 Ronchi prints its RPC URL and dashboard link after readiness.
+The dashboard link can be reopened until that Lab stops.
 Keep this terminal open and start your backend in another terminal with that RPC URL.
 Press Ctrl-C to stop the Lab and retain its Journal.
 Ronchi does not stop your backend.

@@ -303,7 +303,7 @@ fn narrow_start_preserves_endpoints_and_real_holds_use_the_fault_accent() {
     session.until("Ready");
     let screen = session.parser.screen().contents();
     assert!(screen.contains("Make hidden failures visible."));
-    assert!(screen.contains("Fresh link: ronchi dashboard"));
+    assert!(screen.contains("Show link: ronchi dashboard"));
     assert!(screen.contains("Ctrl-C"));
     session.capture("narrow-start");
     session.resize(88);

@@ -91,13 +91,13 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
         },
       },
     );
-    expect(reused.status()).toBe(401);
+    expect(reused.status()).toBe(200);
     const session = (await context.cookies()).find((c) =>
       c.name.startsWith("ronchi_"),
     )!;
     expect(session.httpOnly).toBe(true);
     expect(session.sameSite).toBe("Strict");
-    expect(session.expires - Date.now() / 1000).toBeGreaterThan(1700);
+    expect(session.expires).toBe(-1);
     const second = cli(
       project,
       "--lab",
@@ -212,6 +212,12 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     await expect(
       page.getByRole("alert").filter({ hasText: "Operational query error:" }),
     ).toContainText("401");
+    // The original launch URL remains reusable after the browser loses its cookie.
+    await page.goto(launch);
+    await expect(page.getByRole("heading", { name: "Timeline", exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Timeline", exact: true })).toBeVisible();
+    expect(cli(project, "dashboard").result.launch_url).toBe(launch);
 
     cli(
       project,

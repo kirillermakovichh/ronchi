@@ -94,9 +94,16 @@ Unknown static files return 404; API errors do not fall back to HTML.
 For a ready Lab, run `ronchi dashboard --lab-id <immutable-id>`.
 This finite command prints a launch URL and never opens a browser.
 `--json` returns a version-1 envelope.
-The fragment contains a single-use ticket valid for 60 seconds.
-The browser removes that fragment before exchanging it for a 30-minute HttpOnly, SameSite=Strict cookie.
-The Lab owns at most 16 unexpired tickets and 32 sessions.
+The fragment contains a reusable access key valid until this Lab stops.
+Every launch command for the same live Lab returns the same key.
+The browser removes that fragment before exchanging it for an HttpOnly, SameSite=Strict cookie.
+The server accepts that cookie until the Lab stops; it has no 30-minute timeout.
+The cookie has no Max-Age or Expires; browsers may discard it when their own session ends.
+Reopen the same Lab link to restore browser access.
+The Lab retains exactly one launch key and one distinct browser key after first launch.
+Opening more tabs or browser contexts does not grow an authorization pool.
+A new Lab gets new keys even if its name or port is reused.
+Launch metadata reports `expires_in_seconds:null` and `expires_on:"lab_stop"`.
 Cookies have Lab- and port-specific names and Lab-specific paths.
 Browser API requests require the actual Host and same-origin browser context.
 Bearer control requests retain their existing authorization rules.
@@ -114,7 +121,8 @@ The transport stops reading after 256 KiB.
 
 For retained evidence, run `ronchi dashboard --serve --lab-id <immutable-id>`.
 This foreground process binds an OS-selected loopback port and prints one readiness record.
-With `--json`, readiness is a version-1 envelope with `read_only:true` and a ticket launch URL.
+With `--json`, readiness is a version-1 envelope with `read_only:true`, a reusable launch URL, `expires_in_seconds:null`, and `expires_on:"viewer_stop"`.
+The retained viewer uses the same fixed-size access model; its keys last until that viewer exits.
 The process then waits until Ctrl-C or stdout pipe closure.
 It cancels readers and drains its owned connections within three seconds before forcing closure.
 It never starts a simulator, writer, source application, or relayer.
@@ -127,7 +135,7 @@ A stopped header labels the old RPC address as recorded, not live.
 `up` includes an optional top-level `dashboard` launch object.
 The Demo includes `dashboard_launch` for a ready Lab and `dashboard_argv` for recovery or retained viewing.
 Ticket-capacity or launch transport failure does not undo a successful Lab startup or Demo.
-Run the exact-ID dashboard command for a fresh link if launch metadata is absent.
+Run the exact-ID dashboard command for the Lab link if launch metadata is absent.
 No command opens a browser automatically.
 Closing the browser leaves the persistent Lab running.
 

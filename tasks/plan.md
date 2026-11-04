@@ -149,7 +149,7 @@ JSON, detached startup, redirected output, `TERM=dumb`, and CI retain simple out
 `NO_COLOR` suppresses color and emphasis.
 `up --no-animation` keeps a static styled introduction and completion message.
 Never use raw mode, capture normal keyboard input, clear scrollback, or enter an alternate screen.
-Dashboard links retain their existing single-use, 60-second lifetime; show the command for obtaining a fresh link.
+Dashboard links remain reusable until Lab stop; show the command for printing the same link.
 
 Sources inspected before implementation:
 
@@ -159,3 +159,16 @@ Sources inspected before implementation:
 - [CLI Guidelines](https://clig.dev/#output): TTY-aware animation and intentional color.
 - [NO_COLOR](https://no-color.org/): opt-out convention.
 - [Terminal hyperlinks](https://iterm2.com/feature-reporting/Hyperlinks_in_Terminal_Emulators.html): OSC 8 hyperlink format and compatibility.
+
+## Lab-lifetime dashboard access
+
+The user approved a permanent link for the life of each Lab after finding the 60-second limit disruptive.
+Task 26 supersedes the original task-14 browser expiry defaults.
+Keep the fragment wire field `ticket` and the existing authenticated launch route for compatibility.
+The link returns the same random launch key on every request.
+Its exchange returns one distinct random browser key, with HttpOnly, SameSite=Strict and the existing Lab/port scope.
+Keep both keys in the runtime only; no authorization pool or expiry timers are needed.
+Stop invalidates access; a new Lab or viewer gets fresh keys.
+Retained viewers apply the same rule for their own process lifetime and keep their read-only boundary.
+Preserve Host, Origin, bearer separation, fragment removal, and credential-free evidence bookmarks.
+The trade-off is explicit: a copied full launch URL grants access until its Lab stops.

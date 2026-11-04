@@ -102,8 +102,11 @@ An Investigation has query state, not a separate start, capture, or stop lifecyc
 Interactive `up` uses an inline Ronchi panel with the parallel-band identity.
 It retains scrollback and normal terminal input; it does not use raw mode or an alternate screen.
 The panel shows the RPC URL and a short OSC 8 dashboard hyperlink.
-The hyperlink retains its single-use, 60-second lifetime.
-`ronchi dashboard` obtains a fresh link; use the same project and Lab selectors for a non-default Lab.
+The hyperlink remains reusable until the Lab stops.
+`ronchi dashboard` prints the same Lab link; use the same project and Lab selectors for a non-default Lab.
+Browser authorization has no 30-minute timeout; reopen that link if the browser discards its session cookie.
+Live launch metadata reports `expires_in_seconds:null` and `expires_on:"lab_stop"`.
+A retained viewer instead reports `expires_on:"viewer_stop"` and remains read-only.
 Terminals without hyperlink support can use that command to print the full launch URL.
 
 Startup and normal shutdown animate at most eight times per second.
