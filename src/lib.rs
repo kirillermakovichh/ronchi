@@ -36,7 +36,7 @@ use std::{
 #[derive(Parser)]
 #[command(version, about = "Local reliability lab for blockchain applications")]
 pub struct Cli {
-    /// Emit one version-1 JSON response envelope
+    /// Emit version-1 JSON response envelopes
     #[arg(long, global = true)]
     json: bool,
     /// Select an existing project directory
@@ -79,8 +79,11 @@ enum Command {
     },
     /// Run an isolated bundled public-path experiment
     Demo(demo::Args),
-    /// Start a persistent Lab and wait for lifecycle readiness
+    /// Run a Lab in the terminal until Ctrl-C
     Up {
+        /// Run in the background and return after readiness
+        #[arg(long)]
+        detach: bool,
         #[arg(long, env = "RONCHI_MODE", hide_env_values = true)]
         mode: Option<Mode>,
         #[arg(long, env = "RONCHI_READ_UPSTREAM", hide_env_values = true)]
@@ -121,7 +124,10 @@ enum Command {
         force: bool,
     },
     #[command(name = "__daemon", hide = true)]
-    Daemon,
+    Daemon {
+        #[arg(long)]
+        foreground_owner: bool,
+    },
     /// Show version-1 request and response schemas without accessing a project
     Schema {
         #[arg(value_parser = ["lab.up", "lab.status", "lab.down", "lab.delete", "lab.export", "case.list", "case.arm", "case.disarm", "case.validate", "investigate.summary", "investigate.timeline", "investigate.evidence", "investigate.findings", "check.observe", "check.evaluate"])]
@@ -626,6 +632,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             }
         }
         Command::Up {
+            detach,
             mode,
             read_upstream,
             surfpool_datasource,
@@ -662,11 +669,22 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 Err(message) => return render_lab_error(cli.json, lab::LabError::invalid(message)),
             };
             let root = configuration.project.clone();
+            if !detach {
+                return match run_async(lab::foreground::run(
+                    configuration,
+                    settings,
+                    name,
+                    cli.json,
+                )) {
+                    Ok(exit) => exit,
+                    Err(error) => render_lab_error(cli.json, error),
+                };
+            }
             let result = run_async(lab::up(configuration, settings, name));
             let launch = result.as_ref().ok().and_then(|r| {
                 run_async(dashboard::launch(root, name, Some(&r.manifest.lab_id))).ok()
             });
-            render_lab_dashboard(cli.json, result, launch)
+            render_lab_dashboard(cli.json, result, launch, false)
         }
         Command::Case { operation } => {
             if matches!(operation, CaseCommand::List) {
@@ -791,7 +809,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
                 run_async(lab::down(project, name, cli.lab_id.as_deref(), force)),
             )
         }
-        Command::Daemon => {
+        Command::Daemon { foreground_owner } => {
             let Some(id) = cli.lab_id else {
                 return 2;
             };
@@ -802,7 +820,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> i32 {
             if process::detach().is_err() {
                 return 6;
             }
-            match run_async(lab::daemon::run(project, id)) {
+            match run_async(lab::daemon::run(project, id, foreground_owner)) {
                 Ok(()) => 0,
                 Err(error) => error.exit,
             }
@@ -887,12 +905,13 @@ fn render_lab_error(json: bool, error: lab::LabError) -> i32 {
     }
 }
 fn render_lab_result(json: bool, result: Result<lab::LabResult, lab::LabError>) -> i32 {
-    render_lab_dashboard(json, result, None)
+    render_lab_dashboard(json, result, None, false)
 }
 fn render_lab_dashboard(
     json: bool,
     result: Result<lab::LabResult, lab::LabError>,
     dashboard: Option<dashboard::Launch>,
+    foreground: bool,
 ) -> i32 {
     match result {
         Err(error) => render_lab_error(json, error),
@@ -927,6 +946,23 @@ fn render_lab_dashboard(
             let text = match &dashboard {
                 Some(launch) => format!("{text} · dashboard {}", launch.launch_url),
                 None => text,
+            };
+            let text = if foreground {
+                format!(
+                    "Ronchi is running · Lab {}\nRPC: http://{}\nDashboard: {}\nPress Ctrl-C to stop.",
+                    result.manifest.name,
+                    result
+                        .manifest
+                        .rpc_address
+                        .map(|address| address.to_string())
+                        .unwrap_or_else(|| "unavailable".into()),
+                    dashboard
+                        .as_ref()
+                        .map(|launch| launch.launch_url.as_str())
+                        .unwrap_or("unavailable; run ronchi dashboard")
+                )
+            } else {
+                text
             };
             let envelope = LabEnvelope::Success {
                 contract_version: 1,

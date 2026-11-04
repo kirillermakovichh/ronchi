@@ -60,6 +60,7 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
     const lab = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -102,6 +103,7 @@ test("native embedded dashboard authenticates, pins evidence, and leaves Lab run
       "--lab",
       "second",
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -245,6 +247,7 @@ test("retained viewer reads the original immutable Journal without restarting a 
     const lab = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -309,6 +312,7 @@ test("retained viewer reads the original immutable Journal without restarting a 
     const replacement = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -515,6 +519,7 @@ test("real Findings continue at a pinned prefix and restore an event bookmark", 
     const lab = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -592,6 +597,7 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
     const lab = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -623,6 +629,7 @@ test("a Finding bookmark survives a new retained endpoint and name reuse", async
     newId = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",

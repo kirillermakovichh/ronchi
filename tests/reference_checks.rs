@@ -33,6 +33,7 @@ fn configured() -> (Lab, std::net::SocketAddr) {
         directory.path(),
         &[
             "up",
+            "--detach",
             "--case",
             "tx-response-lost",
             "--rpc-listen",

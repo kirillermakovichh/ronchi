@@ -327,6 +327,7 @@ async fn eof_after_sent_mutation_keeps_accepted_effect_and_can_be_inspected() {
         .arg(project.path())
         .args([
             "up",
+            "--detach",
             "--json",
             "--rpc-listen",
             "127.0.0.1:0",

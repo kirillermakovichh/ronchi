@@ -60,7 +60,7 @@ The sections below retain the full accepted contract.
 
 | Core operation | CLI | MCP tool | Effect |
 | --- | --- | --- | --- |
-| `lab.up` | `ronchi up` | `ronchi_lab_up` | Start a background Lab and wait for readiness within the startup deadline |
+| `lab.up` | `ronchi up --detach` | `ronchi_lab_up` | Start a background Lab and wait for readiness within the startup deadline |
 | `lab.status` | `ronchi status` | `ronchi_lab_status` | Inspect readiness, mode, endpoints, Journal state, health, and active Case |
 | `lab.down` | `ronchi down` | `ronchi_lab_down` | Stop owned resources and finalize the Journal |
 | `case.list` | `ronchi case list` | `ronchi_case_list` | List available built-in Cases and mode requirements |
@@ -76,6 +76,12 @@ The sections below retain the full accepted contract.
 
 Journal queries and mutations require an immutable `lab_id` after target resolution; the connection never selects an implicit Lab.
 Bootstrap operations are exceptions: `lab.up` accepts a project-local name, `lab.status` can resolve a name, and the offline `case.list` needs no Lab.
+Human CLI `ronchi up` stays in the terminal and stops its owned Lab on Ctrl-C.
+`--detach` selects background lifetime independently of `--json`.
+Foreground `--json` flushes one readiness envelope, then waits for shutdown without progress text.
+Normal shutdown adds no stdout record.
+If the Lab fails after readiness, the CLI emits a structured error on a subsequent JSON line and exits nonzero.
+The `lab.up` schema describes core startup settings; `--detach` is a CLI lifetime option.
 Schemas and help also need no Lab.
 Bootstrap responses expose the resolved identity when one exists.
 CLI `--lab <name>` resolves the human Lab name and returns the resolved `lab_id`.
@@ -317,7 +323,7 @@ The [Check contract](checks-and-verdicts.md) owns adapter limits, rules, and Ver
 ## Example paths
 
 ```bash
-ronchi up --case tx-response-lost --json
+ronchi up --detach --case tx-response-lost --json
 ronchi investigate summary --lab default --json
 ronchi investigate timeline --lab-id L1 --signature A --limit 50 --json
 ronchi investigate evidence --lab-id L1 --event-seq 12 --fields kind,source,transaction_signature --json

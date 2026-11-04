@@ -96,6 +96,7 @@ test("public collection cancels on confirmed status and Unicode payload follows 
     id = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -231,6 +232,7 @@ test("obsolete native reads cannot replace a new scope and UI polling preserves 
     id = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",
@@ -359,6 +361,7 @@ test("connection loss preserves the pinned view and offers exact retained recove
     id = cli(
       project,
       "up",
+      "--detach",
       "--rpc-listen",
       "127.0.0.1:0",
       "--control-listen",

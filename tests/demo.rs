@@ -337,6 +337,7 @@ fn concurrent_demos_preserve_user_default_config_and_text_lifecycle() {
         project.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",

@@ -79,6 +79,10 @@ ronchi up --case tx-response-lost
 SOLANA_RPC_URL=http://127.0.0.1:8899 ./withdrawal-worker
 ```
 
+The first terminal stays attached to Ronchi.
+Ctrl-C stops the Lab and retains its Journal.
+For background automation, use `ronchi up --detach` and later `ronchi down`.
+
 Ronchi provides the endpoint and observes traffic; it does not primarily launch, supervise, or decide when the backend has finished.
 An existing integration test may also produce traffic, but tests are not the defining workflow.
 Common Cases are selected by name; normal use does not require YAML for each interaction.
@@ -97,7 +101,7 @@ See [execution modes](overview.md#execution-modes) for the account-state limitat
 ## When local execution is needed
 
 ```bash
-ronchi up --execution surfpool --case tx-response-lost
+ronchi up --mode surfpool --case tx-response-lost
 ```
 
 Ronchi starts and checks its managed native Surfpool instance before exposing readiness.

@@ -126,6 +126,7 @@ fn real_native_backend_owns_all_rpc_and_cleanup_preserves_independent_listener()
     let independent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let result = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -219,6 +220,7 @@ fn real_execution_uses_explicit_snapshot_and_response_loss_never_restarts_identi
     install(&p, &archive);
     let started = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -326,6 +328,7 @@ fn real_execution_uses_explicit_snapshot_and_response_loss_never_restarts_identi
     assert_eq!((accepted, selected), (1, 1));
     let next = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -346,11 +349,12 @@ fn real_execution_uses_explicit_snapshot_and_response_loss_never_restarts_identi
 #[test]
 fn missing_tool_and_confirmation_mode_are_rejected_before_lab_allocation() {
     let p = Project::new();
-    let absent = p.run(&["up", "--mode", "surfpool"]);
+    let absent = p.run(&["up", "--detach", "--mode", "surfpool"]);
     assert_eq!(absent.status.code(), Some(4), "{absent:?}");
     assert!(!p.path().join("ronchi").exists());
     let unsupported = p.run(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--case",
@@ -374,6 +378,7 @@ fn real_native_readiness_failure_and_binary_tampering_preserve_ownership_evidenc
     .unwrap();
     let failed = p.run(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -399,6 +404,7 @@ fn real_native_readiness_failure_and_binary_tampering_preserve_ownership_evidenc
         .unwrap();
     let changed = p.run(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -419,6 +425,7 @@ fn real_native_child_death_fails_lab_without_touching_independent_backend() {
     let independent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let started = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -454,6 +461,7 @@ fn real_verified_orphan_is_cleaned_before_fresh_lab_name_reuse() {
     install(&p, &archive);
     let started = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -475,6 +483,7 @@ fn real_verified_orphan_is_cleaned_before_fresh_lab_name_reuse() {
     assert!(ronchi::process::matches(&old.owned_children[0]).unwrap());
     let restarted = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -539,6 +548,7 @@ fn real_status_cases_preserve_native_execution_and_first_observed_finality() {
     install(&p, &archive);
     let ready = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",
@@ -700,6 +710,7 @@ fn status_cli_limits_share_core_validation_and_leave_previous_policy_armed() {
     let p = Project::new();
     p.ok(&[
         "up",
+        "--detach",
         "--rpc-listen",
         "127.0.0.1:0",
         "--control-listen",
@@ -758,6 +769,7 @@ fn blockhash_cli_setting_selects_the_shared_commitment_policy() {
     let p = Project::new();
     p.ok(&[
         "up",
+        "--detach",
         "--rpc-listen",
         "127.0.0.1:0",
         "--control-listen",

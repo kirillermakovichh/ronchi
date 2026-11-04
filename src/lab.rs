@@ -13,6 +13,19 @@ use std::{
 };
 
 pub mod daemon;
+pub(crate) mod foreground;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StartMode {
+    Detached,
+    Fresh,
+    Foreground,
+}
+
+struct Started {
+    result: LabResult,
+    owner: Option<foreground::Owner>,
+}
 const STARTUP: Duration = Duration::from_secs(30);
 const CLEANUP: Duration = Duration::from_secs(5);
 #[derive(Debug)]
@@ -298,10 +311,11 @@ pub async fn up(
         configuration,
         explicit,
         name,
-        false,
+        StartMode::Detached,
         tokio_util::sync::CancellationToken::new(),
     )
     .await
+    .map(|started| started.result)
 }
 /// Use the ordinary startup cleanup path when an attaching transport cancels.
 pub(crate) async fn up_cancellable(
@@ -310,7 +324,9 @@ pub(crate) async fn up_cancellable(
     name: &str,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<LabResult, LabError> {
-    up_selected(configuration, explicit, name, false, cancel).await
+    up_selected(configuration, explicit, name, StartMode::Detached, cancel)
+        .await
+        .map(|started| started.result)
 }
 /// Start only a never-used name, under the ordinary startup operation lock.
 pub(crate) async fn up_fresh(
@@ -327,13 +343,13 @@ pub(crate) async fn up_fresh(
             configuration.clone(),
             Settings::default(),
             &name,
-            true,
+            StartMode::Fresh,
             external.clone(),
         )
         .await
         {
             Err(error) if error.code == "name_occupied" => continue,
-            result => return result,
+            result => return result.map(|started| started.result),
         }
     }
     Err(LabError::conflict(
@@ -344,9 +360,9 @@ async fn up_selected(
     configuration: EffectiveConfig,
     explicit: Settings,
     name: &str,
-    fresh: bool,
+    mode: StartMode,
     external: tokio_util::sync::CancellationToken,
-) -> Result<LabResult, LabError> {
+) -> Result<Started, LabError> {
     use std::process::{Command, Stdio};
     if !workspace::identifier(name) {
         return Err(LabError::invalid("Invalid Lab name"));
@@ -368,7 +384,7 @@ async fn up_selected(
         ));
     }
     if ws.root.join("names").join(format!("{name}.json")).exists() {
-        if fresh {
+        if mode == StartMode::Fresh {
             return Err(LabError::new(
                 5,
                 "name_occupied",
@@ -377,6 +393,9 @@ async fn up_selected(
         }
         let previous = ws.target(name, None)?;
         if let Ok(live) = authenticated(&ws, &previous).await {
+            if mode == StartMode::Foreground {
+                return Err(LabError::conflict("Lab is already running; inspect status or use up --detach. Stop it before starting a foreground Lab").for_lab(&previous.lab_id));
+            }
             if live.state != Lifecycle::Ready {
                 return Err(
                     LabError::conflict("Lab is not ready; inspect status before retrying")
@@ -414,9 +433,12 @@ async fn up_selected(
                 )
                 .for_lab(&previous.lab_id));
             }
-            return Ok(LabResult {
-                manifest: live,
-                selection_basis: "current".into(),
+            return Ok(Started {
+                result: LabResult {
+                    manifest: live,
+                    selection_basis: "current".into(),
+                },
+                owner: None,
             });
         }
         if previous.configuration.mode == Mode::Surfpool {
@@ -525,12 +547,21 @@ async fn up_selected(
     command.env_remove("RONCHI_RUNTIME_SURFPOOL_DATASOURCE");
     if let Some(url)=&configuration.surfpool_datasource {command.env("RONCHI_RUNTIME_SURFPOOL_DATASOURCE",url);}
     if let Some(url) = &configuration.read_upstream { command.env("RONCHI_RUNTIME_READ_UPSTREAM", url); }
+    let mut owner_socket = if mode == StartMode::Foreground {
+        let (owner, daemon) = std::os::unix::net::UnixStream::pair()?;
+        command.stdin(Stdio::from(std::os::fd::OwnedFd::from(daemon)));
+        Some(owner)
+    } else {
+        command.stdin(Stdio::null());
+        None
+    };
+    command.arg("__daemon");
+    if mode == StartMode::Foreground { command.arg("--foreground-owner"); }
     let mut child = command
-        .args(["__daemon", "--lab-id", &id])
+        .args(["--lab-id", &id])
         .arg("--project")
         .arg(&configuration.project)
         .current_dir(&configuration.project)
-        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
@@ -549,9 +580,9 @@ async fn up_selected(
                             return Err(error);
                         }
                         drop(lease);
-                        return Ok(LabResult {
-                            manifest,
-                            selection_basis: "current".into(),
+                        return Ok(Started {
+                            result: LabResult { manifest, selection_basis: "current".into() },
+                            owner: owner_socket.map(|socket| foreground::Owner::new(child, socket)),
                         });
                     }
                 }
@@ -603,6 +634,14 @@ async fn up_selected(
             }
             let ready = ws.manifest(&id).is_ok_and(|m| m.state == Lifecycle::Ready);
             let exited = child.try_wait()?.is_some();
+            if ready && let Some(socket) = owner_socket.take() {
+                let mut owner = foreground::Owner::new(child, socket);
+                let completion = owner.shutdown(&configuration.project, &id).await;
+                let mut error = LabError::new(if cancelled {130} else {124}, if cancelled {"cancelled"} else {"deadline_exceeded"},
+                    if completion.is_ok() {"Foreground startup cancelled after readiness; the owned Lab stopped"} else {"Foreground shutdown completion is uncertain; inspect status"});
+                error.effects = if completion.is_ok() {"applied"} else {"unknown"};
+                return Err(error.for_lab(&id));
+            }
             if !ready && acquired && !exited {
                 if configuration.mode==Mode::Surfpool {
                     // SAFETY: this unreaped child is the daemon launched by this operation.

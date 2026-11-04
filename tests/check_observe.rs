@@ -57,6 +57,7 @@ fn cli_collects_application_evidence_and_retains_it_after_stop() {
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -120,6 +121,7 @@ fn configured_project(address: std::net::SocketAddr) -> tempfile::TempDir {
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -234,6 +236,7 @@ fn public_source_failures_are_gaps_without_retries_partial_facts_or_verdicts() {
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -361,6 +364,7 @@ fn generic_collector_reads_real_relayer_mapping_without_advancing_its_worker() {
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -469,6 +473,7 @@ fn authenticated_collection_enforces_capacity_normalized_scope_and_skips_busy_po
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -581,6 +586,7 @@ fn runtime_credentials_and_raw_source_errors_never_enter_public_evidence() {
         .env("RONCHI_CHECK_TEST_AUTH", format!("Bearer {secret}"))
         .args([
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -635,6 +641,7 @@ fn complete_observation_can_be_read_in_bounded_evidence_chunks() {
         temp.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",

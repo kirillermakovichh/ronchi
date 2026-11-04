@@ -64,6 +64,7 @@ impl Project {
         std::fs::create_dir(&self.path).unwrap();
         self.ok(&[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",

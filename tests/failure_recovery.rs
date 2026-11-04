@@ -24,6 +24,7 @@ impl Lab {
             directory.path(),
             &[
                 "up",
+                "--detach",
                 "--rpc-listen",
                 "127.0.0.1:0",
                 "--control-listen",

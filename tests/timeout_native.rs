@@ -64,6 +64,7 @@ fn native_surfpool_timeout_prevents_dispatch_then_recovers_with_source_authority
     p.ok(&["tool", "surfpool", "install", "--archive", &archive]);
     let up = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",

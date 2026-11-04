@@ -580,6 +580,7 @@ fn lab_replacement_history(request_new: bool) {
     lab.command(&["down", "--force"]);
     let new_lab = lab.command(&[
         "up",
+        "--detach",
         "--rpc-listen",
         &lab.rpc.to_string(),
         "--control-listen",

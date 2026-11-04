@@ -199,7 +199,7 @@ class Lab:
         try:
             if mode == "surfpool":
                 self.cli("tool", "surfpool", "install", "--archive", str(args.surfpool_archive))
-            up_args = ["up", "--mode", mode, "--rpc-listen", "127.0.0.1:0", "--control-listen", "127.0.0.1:0"]
+            up_args = ["up", "--detach", "--mode", mode, "--rpc-listen", "127.0.0.1:0", "--control-listen", "127.0.0.1:0"]
             if mode == "simulator":
                 up_args += ["--read-upstream", source]
             up, _ = self.cli(*up_args, timeout=150)

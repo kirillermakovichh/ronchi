@@ -45,7 +45,8 @@ async fn bind(address: SocketAddr, flag: &str) -> Result<TcpListener, LabError> 
         ))
     })
 }
-pub async fn run(project: PathBuf, id: String) -> Result<(), LabError> {
+pub async fn run(project: PathBuf, id: String, foreground_owner: bool) -> Result<(), LabError> {
+    let owner = foreground::owner_socket(foreground_owner)?;
     let ws = Workspace::new(&project);
     let dir = ws.lab(&id)?;
     let launch: Launch = workspace::read_json(&dir.join("launch.json"))?;
@@ -94,7 +95,7 @@ pub async fn run(project: PathBuf, id: String) -> Result<(), LabError> {
             ));
         }
     };
-    let result = run_owned(&dir, manifest, upstream, datasource).await;
+    let result = run_owned(&dir, manifest, upstream, datasource, owner).await;
     if let Err(error) = &result
         && !dir.join("journal.sqlite").exists()
         && let Ok(mut failed) = ws.manifest(&id)
@@ -116,6 +117,7 @@ async fn run_owned(
     manifest: Manifest,
     upstream: Option<String>,
     datasource: Option<String>,
+    mut owner: Option<tokio::net::UnixStream>,
 ) -> Result<(), LabError> {
     let started = Instant::now();
     let mut startup_interrupt =
@@ -325,6 +327,13 @@ async fn run_owned(
         return Err(error);
     }
     let (mut force, mut failed, rpc_finished, control_finished) = tokio::select! {
+        _=async {
+            if let Some(socket)=owner.as_mut() {
+                use tokio::io::AsyncReadExt;
+                let mut byte=[0u8;1];
+                let _=socket.read(&mut byte).await;
+            } else { std::future::pending::<()>().await }
+        }=>(false,false,false,false),
         command=stops.recv()=>(command.unwrap_or(true),false,false,false),
         _=async{if let Some(owned)=backend.as_mut(){let _=owned.exited().await;}else{std::future::pending::<()>().await}}=>(true,true,false,false),
         _=health.wait_for(|status|status.health==WriterHealth::Failed)=>(true,true,false,false),

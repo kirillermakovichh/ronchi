@@ -57,6 +57,7 @@ impl Project {
     fn up(&self) -> Value {
         self.ok(&[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -95,6 +96,158 @@ fn raw(address: SocketAddr, request: String) -> String {
     let mut result = String::new();
     stream.read_to_string(&mut result).unwrap();
     result
+}
+
+fn foreground(project: &Project) -> (std::process::Child, Value) {
+    use std::os::fd::AsRawFd;
+    let mut child = project
+        .command(&[
+            "up",
+            "--rpc-listen",
+            "127.0.0.1:0",
+            "--control-listen",
+            "127.0.0.1:0",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let stdout = child.stdout.as_mut().unwrap();
+    let mut ready = Vec::new();
+    while !ready.contains(&b'\n') {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("readiness was not flushed while up was running");
+        }
+        let mut poll = libc::pollfd {
+            fd: stdout.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: poll receives one valid descriptor record.
+        if unsafe { libc::poll(&mut poll, 1, 100) } > 0 {
+            let mut bytes = [0u8; 8192];
+            let n = stdout.read(&mut bytes).unwrap();
+            assert!(n > 0, "CLI closed stdout before readiness: {ready:?}");
+            ready.extend_from_slice(&bytes[..n]);
+            assert!(ready.len() < 128 * 1024);
+        }
+    }
+    let ready = serde_json::from_slice(&ready).unwrap();
+    (child, ready)
+}
+fn finish_foreground(mut child: std::process::Child) -> Output {
+    let deadline = Instant::now() + Duration::from_secs(35);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("foreground shutdown timed out");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.wait_with_output().unwrap()
+}
+#[test]
+fn foreground_up_serves_until_ctrl_c_and_finalizes_the_journal() {
+    let project = Project::new();
+    let (mut child, ready) = foreground(&project);
+    assert_eq!(ready["result"]["state"], "ready");
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "up returned instead of owning the terminal"
+    );
+    assert_eq!(project.ok(&["status"])["result"]["state"], "ready");
+    let manifest = project.manifest();
+    let rpc = manifest.rpc_address.unwrap();
+    assert!(raw(rpc, format!("POST / HTTP/1.1\r\nHost: {rpc}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}" )).contains("-32600"));
+    // SAFETY: child is the unreaped CLI process owned by this test.
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let output = finish_foreground(child);
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    assert!(
+        output.stdout.is_empty(),
+        "normal stop emitted extra JSON: {output:?}"
+    );
+    assert_eq!(ready["lab_id"], manifest.lab_id);
+    assert_eq!(
+        project.ok(&["status"])["result"]["journal_state"],
+        "finalized"
+    );
+    assert!(TcpStream::connect(rpc).is_err());
+}
+
+#[test]
+fn foreground_exits_after_external_down_and_propagates_daemon_failure() {
+    let project = Project::new();
+    let (child, _) = foreground(&project);
+    project.ok(&["down"]);
+    assert!(finish_foreground(child).status.success());
+    let (child, _) = foreground(&project);
+    let manifest = project.manifest();
+    // SAFETY: the manifest authenticates the daemon owned by this isolated test Lab.
+    assert_eq!(
+        unsafe { libc::kill(manifest.process.unwrap().pid as i32, libc::SIGKILL) },
+        0
+    );
+    error(finish_foreground(child), 6, "internal_error");
+    assert_eq!(
+        project.ok(&["status"])["result"]["journal_state"],
+        "interrupted"
+    );
+}
+
+#[test]
+fn foreground_does_not_take_ownership_of_an_existing_lab() {
+    let project = Project::new();
+    let existing = project.up();
+    error(project.run(&["up"]), 5, "state_conflict");
+    assert_eq!(project.ok(&["status"])["lab_id"], existing["lab_id"]);
+    assert_eq!(project.ok(&["status"])["result"]["state"], "ready");
+    project.ok(&["down"]);
+}
+
+#[test]
+fn foreground_terminal_signals_and_owner_death_stop_only_the_owned_lab() {
+    let project = Project::new();
+    let independent = project.ok(&[
+        "up",
+        "--detach",
+        "--lab",
+        "independent",
+        "--rpc-listen",
+        "127.0.0.1:0",
+        "--control-listen",
+        "127.0.0.1:0",
+    ]);
+    for sig in [libc::SIGTERM, libc::SIGHUP, libc::SIGKILL] {
+        let (mut child, _) = foreground(&project);
+        // SAFETY: child is an unreaped process exclusively owned by this test.
+        assert_eq!(unsafe { libc::kill(child.id() as i32, sig) }, 0);
+        if sig == libc::SIGKILL {
+            child.wait().unwrap();
+        } else {
+            assert!(finish_foreground(child).status.success());
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let state = project.ok(&["status"]);
+            if state["result"]["state"] == "stopped" {
+                assert_eq!(state["result"]["journal_state"], "finalized");
+                break;
+            }
+            assert!(Instant::now() < deadline, "owner death left a live Lab");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            project.ok(&["status", "--lab", "independent"])["lab_id"],
+            independent["lab_id"]
+        );
+    }
+    project.ok(&["down", "--lab", "independent"]);
 }
 
 #[test]
@@ -196,6 +349,7 @@ fn concurrent_starts_reuse_only_compatible_settings_and_leave_other_processes_al
     let project = Project::new();
     let args = [
         "up",
+        "--detach",
         "--rpc-listen",
         "127.0.0.1:0",
         "--control-listen",
@@ -220,14 +374,15 @@ fn concurrent_starts_reuse_only_compatible_settings_and_leave_other_processes_al
     let a: Value = serde_json::from_slice(&out1.stdout).unwrap();
     let b: Value = serde_json::from_slice(&out2.stdout).unwrap();
     assert_eq!(a["lab_id"], b["lab_id"]);
-    assert_eq!(project.ok(&["up"])["lab_id"], a["lab_id"]);
+    assert_eq!(project.ok(&["up", "--detach"])["lab_id"], a["lab_id"]);
     error(
-        project.run(&["up", "--rpc-listen", "127.0.0.1:8898"]),
+        project.run(&["up", "--detach", "--rpc-listen", "127.0.0.1:8898"]),
         5,
         "state_conflict",
     );
     let other = project.ok(&[
         "up",
+        "--detach",
         "--lab",
         "other",
         "--rpc-listen",
@@ -277,15 +432,16 @@ fn occupied_ports_fail_without_terminating_the_occupant_or_leaking_listeners() {
         let address = occupied.local_addr().unwrap().to_string();
         let mut args = vec![
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
             "127.0.0.1:0",
         ];
         if flag == "--rpc-listen" {
-            args[2] = &address;
+            args[3] = &address;
         } else {
-            args[4] = &address;
+            args[5] = &address;
         }
         error(project.run(&args), 5, "state_conflict");
         assert!(TcpStream::connect(occupied.local_addr().unwrap()).is_ok());
@@ -326,7 +482,7 @@ fn forged_birth_identity_never_signals_or_takes_over_the_live_owner() {
         .unwrap()
         .join("manifest.json");
     ronchi::workspace::atomic_json(&path, &forged).unwrap();
-    error(project.run(&["up"]), 5, "state_conflict");
+    error(project.run(&["up", "--detach"]), 5, "state_conflict");
     error(project.run(&["status"]), 5, "state_conflict");
     error(project.run(&["down"]), 3, "lab_unavailable");
     assert_eq!(
@@ -402,80 +558,107 @@ fn cancellation_before_start_does_not_leave_a_lab() {
 }
 
 #[test]
-fn closing_a_real_terminal_after_readiness_does_not_stop_the_lab() {
+fn real_terminal_ctrl_c_and_closure_respect_foreground_and_detach_ownership() {
     use std::os::{
         fd::{AsRawFd, FromRawFd},
         unix::process::CommandExt,
     };
-    let project = Project::new();
-    let mut master = -1;
-    let mut slave = -1;
-    // SAFETY: both descriptor pointers are valid; optional terminal attributes are null.
-    assert_eq!(
+    for (detached, hangup) in [(true, true), (false, false), (false, true)] {
+        let project = Project::new();
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: both descriptor pointers are valid; optional terminal attributes are null.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two distinct owned descriptors.
+        let mut master = unsafe { std::fs::File::from_raw_fd(master) };
+        let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        let fd = slave.as_raw_fd();
+        // Do not leak the PTY master into the CLI: that would prevent a real hangup.
+        for descriptor in [master.as_raw_fd(), fd] {
+            // SAFETY: these are owned, valid PTY descriptors.
+            assert_eq!(
+                unsafe { libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC) },
+                0
+            );
+        }
+        let mut command = project.command(&[
+            "up",
+            "--rpc-listen",
+            "127.0.0.1:0",
+            "--control-listen",
+            "127.0.0.1:0",
+        ]);
+        if detached {
+            command.arg("--detach");
+        }
+        command
+            .stdin(slave.try_clone().unwrap())
+            .stdout(slave.try_clone().unwrap())
+            .stderr(slave.try_clone().unwrap());
+        // SAFETY: the post-fork closure calls only async-signal-safe OS functions.
         unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        },
-        0
-    );
-    // SAFETY: openpty returned two distinct owned descriptors.
-    let mut master = unsafe { std::fs::File::from_raw_fd(master) };
-    let slave = unsafe { std::fs::File::from_raw_fd(slave) };
-    let fd = slave.as_raw_fd();
-    let mut command = project.command(&[
-        "up",
-        "--rpc-listen",
-        "127.0.0.1:0",
-        "--control-listen",
-        "127.0.0.1:0",
-    ]);
-    command
-        .stdin(slave.try_clone().unwrap())
-        .stdout(slave.try_clone().unwrap())
-        .stderr(slave.try_clone().unwrap());
-    // SAFETY: the post-fork closure calls only async-signal-safe OS functions.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
+            command.pre_exec(move || {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::ioctl(fd, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        drop(slave);
+        drop(command);
+        let mut received = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !received.contains(&b'\n') {
+            assert!(Instant::now() < deadline);
+            let mut poll = libc::pollfd {
+                fd: master.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: poll points to one valid descriptor record.
+            if unsafe { libc::poll(&mut poll, 1, 100) } > 0 {
+                let mut bytes = [0u8; 4096];
+                let n = master.read(&mut bytes).unwrap();
+                assert!(n > 0);
+                received.extend_from_slice(&bytes[..n]);
             }
-            if libc::ioctl(fd, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
+        }
+        let result: Value = serde_json::from_slice(&received).unwrap();
+        assert_eq!(result["result"]["state"], "ready");
+        if detached {
+            assert!(child.wait().unwrap().success());
+            drop(master);
+            assert_eq!(project.ok(&["status"])["result"]["state"], "ready");
+            project.ok(&["down"]);
+        } else {
+            assert!(child.try_wait().unwrap().is_none());
+            if hangup {
+                drop(master);
+            } else {
+                master.write_all(&[3]).unwrap();
             }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().unwrap();
-    drop(slave);
-    drop(command);
-    let mut received = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !received.contains(&b'\n') {
-        assert!(Instant::now() < deadline);
-        let mut poll = libc::pollfd {
-            fd: master.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: poll points to one valid descriptor record.
-        if unsafe { libc::poll(&mut poll, 1, 100) } > 0 {
-            let mut bytes = [0u8; 4096];
-            let n = master.read(&mut bytes).unwrap();
-            assert!(n > 0);
-            received.extend_from_slice(&bytes[..n]);
+            assert!(finish_foreground(child).status.success());
+            assert_eq!(
+                project.ok(&["status"])["result"]["journal_state"],
+                "finalized"
+            );
         }
     }
-    let result: Value = serde_json::from_slice(&received).unwrap();
-    assert_eq!(result["result"]["state"], "ready");
-    assert!(child.wait().unwrap().success());
-    drop(master);
-    assert_eq!(project.ok(&["status"])["result"]["state"], "ready");
-    project.ok(&["down"]);
 }
 
 #[test]
@@ -509,6 +692,7 @@ fn cancelling_startup_while_readiness_is_blocked_cleans_up_the_owned_process() {
         let mut child = project
             .command(&[
                 "up",
+                "--detach",
                 "--rpc-listen",
                 "127.0.0.1:0",
                 "--control-listen",
@@ -600,7 +784,7 @@ fn explicit_ids_never_stop_history_and_configured_changes_require_restart() {
         "schema_version = 1\nrpc_listen = '127.0.0.1:8898'\n",
     )
     .unwrap();
-    error(project.run(&["up"]), 5, "state_conflict");
+    error(project.run(&["up", "--detach"]), 5, "state_conflict");
     project.ok(&["down"]);
 }
 
@@ -615,6 +799,7 @@ fn replacing_the_binary_file_does_not_change_the_live_process_birth_identity() {
         .arg(project.path())
         .args([
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",
@@ -645,7 +830,7 @@ fn unknown_recorded_children_block_name_reuse_without_signals_or_history_deletio
     let ws = Workspace::new(project.path());
     let dir = ws.lab(&manifest.lab_id).unwrap();
     ronchi::workspace::atomic_json(&dir.join("manifest.json"), &manifest).unwrap();
-    let output = project.run(&["up"]);
+    let output = project.run(&["up", "--detach"]);
     let still_running = unrelated.try_wait().unwrap().is_none();
     let actual = ronchi::process::identity(identity.pid).unwrap();
     unrelated.kill().unwrap();
@@ -716,6 +901,7 @@ fn public_case_operations_preserve_lab_identity_and_reject_invalid_replacement()
     assert_eq!(catalog["result"][0]["case_id"], "tx-response-lost");
     let ready = project.ok(&[
         "up",
+        "--detach",
         "--rpc-listen",
         "127.0.0.1:0",
         "--control-listen",
@@ -884,7 +1070,12 @@ fn native_normal_and_force_stop_with_live_hold_finalize_or_interrupt_after_owned
     use ed25519_dalek::{Signer, SigningKey};
     for force in [false, true] {
         let project = Project::new();
-        project.up();
+        let owner = if force {
+            project.up();
+            None
+        } else {
+            Some(foreground(&project).0)
+        };
         project.ok(&[
             "case",
             "arm",
@@ -952,11 +1143,13 @@ fn native_normal_and_force_stop_with_live_hold_finalize_or_interrupt_after_owned
                 .unwrap()
                 .is_empty()
         );
-        project.ok(if force {
-            &["down", "--force"]
+        if let Some(child) = owner {
+            // SAFETY: child is the unreaped foreground CLI owned by this test.
+            assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+            assert!(finish_foreground(child).status.success());
         } else {
-            &["down"]
-        });
+            project.ok(&["down", "--force"]);
+        }
         let mut response = Vec::new();
         stream.read_to_end(&mut response).unwrap();
         assert!(response.is_empty());

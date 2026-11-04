@@ -19,6 +19,7 @@ impl Lab {
             .arg(project.path())
             .args([
                 "up",
+                "--detach",
                 "--rpc-listen",
                 "127.0.0.1:0",
                 "--control-listen",

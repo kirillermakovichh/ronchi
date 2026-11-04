@@ -35,6 +35,7 @@ impl Lab {
             root.path(),
             &[
                 "up",
+                "--detach",
                 "--read-upstream",
                 source,
                 "--rpc-listen",
@@ -181,7 +182,10 @@ fn credentials_are_used_only_for_source_transport_and_never_retained() {
         source.address
     );
     let lab = Lab::start(&url);
-    let reused = cli(lab.root.path(), &["up", "--read-upstream", &url]);
+    let reused = cli(
+        lab.root.path(),
+        &["up", "--detach", "--read-upstream", &url],
+    );
     assert_eq!(reused["lab_id"], lab.id);
     assert_eq!(
         reused["result"]["configuration"]["read_upstream"],

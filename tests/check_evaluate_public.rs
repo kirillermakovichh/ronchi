@@ -92,6 +92,7 @@ fn public_evaluation_is_credential_free_read_only_and_never_calls_the_http_sourc
         directory.path(),
         &[
             "up",
+            "--detach",
             "--rpc-listen",
             "127.0.0.1:0",
             "--control-listen",

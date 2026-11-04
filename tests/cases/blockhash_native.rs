@@ -16,6 +16,7 @@ fn real_native_expiry_uses_backend_height_and_preserves_safehash_admission() {
     install(&p, &archive);
     let started = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",

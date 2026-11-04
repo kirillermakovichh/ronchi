@@ -6,8 +6,15 @@ The native stack remains defined by [ADR-0019](../adr/0019-resource-efficient-ru
 
 ## Ownership and identity
 
-`ronchi up` starts a background Lab and waits for readiness.
-The Lab survives the terminal, dashboard, CLI command, and MCP client that connected to it.
+`ronchi up` runs in the terminal until Ctrl-C.
+After readiness, it prints the RPC URL and a single-use dashboard link.
+The developer starts their backend in another terminal.
+Ctrl-C requests normal shutdown and waits for the owned Lab to terminate.
+SIGTERM, terminal closure, a closed stdout pipe, or owner-process death also request normal shutdown.
+`ronchi up --detach` starts a background Lab and returns after readiness.
+The detached Lab survives its initiating terminal and CLI process.
+The MCP `lab.up` operation and Demo retain their background startup behavior.
+Dashboard closure and MCP client disconnection do not stop a Lab.
 Ronchi owns its daemon, listeners, Journal writer, and managed Surfpool child.
 The System Under Test remains independently owned.
 Ronchi never stops the backend, resets its database, or cancels its external Workload.
@@ -146,13 +153,15 @@ Report `ready` only after the listeners, Journal writer, state authority, and re
 Commit the startup evidence before acknowledging readiness.
 Readiness proves the local Lab is usable; it does not prove that every datasource read or application operation will succeed.
 Publish the RPC and dashboard endpoints, `lab_id`, mode, active Case, and Journal health.
-Repeated `up` returns the existing ready Lab when the explicitly requested settings match.
+Repeated `up --detach` or MCP `lab.up` returns the existing ready Lab when the explicitly requested settings match.
 If they differ, return a state conflict with the required Case-change or restart action.
+Foreground `up` rejects an already running Lab and never takes over its terminal ownership.
 An incompatible live daemon requires an explicit stop; a new binary never takes over its lock.
 
 If startup fails, stop only acquired resources and retain its failed manifest, diagnostics, and any interrupted Journal.
 If the initiating `up` is cancelled before readiness, cancel that startup and perform the same cleanup.
-Once readiness is committed, caller cancellation does not stop the Lab.
+Once readiness is committed, detached caller cancellation does not stop the Lab.
+Foreground cancellation after readiness stops its owned Lab through the normal drain.
 
 ### Implemented native ownership
 
@@ -160,7 +169,14 @@ The workspace uses `ronchi/names/<name>.json` for the selected immutable ID.
 Per-name operation locks serialize CLI start and stop decisions.
 A separate owner lock remains held for the entire daemon lifetime.
 The daemon starts in its own operating-system session with no inherited terminal streams.
-CLI exit, pipe closure, and terminal closure do not stop a ready daemon.
+In foreground mode, the CLI retains its exact child handle and a private lifetime socket.
+The daemon treats socket EOF as a normal stop request.
+This also stops the Lab if the terminal owner dies without sending a control request.
+The CLI waits for the child to exit and checks the retained Journal state.
+An external `down` completes that wait.
+A failed child or interrupted Journal produces a nonzero foreground exit.
+Normal Ctrl-C after readiness exits `0`; pre-readiness cancellation exits `130`.
+Detached startup has no terminal lifetime socket.
 
 Startup allocates a fresh random ID and 256-bit control credential.
 Workspace directories use mode `0700`; newly created metadata and credential files use mode `0600`.
@@ -172,7 +188,8 @@ The manifest records requested configuration, actual endpoints, component versio
 The startup CLI holds a lease until readiness publication.
 A gate serializes publication with cancellation inspection.
 A lost startup lease aborts pre-readiness startup and joins acquired resources.
-If readiness won the race, cancellation reports applied effects and leaves the Lab running.
+If readiness won the race, detached cancellation reports applied effects and leaves the Lab running.
+Foreground cancellation instead closes the lifetime socket and waits for normal shutdown.
 If completion cannot be established within the cleanup bound, report unknown effects instead of claiming cancellation completed.
 The CLI retains its direct child handle until this decision; it never kills a process selected from a manifest PID.
 One SIGINT receiver remains registered throughout each start or stop wait.
@@ -246,6 +263,7 @@ Record the observed boundary result and any unavailable backend outcome separate
 ## Shutdown and failures
 
 `ronchi down` stops new RPC admission and Case mutations, then waits for accepted work to settle.
+Foreground Ctrl-C uses the same shutdown path and does not imply `--force`.
 Keep status available while the Lab is stopping.
 Existing holds retain their original deadline within the shutdown drain budget.
 After accepted RPC work settles, quiesce other producers and stop the verified owned Surfpool process.

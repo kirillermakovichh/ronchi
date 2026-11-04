@@ -55,6 +55,7 @@ fn native() -> Option<(Project, Value)> {
     install(&p, &archive);
     let ready = p.ok(&[
         "up",
+        "--detach",
         "--mode",
         "surfpool",
         "--rpc-listen",

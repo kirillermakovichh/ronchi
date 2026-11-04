@@ -23,10 +23,21 @@ Use `ronchi schema lab.up` for the current request and response schemas.
 `lab.status` and `lab.down` also have offline schemas.
 See [startup configuration](docs/product/lab-lifecycle.md#implemented-configuration-surface) for supported settings.
 
-A lifecycle-only Lab can use dynamic loopback ports:
+Start a Lab in the terminal:
 
 ```bash
-ronchi up --rpc-listen 127.0.0.1:0 --control-listen 127.0.0.1:0
+ronchi up
+```
+
+Ronchi prints its RPC URL and dashboard link after readiness.
+Keep this terminal open and start your backend in another terminal with that RPC URL.
+Press Ctrl-C to stop the Lab and retain its Journal.
+Ronchi does not stop your backend.
+
+For scripts or background use, select `--detach` explicitly:
+
+```bash
+ronchi up --detach --rpc-listen 127.0.0.1:0 --control-listen 127.0.0.1:0
 ronchi status --json
 ronchi down
 ```
