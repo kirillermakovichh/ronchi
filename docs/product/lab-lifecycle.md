@@ -223,7 +223,7 @@ The cookie name includes the Lab ID and port; its path includes the immutable La
 `ronchi dashboard` prints a finite live launch link.
 `ronchi dashboard --serve --lab-id <id>` owns a foreground read-only retained viewer.
 The viewer has no writer or simulator and does not change Lab ownership.
-See [build and launch](../development.md#dashboard-build-and-launch) for readiness and shutdown.
+See [build and launch](dashboard.md#access-and-retained-viewing) for readiness and shutdown.
 Each listener owns at most 64 connection tasks.
 HTTP headers are bounded to 32 KiB and 64 fields, with a 30-second header deadline.
 Control JSON bodies are bounded to 1 KiB with a 30-second handler deadline.
@@ -284,15 +284,10 @@ After a bounded graceful child-stop interval, terminate only a verified owned ch
 If cleanup cannot complete, report the remaining owned resources and return an error.
 Never report a requested cancellation or sent signal as confirmed termination.
 Cancellation or disconnection of the `down` client does not reverse an accepted shutdown.
-The Lab owns active Check collections and their HTTP cancellation.
-Stop rejects new collections and cancels active invocations before closing the Journal writer.
-Collection settlement uses the existing five-second cleanup budget.
-The writer retains terminal cancellation records when persistence remains available.
-This cancellation does not stop a developer-owned observation source.
 
 If the Journal writer fails, its queue saturates, or storage reaches its bound, set Lab health to `failed` and stop admitting RPC work.
 Perform bounded shutdown and treat the Journal as interrupted.
-Do not continue an unrecorded experiment or turn a Ronchi failure into a System Under Test Verdict.
+Do not continue an unrecorded experiment or turn a Ronchi failure into a claim about application correctness.
 If managed Surfpool exits unexpectedly, apply the same fail-stop behavior.
 Do not restart it transparently against a new chain state.
 
@@ -399,3 +394,5 @@ The native acceptance fixture signs a system transfer independently of Ronchi's 
 It verifies changed recipient balance, actual transaction status, missing-fee-payer rejection, duplicate backend responses, response loss, clean-state restart, binary tamper rejection, native snapshot startup failure, child death, owned cleanup, and verified orphan cleanup.
 Set `RONCHI_TEST_SURFPOOL_ARCHIVE` to the local pinned archive to run `cargo test --locked --test surfpool_mode -- --test-threads=1` with real native execution.
 Without that explicit fixture, native tests print or retain their fixture limitation and do not establish execution coverage.
+
+Application Check source configuration is removed. Remove old `[checks]` sections before starting a new Lab. Retained manifests and Journal records remain readable.

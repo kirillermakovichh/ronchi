@@ -222,3 +222,71 @@ async fn exchange_projection_honors_response_and_filter_budgets() {
         "invalid_argument"
     );
 }
+
+#[tokio::test]
+async fn newest_pages_are_bounded_and_old_cursors_keep_their_snapshot_and_direction() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "L1").unwrap();
+    for n in 1..=55 {
+        store
+            .append(&[event(
+                "rpc.registered",
+                &format!("r{n}"),
+                json!({"method":"getHealth","registration_seq":n}),
+            )])
+            .unwrap();
+    }
+    let mut r = request(Operation::Requests);
+    r.arguments = serde_json::from_value(json!({"limit":2,"order":"desc"})).unwrap();
+    let engine = Engine::default();
+    let first = engine
+        .execute(
+            path.clone(),
+            true,
+            "explicit",
+            r.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.result["items"][0]["request_id"], "r55");
+    assert_eq!(first.result["items"][1]["request_id"], "r54");
+    store
+        .append(&[event(
+            "rpc.registered",
+            "r56",
+            json!({"method":"getHealth","registration_seq":56}),
+        )])
+        .unwrap();
+    let latest = engine
+        .execute(
+            path.clone(),
+            true,
+            "explicit",
+            r.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(latest.result["items"][0]["request_id"], "r56");
+    r.arguments.cursor = first.page.next_cursor;
+    let older = engine
+        .execute(
+            path.clone(),
+            true,
+            "explicit",
+            r.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(older.view.snapshot_seq, 55);
+    assert_eq!(older.result["items"][0]["request_id"], "r53");
+    r.arguments = serde_json::from_value(json!({"limit":2})).unwrap();
+    let ascending = engine
+        .execute(path, true, "explicit", r, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(ascending.result["items"][0]["request_id"], "r1");
+}

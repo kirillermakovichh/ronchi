@@ -281,3 +281,33 @@ fn slot_profile_flags_override_environment_and_reject_invalid_effective_values()
     );
     assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn retired_application_configuration_and_commands_are_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("ronchi")).unwrap();
+    std::fs::write(
+        temp.path().join("ronchi/config.toml"),
+        "schema_version=1\n[checks]\nconcurrency=1\n",
+    )
+    .unwrap();
+    assert!(ronchi::config::resolve(temp.path().to_path_buf(), Default::default()).is_err());
+    for arguments in [
+        vec!["check", "--help"],
+        vec!["schema", "check.observe"],
+        vec!["schema", "check.evaluate"],
+    ] {
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_ronchi"))
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+    }
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_ronchi"))
+        .args(["schema", "lab.up"])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(!schema.to_string().contains("\"checks\""));
+}

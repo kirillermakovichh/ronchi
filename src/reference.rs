@@ -60,7 +60,7 @@ pub enum Error {
     Busy,
     #[error("The pinned local Lab or its network identity is unavailable")]
     Unavailable,
-    #[error("Reference observation deadline exceeded")]
+    #[error("Reference request deadline exceeded")]
     Deadline,
 }
 impl Error {
@@ -233,11 +233,7 @@ pub async fn run(
     ));
     let mut server = tokio::spawn(crate::network::serve(
         listener,
-        crate::network::Handler::Control(http::router(
-            store.clone(),
-            address,
-            binding.lab_id.clone(),
-        )),
+        crate::network::Handler::Control(http::router(store.clone(), address)),
         stop.clone(),
         force,
     ));

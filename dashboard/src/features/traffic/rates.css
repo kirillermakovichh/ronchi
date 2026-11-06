@@ -1,0 +1,57 @@
+.rpc-rates {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.rpc-rate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  line-height: 1.3;
+}
+.rpc-rate strong {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.runtime-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 4px;
+}
+.lab-health-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.lab-health-card i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.lab-health-card.is-healthy i {
+  background: var(--green);
+}
+.lab-health-card.is-failed i {
+  background: var(--red);
+}

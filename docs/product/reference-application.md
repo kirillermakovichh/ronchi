@@ -1,18 +1,14 @@
 # Reference Application: Withdrawal Relayer
 
-Status: task 10 implemented. The native foreground relayer, durable recovery, and read-only application observation source are verified on macOS. Generic Check collection and deterministic evaluation are implemented in tasks 11–12. The public-path Demo and its bounded native failure/isolation histories are implemented in task 13.
-See [workflows](workflows.md) for the Demo entry point and [Checks and Verdicts](checks-and-verdicts.md) for generic observation and evaluation.
-The defaults below are reversible choices for the first implementation.
+Status: implemented bundled consumer and Demo workload, with durable recovery verified on macOS.
+This document owns relayer behavior, storage and recovery. [Workflows](workflows.md#first-proof-bundled-demo) owns Demo orchestration.
+The defaults below are reversible prototype choices.
 
-The reference System Under Test is a Solana Withdrawal Relayer.
-It gives Ronchi one concrete workflow for testing Cases, evidence, and application-state conclusions.
-Simulator-mode outcomes never claim that a withdrawal executed economically.
-
-The Reference Application is bundled with Ronchi but is not the product core. It is an example consumer, the System Under Test for the self-contained Demo, and an acceptance harness that prevents the product from becoming a fault generator with no proof of application-level value.
-
-The implemented Demo uses the same external RPC, control, evidence, Check, and CLI operations used by real applications.
-Dashboard and MCP integration remain later tasks and must reuse those operations.
-The Demo does not depend on canned Journal Evidence or a private shortcut unavailable to users.
+The relayer accepts a durable Withdrawal Intent, signs and submits a transaction, then reconciles a terminal state.
+It owns business identity, signing, submission policy and persistence. Ronchi owns the RPC boundary, Cases and Journal.
+Both profiles use the same external RPC/control interfaces as other applications; no canned trace or private evidence path is used.
+The bundled Demo may manage this known child. Ronchi does not manage arbitrary user backends.
+The default simulator executes no programs and changes no balances. Simulated finality is not economic execution.
 
 ## Implemented reference process
 
@@ -38,7 +34,7 @@ Unknown keys are rejected.
 The canonical payload digest covers recipient and amount.
 Concurrent identical IDs return the same durable intent; another payload returns HTTP 409.
 A second active intent returns HTTP 409 instead of creating an unbounded queue.
-`GET /intents/{intent_id}` returns committed application state with explicit signature/collection availability.
+`GET /intents/{intent_id}` returns committed application state with explicit signature/list availability.
 An absent intent returns `availability:unavailable`.
 The request body limit is 8 KiB; responses are bounded to 256 KiB.
 The loopback listener accepts at most 64 connections and rejects browser Origin headers.
@@ -70,159 +66,6 @@ The worker reserves terminal headroom within 128 observations per intent and end
 State transitions and their supporting observations share one SQLite transaction.
 A storage error stops the worker/process instead of sending after an uncertain commit.
 Normal SIGINT/SIGTERM preserves confirmed state and keeps the Lab running.
-The generic HTTP Check collector and deterministic evaluator are implemented separately from the relayer source.
-The public-path Demo and its bounded native failure/isolation histories are implemented in task 13.
-
-### Read-only observation source
-
-`POST /checks/observe` accepts contract version 1 with `invocation_id`, `check_id`, the pinned `lab_id`, `snapshot_seq`, `scope:{intent_ids:[id]}`, `facts:["intent"]`, and an RFC 3339 `deadline`.
-The first source supports one explicit intent and the `intent` fact record; other names/scopes are rejected.
-The deadline must be future and at most 30 seconds away; the server also caps each HTTP handler at 5 seconds.
-The operation returns `source:reference-relayer`, `schema_version:1`, invocation identity, `observed_at`, optional per-intent `revision`, and per-fact availability.
-The `intent` value includes committed state, original/tracked mapping, the complete bounded prepared set, attempts, and retained client/status observations.
-Original/tracked signatures and unknown attempt results declare `availability:unavailable` until collected.
-A missing intent returns an unavailable fact without a fabricated state, zero revision, or empty observation value.
-The same SQLite read transaction supplies the intent row and its identities, attempts, and observations.
-`snapshot_relation:application_only` explicitly separates this application snapshot from the caller's Lab evidence prefix.
-The endpoint does not send RPC, notify the worker, append observations, mutate state, or return a Verdict.
-Signing material and exact signed bytes are excluded from public responses.
-`wire_digest` is SHA-256 over the retained canonical base64 UTF-8 representation; it is not the Lab raw-wire digest.
-The task-11 integration tests collect this source through the generic public CLI and HTTP adapter.
-The relayer remains an independent source and does not own collection.
-
-## Reference Behavior Profiles
-
-The Demo uses one Withdrawal Relayer codebase with named behavior policies:
-
-- `unsafe` creates and submits another transaction for the same Withdrawal Intent after an ambiguous response;
-- `resilient` preserves the original transaction identity and reconciles its simulated lifecycle state before deciding what to do next.
-
-The same `tx-response-lost` Case runs against both profiles. Ronchi must report their different observable RPC and application behavior from evidence, not from knowledge of which profile name was selected.
-
-These profiles are intended to demonstrate that Ronchi distinguishes observable unsafe and resilient handling. They are not intended to mimic every application or demonstrate every Case. The broader Case catalog is exercised against real Systems Under Test and extended through protocol-aware Cases, Findings, and optional application Checks.
-
-## Responsibility
-
-The bundled Demo may control its known reference consumer. This does not make the public Ronchi workflow responsible for starting or resetting arbitrary user backends.
-
-The Withdrawal Relayer accepts a durable Withdrawal Intent, turns it into a signed Solana transaction, submits that transaction, tracks its outcome, and reconciles the intent to a terminal state.
-
-Conceptually:
-
-```text
-accept Withdrawal Intent
-  -> prepare and persist transaction identity
-  -> submit transaction
-  -> observe signature and commitment
-  -> reconcile RPC-visible transaction state with intent state
-  -> publish terminal outcome
-```
-
-## Boundary
-
-The reference application owns:
-
-- Withdrawal Intent identity and durable state;
-- transaction construction and signing;
-- submission policy;
-- confirmation and expiration policy;
-- retry and reconciliation policy;
-- an externally observable intent outcome.
-
-Ronchi owns:
-
-- the stateful Solana RPC Simulator and its Simulated Chain State;
-- HTTP JSON-RPC observation;
-- Protocol Fault injection;
-- ordered Timeline evidence;
-- generic Checks and invocation of application-specific Checks;
-- persistent Lab and Journal lifecycle, plus optional Run and reproduction-artifact workflows.
-
-## First reference incident
-
-The first Withdrawal Intent supplies a stable business identifier for correlation. The Reference Application may build a syntactically valid signed Solana transaction, but Ronchi does not execute its instructions or mutate balances.
-
-The initial incident is `tx-response-lost`:
-
-1. The Withdrawal Relayer submits a signed transaction.
-2. The RPC Simulator derives its signature and assigns it a configured Simulated Transaction State.
-3. Ronchi withholds the successful RPC response under the Case's bounded hold policy.
-4. The Withdrawal Relayer may observe a timeout; a claimed Client Outcome requires collected client-side evidence.
-5. Later status queries expose the configured lifecycle state for the same signature.
-6. Ronchi observes whether the Withdrawal Relayer reconciles the original signature, submits another transaction, or remains unresolved.
-
-This incident exposes the difference between a missing submission response and later lifecycle evidence for the same signature. Reference client evidence can additionally establish whether the call timed out.
-
-## Observable behavior goals
-
-**Original transaction reconciliation**:
-After an ambiguous response, the relayer continues tracking the original signature before creating another transaction for the same Withdrawal Intent.
-
-**Truthful terminal status**:
-An intent's reported status is consistent with the simulator lifecycle state and the relayer's configured policy.
-
-**Eventual resolution**:
-After the backend and RPC path recover, the intent must not remain unresolved indefinitely within the bounded reference Run.
-
-**Durable reconciliation**:
-Restarting the relayer after an ambiguous submission must not erase the evidence required to reconcile the intent.
-
-## Evidence needed for a verdict
-
-The reference Run should correlate:
-
-- the Withdrawal Intent identifier;
-- every prepared transaction identity and signature;
-- every submission attempt observed by Ronchi;
-- the Simulated Transaction State assigned to each signature;
-- each injected Protocol Fault;
-- the relayer's reported intent state and durable decision history collected through a configured Check.
-
-Ronchi may find that multiple signed transactions were submitted for one explicitly correlated intent. It must not call that duplicate economic execution: the simulator does not execute transactions or change balances.
-
-## Optional Control comparison
-
-A successful Control Run establishes that the selected Fixture, Workload, relayer, and configured Checks completed without injection. It does not by itself prove semantic transparency or equivalent starting state. An optional Chaos Run uses comparable inputs and adds `tx-response-lost`.
-
-```text
-Control Run: intent reaches the expected state without injection
-Chaos Run:   relayer reconciles the original simulated transaction after an ambiguous response
-```
-
-A failed Control Run makes the comparison inconclusive; it is not evidence of a resilience defect.
-A directly established invariant violation can still support an independent Check failure.
-
-A reference comparison must restore equivalent Ronchi-owned Simulated Chain State and separately prepare equivalent Withdrawal Intent and relayer persistence. The reference workflow records its Fixture digest, profile, Workload digest, and fresh database preparation for Comparability.
-Each side uses a new Lab and a new reference database initialized with the same logical intent and transaction policy.
-A paired Control/Chaos comparison keeps the same profile; comparison of `unsafe` and `resilient` is a separate policy demonstration.
-Transaction signatures may differ where a new Lab uses a different local blockhash; comparison uses the declared logical intent and policy.
-No reset operates on an arbitrary backend database. Without that evidence, Ronchi may show both Runs but must not attribute their difference to `tx-response-lost`.
-
-## Packaging and configuration
-
-The Reference Application is Rust code shipped in the same native executable as Ronchi.
-The Demo starts it as an owned child process in the executable's relayer mode.
-An ordinary Demo leaves its Lab running after the bounded reference Workload and relayer finish.
-It returns actual RPC/control endpoints, immutable `lab_id`, pinned Check results, summary, Findings, and project-aware CLI evidence commands.
-The result now includes a ready Lab dashboard ticket link or exact-ID retained viewer argv.
-`--stop-after-demo` explicitly stops only the Demo-owned Lab after collecting Checks; `--json` changes rendering only.
-The Demo selects a fresh available `demo` name and free loopback ports; it never reuses or replaces the user's `default` Lab.
-If `demo` already exists, allocate `demo-2`, then the next free suffix, and return the selected name.
-Each invocation creates fresh Lab and application state; reopening a relayer database is an explicit recovery exercise.
-This keeps an external HTTP/RPC boundary without requiring Go, Node, Python, or a database server.
-It uses a separate SQLite database under the Demo's Project Workspace artifacts.
-The Reference Application never writes the Lab Journal directly.
-The Demo selects `unsafe` or `resilient` with `ronchi demo tx-response-lost --profile <profile>`; the default is `resilient`.
-The selected profile is persisted at database creation and cannot change while recovering that database.
-Profile names are setup metadata; Check rules evaluate observations rather than trusting those names.
-
-Initial limits are one active intent, one in-flight RPC call per intent, a 5-second client request deadline, and 1-second status polling.
-The target commitment is `finalized`; the bounded Demo observation horizon is 60 seconds of real time from intent acceptance.
-The Case retains its independent default successful lifecycle at 2/4/6 seconds of simulator time and response hold of up to 20 seconds of real time.
-A client timeout may end the held connection earlier; only retained client-side evidence establishes that timeout.
-Simulator submissions explicitly set `skipPreflight: true` and `maxRetries: 0`.
-The reference fixture may use one valid signed transaction format; the core retains its full [format contract](solana-rpc-contract.md#transaction-formats-and-encodings).
-The Demo's narrower transaction generator does not narrow legacy/v0/v1, `jsonParsed`, or durable-nonce support requirements.
 
 ## Durable state and identity
 
@@ -233,7 +76,7 @@ The Demo's narrower transaction generator does not narrow legacy/v0/v1, `jsonPar
 | `submitting` | An attempt-start record is committed before the HTTP call; completion may be unknown after a crash |
 | `reconciling` | Follow the policy-selected identity and record status observations until the terminal policy is satisfied |
 | `succeeded` | The tracked signature reached the configured commitment with no reported transaction error; the resilient profile requires the original identity |
-| `failed` | A definitive transaction failure or policy-defined validity failure is observed; retain its evidence |
+| `failed` | A definitive transaction error is observed; retain its evidence |
 | `unresolved` | The bounded horizon ended without enough evidence; do not claim rejection or success |
 
 `succeeded` describes the reference application's interpretation of simulated lifecycle state.
@@ -248,18 +91,14 @@ A transaction table stores exact signed bytes, signature, intent identity, gener
 Attempt and observation tables retain attempt start, returned result or recorded Client Outcome, queried signature, and returned commitment/error.
 Terminal state updates and their supporting observation commit atomically.
 An original signature is immutable after the first `prepared` commit.
-A repeated intent ID with the same payload returns the existing intent; a different payload returns a conflict.
-The sender commits signed bytes and identity before any network submission.
 A failed identity commit prevents submission.
 The sender never regenerates a signature merely because its response is missing.
 The deliberately unsafe policy below is the explicit demonstration exception.
 
-SQLite uses WAL, `synchronous=FULL`, enabled foreign keys, and versioned migrations.
-One owner serializes writes; no database transaction remains open across an HTTP call.
 A committed state transition is the application persistence boundary under local filesystem guarantees.
 An uncertain database write outcome stops new submissions until the database is reopened and reconciled.
 A storage failure remains an application infrastructure failure, not a false terminal withdrawal outcome.
-Private signing material stays outside Check responses, Journal Evidence, and exports.
+Private signing material stays outside public responses, Journal Evidence and exports.
 
 ## Profiles and crash recovery
 
@@ -287,37 +126,51 @@ Recovery preserves stored horizon timing and never silently gives an intent a ne
 If the original Lab is unavailable, recovery reports `unresolved` with that source gap; it does not point the old intent at a new Lab.
 The relayer pins the immutable `lab_id` and local network identity in its Demo configuration.
 
-## Public application observations and Checks
+## Demo configuration and observation limits
 
-The reference HTTP API accepts an idempotent intent with `POST /intents` and exposes committed state with `GET /intents/{intent_id}`.
-It exposes the read-only `POST /checks/observe` operation defined by the generic HTTP observation adapter.
-The returned revision identifies a consistent SQLite read of intent, prepared transactions, attempts, and observations.
-Explicit `intent_id` to signature mappings supply business correlation; Ronchi does not infer it from RPC timing.
-The Check response identifies `original_signature`, `tracked_signature`, prepared/submitted identities, current state, target commitment, and relevant client/status observations.
-It reports these as application-source facts, not trusted simulator transitions or SDK Application Checkpoints.
-The optional SDK is unnecessary for this path.
+The native executable contains both Ronchi and the relayer. Demo starts the relayer as an owned child.
+`ronchi demo tx-response-lost --profile resilient|unsafe` selects the policy; `resilient` is the default.
+Each Demo uses a new Lab, free loopback ports and fresh relayer storage. It never replaces the user's default Lab.
+The [Demo workflow](workflows.md#first-proof-bundled-demo) defines names, artifacts, cancellation, stop behavior and reported links.
 
-The implemented source additionally reports `prepared_set_complete`, `interval_closed`, `terminal_at_ms`, and `time_basis:application_unix_ms`.
-The prepared set is the full committed inventory from the same SQLite snapshot.
-A terminal interval remains closed after recovery because terminal intents do not resume submission.
-`terminal_at_ms` comes from the retained terminal observation; it is unavailable before terminal commit.
-Acceptance, deadline, terminal time, and source `observed_at` use the declared application UTC clock.
-The evaluator does not infer a global causal order from this coordinate.
-The maintained [reference Check definition](../../src/checks/reference.rs) expresses these requirements through the generic typed mechanism.
-Its current definition version is 2 and its rule versions are 1.
-Evaluate it with `ronchi check evaluate reference-intent --definition-version 2 --intent-id W1 --snapshot-seq N`.
-The offline `ronchi schema check.evaluate` result includes this definition.
-The native acceptance test collects both profiles through `check.observe` and replays evaluation after the source and Lab stop.
+The reference fixture is one legacy signed message with an intent/generation discriminator.
+This narrower generator does not narrow the core's [transaction format contract](solana-rpc-contract.md#transaction-formats-and-encodings).
+There is one active intent and one in-flight RPC call, a five-second client deadline and one-second status polling.
+Default finality is `finalized`; the application horizon is 60 real seconds from acceptance.
+Case lifecycle and withholding use their separate [clock and hold policy](cases.md#tx-response-lost-default-simulated-outcome).
+A client deadline can close a held connection sooner; only the relayer's own retained evidence establishes its Client Outcome.
+Ronchi does not ingest the relayer database or ordinary HTTP status into the Journal.
 
-The Demo configures three versioned requirements: at most one prepared identity per intent, terminal success tied to original-signature finality, and resolution within the declared horizon.
-The unsafe profile must fail the identity requirement after its second committed preparation.
-The resilient profile can pass only when observed intent success and committed simulator evidence establish finality for its original signature, with required complete evidence.
-Crash-recovery acceptance additionally verifies that restart retains that original identity and resumes reconciliation.
-A deadline with authoritative observed unresolved state fails the resolution requirement; an unreachable Check endpoint makes it inconclusive.
-A missing signature mapping, lost evidence, or unknown final boundary cannot become a pass by default.
+The resilient policy aims to retain the original identity, report a truthful terminal state and recover durable reconciliation.
+Unsafe deliberately demonstrates one replacement after ambiguity. These are example policies, not generic business rules evaluated by Ronchi.
+Manual inspection can correlate intent ID, prepared identities, attempts, RPC lifecycle, Faults and the relayer's own state.
+Two different signed identities still do not establish two economic transfers.
 
-Real native SOL or SPL execution remains outside this default simulator-based reference incident.
-It requires the optional [Surfpool execution mode](../adr/0013-managed-surfpool-execution-mode.md) and separate execution-backed requirements.
+## Application inspection
+
+The bundled relayer accepts intents with `POST /intents` and returns committed state with `GET /intents/{intent_id}`.
+These routes support workload control and manual inspection.
+Demo uses the ordinary GET route only to await a terminal workload state.
+Ronchi does not ingest these responses into the Journal or evaluate application requirements.
+Its report contains RPC summary, Findings and evidence commands, without a business Verdict.
+
+## Optional Control comparison
+
+A successful Control Run establishes that the selected Fixture, Workload and relayer completed without injection. It does not by itself prove semantic transparency or equivalent starting state. An optional Chaos Run uses comparable inputs and adds `tx-response-lost`.
+
+```text
+Control Run: intent reaches the expected state without injection
+Chaos Run:   relayer reconciles the original simulated transaction after an ambiguous response
+```
+
+A failed Control Run makes the comparison inconclusive; it is not evidence of a resilience defect.
+The developer can assess application invariants separately from Ronchi's RPC Findings.
+
+For a manual comparison, restore equivalent Ronchi-owned Simulated Chain State and separately prepare equivalent Withdrawal Intent and relayer persistence. The caller records the Fixture digest, profile, Workload digest and fresh database preparation for Comparability.
+Each side uses a new Lab and a new reference database initialized with the same logical intent and transaction policy.
+A paired Control/Chaos comparison keeps the same profile; comparison of `unsafe` and `resilient` is a separate policy demonstration.
+Transaction signatures may differ where a new Lab uses a different local blockhash; comparison uses the declared logical intent and policy.
+No reset operates on an arbitrary backend database. Without that evidence, Ronchi may show both Runs but must not attribute their difference to `tx-response-lost`.
 
 ## Verified recovery histories
 
@@ -340,7 +193,7 @@ Debug builds expose a closed test barrier set through `RONCHI_REFERENCE_TEST_BAR
 Phases are `before_prepare_commit`, `prepared`, `attempt_start`, `rpc_result`, `replacement_prepared`, and `terminal`.
 A barrier atomically writes `barrier.json` in the private reference directory and waits for `barrier.release` or shutdown.
 These development barriers execute no supplied code and are ignored in release builds.
-Read-only HTTP observations do not release them.
+`GET /intents/{intent_id}` does not release these barriers.
 Tests observe these markers before SIGKILL and reopen the same database in a new process.
 They do not use an arbitrary sleep as the crash-boundary oracle.
 
@@ -359,4 +212,3 @@ Private seed loss, unsupported schema, or storage failure requires explicit reco
 The fixture is one legacy inert signed message; it does not execute a SOL/SPL transfer.
 Process-crash histories do not establish power-loss guarantees beyond SQLite FULL and the local filesystem contract.
 Linux/Windows process behavior has not been verified by this slice.
-The task-13 Demo must use the implemented generic adapter and evaluator through these public interfaces.

@@ -146,6 +146,8 @@ pub struct Policy {
     pub revision: u64,
     #[serde(default)]
     pub activated_elapsed_ns: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub activated_at: String,
     #[serde(default)]
     pub activated_simulated_ns: u64,
     #[serde(flatten)]

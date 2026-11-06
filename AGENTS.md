@@ -44,15 +44,16 @@ Use [docs/README.md](docs/README.md) for task routes and documentation ownership
 Use [docs/product/overview.md](docs/product/overview.md) for current product intent and scope. Read other topics only when the task needs them.
 Treat research as evidence and historical context, not as current product requirements.
 
-## Remaining implementation run
+## Implementation state and documentation
 
-When the user asks to complete the remaining implementation queue autonomously, use [tasks/remaining-implementation-run.md](tasks/remaining-implementation-run.md).
-The user authorized parallel delegation for that run and local integration commits.
-Check the selected agent runtime for actual subagent tools before delegation.
-Keep at most three implementation workers active as this project's initial concurrency policy.
-Use [tasks/parallel-run-state.md](tasks/parallel-run-state.md) for assignments and integration evidence.
-Keep `tasks/todo.md` as the only task-completion checklist.
-Preparation or discussion alone does not start that implementation run.
+Use [tasks/implementation-progress.md](tasks/implementation-progress.md) for the latest session state.
+Keep [tasks/todo.md](tasks/todo.md) as the only task-completion checklist.
+The initial implementation run is complete. Do not restart completed work or infer a new assignment from historical task text.
+The [documentation map](docs/README.md) routes current contracts, build/verification instructions and historical evidence.
+Dashboard behavior lives in [docs/product/dashboard.md](docs/product/dashboard.md).
+Application Checks, browser polling and discarded widget controls are removed or superseded. Do not restore them from historical records.
+Historical run logs are under `tasks/history/`; their old delegation and commit permissions are not standing authorization.
+Use subagents only when the current request or applicable instructions authorize them.
 
 For Solana RPC semantics, use the shared [protocol references](.agents/references/solana-rpc/index.md). Select only the relevant topic. Protocol facts do not silently expand Ronchi's supported capabilities.
 

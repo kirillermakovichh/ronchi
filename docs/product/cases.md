@@ -193,7 +193,7 @@ Surfpool behavior remains a requirement for its later implementation, not a veri
 | Case changes | [Bind policy at request registration](#continuing-case-model). [Already held requests keep their original deadline](#tx-response-lost-case-switching). Preserve the Lab's record of affected transaction identities across reactivation. |
 | Required evidence | Received requests and signatures, selected Case and settings, the shared registration/control order, simulator acceptance or the local backend's acceptance response, applied Faults, RPC Boundary Results, and any observed lifecycle changes and later RPC actions. Each statement identifies its evidence source. |
 | Implemented Findings | Two [version-1 rules](evidence-and-findings.md#implemented-version-1-rules) explain observed acceptance, selected response loss, observed withholding, and a later status/transaction request or submission attempt for the same signature. Rules report receipt of the later action; they do not interpret its returned state or infer operation completion. Saved later response facts remain available in Timeline/Evidence Slice. |
-| Verdict boundary | A base Investigation can be useful without a Verdict. A Verdict requires configured Checks and sufficient evidence; the [Reference Application](reference-application.md) can supply known intent correlation and application observations. |
+| Application boundary | Findings describe observed RPC behavior. The developer verifies business correctness in their application. |
 | Unavailable conclusions | RPC-only evidence does not establish a Client Outcome, final business-operation state, or shared intent between different signatures. Simulator state does not establish program execution, balance changes, or duplicate economic execution. |
 
 The accepted [RPC contract](solana-rpc-contract.md) defines format coverage, request behavior, Read-through, and the initial clock profile.
@@ -506,7 +506,7 @@ Every implemented Case publishes:
 - precise protocol and failure semantics, including supported variants;
 - required simulator or Execution Backend capabilities and versions;
 - Observation Boundary and Journal Evidence required for its Findings;
-- supported Findings and any generic or application-supplied Checks for a Verdict;
+- supported Findings and their evidence limits;
 - known limitations and unavailable conclusions.
 
 If a required capability is absent, report the Case as unsupported or its conclusions as limited.
@@ -554,7 +554,7 @@ Packs are proposed groupings, not a committed first-release matrix:
 | Pack | Intended grouping |
 | --- | --- |
 | `transaction-sender-resilience` | Submission ambiguity, confirmation stalls, expiry, stale status, and later rate-limit cases |
-| `relayer-resilience` | Sender behavior plus durable intent reconciliation, externally driven restarts, and application-level Checks |
+| `relayer-resilience` | Sender behavior plus durable intent reconciliation, externally driven restarts, and application inspection |
 | `indexer-resilience` | Disconnects, gaps, duplicates, ordering, reorg-shaped histories, and backfill; outside the initial HTTP scope |
 | `wallet-resilience` | Provider disagreement, stale balances, ambiguous submission, and terminal user-visible state |
 | `exchange-deposits` | Duplicate events, delayed finality, provider disagreement, and canonical-history reconciliation |
@@ -587,7 +587,15 @@ Disarming, replacing, and reactivating the Case preserve this identity memory.
 This acceptance establishes a backend RPC response, not a promise of successful execution.
 Account effects and status require actual later backend evidence.
 Ronchi records no invented simulated processing or commitment transitions in this mode.
-The current response-loss Findings remain simulator-specific and report their source/mode limitation for Surfpool evidence.
+`tx-response-lost.surfpool-response-withheld@1` explains that Surfpool returned the validated signature and Ronchi recorded response withholding.
+It requires committed same-request submission, Surfpool acceptance, Fault selection and observed withholding.
+A later application action is not a prerequisite for this explanation.
+The existing same-signature lookup and submission Findings also accept schema-1 Surfpool histories with mode-specific source checks.
+Their statements do not infer execution or a client timeout.
+The base Finding includes the bounded selected Journal window and counts of later retained same-signature registrations.
+Zero recorded lookups is scoped to that window and its explicit filters.
+An interrupted Journal or incomplete/unsupported correlation prevents a complete-coverage claim.
+The window ends at the last selected committed record, not at current wall time.
 A core source response does not establish a Client Outcome.
 
 ## Verified recent-blockhash reuse claim

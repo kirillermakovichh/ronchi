@@ -5,7 +5,7 @@
 An open-source, local-first reliability lab for blockchain applications.
 Ronchi is designed to show how a real backend handles controlled Solana RPC failures through an explanatory Timeline and evidence-linked Findings.
 
-**Project stage:** local investigation prototype. Persistent Labs, a durable bounded Journal, the embedded dashboard, CLI/MCP queries, application Checks, built-in Cases, and bounded YAML Custom Cases are implemented. Allowlisted Read-through has a write firewall. Optional pinned Surfpool supplies local execution. The API is not stable.
+**Project stage:** local investigation prototype. Persistent Labs, a durable bounded Journal, the embedded dashboard, CLI/MCP queries, built-in Cases, and bounded YAML Custom Cases are implemented. Allowlisted Read-through has a write firewall. Optional pinned Surfpool supplies local execution. The API is not stable.
 
 The simulator supports the declared transaction encodings, lifecycle lookups, explicit lookup-table/nonce state, parsed projections, and fee quotes.
 See the [RPC contract](docs/product/solana-rpc-contract.md) for compatibility limits and the [development queue](tasks/todo.md) for verification and remaining external validation.
@@ -23,18 +23,27 @@ Use `ronchi schema lab.up` for the current request and response schemas.
 `lab.status` and `lab.down` also have offline schemas.
 See [startup configuration](docs/product/lab-lifecycle.md#implemented-configuration-surface) for supported settings.
 
-Start a Lab in the terminal:
+Start the built Lab in the terminal:
 
 ```bash
-ronchi up
+./target/debug/ronchi up
 ```
+
+The examples below use `ronchi` for a binary available on PATH. Otherwise use `./target/debug/ronchi` or the release binary.
 
 Ronchi prints its RPC URL and dashboard link after readiness.
 The dashboard link can be reopened until that Lab stops.
-Overview guides the first connection.
-Observations explains Findings and their evidence.
-Traffic opens the RPC inspector and the advanced Journal view.
-Case and Checks have separate pages for their explicit actions.
+Workspace opens by default with Cases, Observations, Traffic and Inspector widgets.
+Drag panel titles to exchange positions. Drag the dividers to resize panels.
+All four widgets remain visible.
+Observations shows a compact timeline, request counts and actual retained RPC status replies.
+Technical details retains the full evidence and source records.
+Select an Observation to inspect its expandable path and highlight related RPC requests.
+Journal and Lab have separate destinations.
+The dashboard receives live updates over one WebSocket, including open request and Finding details.
+It requires no polling, refresh button or page reload.
+Use Pause live updates to inspect fixed evidence, then Resume live updates to catch up.
+Case controls stay in Workspace.
 Keep this terminal open and start your backend in another terminal with that RPC URL.
 Press Ctrl-C to stop the Lab and retain its Journal.
 Ronchi does not stop your backend.
@@ -72,9 +81,11 @@ Both modes are limited to local development, CI, and isolated staging; Ronchi ne
 | --- | --- |
 | Product value, user, scope, and limits | [Product overview](docs/product/overview.md) |
 | Find the document for a task | [Documentation map](docs/README.md) |
+| Understand Workspace, Observations, live updates and access | [Dashboard](docs/product/dashboard.md) |
+| Build, test or work on the code | [Development](docs/development.md) |
 | Understand domain terms | [Domain glossary](CONTEXT.md) |
 | Work on the project as an agent | [Agent rules and skill routing](AGENTS.md) |
 | See unresolved decisions | [Open questions](docs/open-questions.md) |
-| Start development from the recorded baseline | [Development queue](tasks/todo.md) |
+| Review completed work and remaining validation | [Development queue](tasks/todo.md) |
 
 The documentation map routes to workflows, Cases, the reference relayer, branding, research, and architectural decisions.

@@ -12,7 +12,7 @@ struct Viewer {
     path: std::path::PathBuf,
     sessions: Sessions,
     queries: query::Engine,
-    stop: CancellationToken,
+    sockets: socket::Hub,
 }
 fn host(v: &Viewer, id: &str, h: &HeaderMap) -> Result<(), StatusCode> {
     if id != v.manifest.lab_id {
@@ -80,7 +80,7 @@ async fn authorize(
     if let Err(s) = same_origin(
         v.manifest.control_address,
         r.headers(),
-        r.method() != axum::http::Method::GET,
+        r.method() != axum::http::Method::GET || r.uri().path().ends_with("/socket"),
     ) {
         return s.into_response();
     }
@@ -102,43 +102,22 @@ async fn authorize(
         .insert("cache-control", HeaderValue::from_static("no-store"));
     result
 }
-async fn status(
+async fn websocket(
     State(v): State<Viewer>,
     Path(id): Path<String>,
     h: HeaderMap,
-) -> Result<Json<Manifest>, StatusCode> {
-    host(&v, &id, &h)?;
-    Ok(Json(v.manifest))
-}
-async fn investigate(
-    State(v): State<Viewer>,
-    Path(id): Path<String>,
-    h: HeaderMap,
-    args: Result<Json<query::Request>, axum::extract::rejection::JsonRejection>,
+    ws: axum::extract::WebSocketUpgrade,
 ) -> Result<axum::response::Response, StatusCode> {
     host(&v, &id, &h)?;
-    let Json(r) = args.map_err(|_| StatusCode::BAD_REQUEST)?;
-    if r.lab_id != id {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let request_id = r.request_id.clone();
-    match v
-        .queries
-        .execute(v.path, false, "explicit", r, v.stop.child_token())
-        .await
-    {
-        Ok(response) => Ok(Json(response).into_response()),
-        Err(error) => Ok((
-            StatusCode::BAD_REQUEST,
-            Json(query::Failure {
-                contract_version: 1,
-                request_id,
-                lab_id: Some(id),
-                error,
-            }),
-        )
-            .into_response()),
-    }
+    socket::upgrade(
+        ws,
+        socket::Source::Retained {
+            manifest: std::sync::Arc::new(v.manifest),
+            path: v.path,
+            queries: v.queries,
+        },
+        v.sockets,
+    )
 }
 pub async fn serve(
     project: std::path::PathBuf,
@@ -180,7 +159,7 @@ pub async fn serve(
         path,
         sessions: Sessions::default(),
         queries: query::Engine::default(),
-        stop: stop.clone(),
+        sockets: Default::default(),
     };
     let ticket = v
         .sessions
@@ -191,12 +170,7 @@ pub async fn serve(
         selection,
     );
     let api = Router::new()
-        .route("/ui/{id}/api/status", get(status))
-        .route("/ui/{id}/api/investigate", post(investigate))
-        .route("/ui/{id}/api/checks/evaluate", post(investigate))
-        .layer(axum::extract::DefaultBodyLimit::max(
-            query::MAX_REQUEST_BYTES,
-        ))
+        .route("/ui/{id}/socket", get(websocket))
         .layer(axum::middleware::from_fn_with_state(v.clone(), authorize));
     let router = Router::new()
         .merge(api)
@@ -223,7 +197,8 @@ pub async fn serve(
         force.clone(),
     );
     tokio::pin!(server);
-    tokio::select! {result=&mut server=>return result.map_err(|_|LabError::internal("Retained viewer listener failed")),_=tokio::signal::ctrl_c()=>{},_=crate::query::cli::stdout_closed()=>{}}
+    tokio::select! {result=&mut server=>{v.sockets.shutdown().await;return result.map_err(|_|LabError::internal("Retained viewer listener failed"));},_=tokio::signal::ctrl_c()=>{},_=crate::query::cli::stdout_closed()=>{}}
+    v.sockets.shutdown().await;
     stop.cancel();
     match tokio::time::timeout(Duration::from_secs(3), &mut server).await {
         Ok(result) => result.map_err(|_| LabError::internal("Retained viewer shutdown failed"))?,

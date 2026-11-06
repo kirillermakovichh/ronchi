@@ -34,7 +34,8 @@ An Investigation should answer:
 The primary output is an explanatory Timeline and deterministic, evidence-linked Findings.
 A failure before acceptance and a lost response after acceptance can look alike at the transport boundary; their lifecycle and boundary facts must remain distinct.
 The tool must remain useful without reducing every Investigation to a terminal test result.
-Formal `pass`, `fail`, or `inconclusive` Verdicts require configured Checks and sufficient evidence.
+Ronchi does not collect application facts through configurable endpoints or evaluate business requirements.
+Business correctness remains the developer's responsibility.
 See [ADR-0005](../adr/0005-explanation-first-outcomes.md).
 
 For the first version, a Finding is accompanied by short guidance on what to check in the backend.
@@ -108,7 +109,6 @@ The [clock and validity profile](solana-rpc-contract.md#clock-and-validity-profi
 | Configured RPC path and simulator/backend | Received requests, local lifecycle decisions, applied Faults, RPC Boundary Results, and later RPC calls |
 | Optional Instrumented RPC Client | Client Outcomes, call sites, and explicitly supplied business correlation |
 | Optional Application Checkpoints | The application decisions or transitions those events report |
-| Configured Checks or adapters | The external application state they actually observe |
 
 Changing the RPC URL is sufficient for the base Observation Boundary.
 It does not expose hidden application state, prove how the client interpreted a response, or relate different signatures to one business intent automatically.
@@ -116,7 +116,6 @@ Every Finding links to its supporting Journal Evidence.
 Summaries expose the active boundary, Evidence Gaps, and unavailable conclusions.
 Missing evidence is not proof that an event did not occur.
 The [evidence contract](evidence-and-findings.md) defines recorded facts, deterministic rules, redaction, retention, and storage failure behavior.
-The [Check contract](checks-and-verdicts.md) defines no-SDK application observations and bounded Verdicts.
 
 A Control Run is optional.
 The developer or Coding Agent owns equivalent application state and Workload for any comparison.
@@ -170,7 +169,7 @@ Ronchi never sits between a production application and production RPC, including
 An explicitly configured public Read Upstream is allowed behind the write firewall; that does not make the application production traffic supported.
 
 The initial fault surface is one Solana HTTP JSON-RPC path.
-WebSocket, multi-provider routing, Jito, provider-specific APIs, OS interception, generic service chaos, and EVM support are deferred.
+Blockchain WebSocket, multi-provider routing, Jito, provider-specific APIs, OS interception, generic service chaos, and EVM support are deferred.
 Ronchi is not a load tester, smart-contract verifier, replacement node, or proof of production consensus and economic correctness.
 
 Local-first does not make a live Read Upstream or an arbitrary application's dependencies offline or deterministic.

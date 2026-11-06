@@ -158,3 +158,48 @@ fn admission_order_and_fact_versions_bound_the_conclusion() {
         State::Unsupported
     );
 }
+
+#[test]
+fn surfpool_base_explanation_requires_authority_and_observed_withholding() {
+    let mut e = history(FactKind::StatusRequest);
+    e.later = None;
+    for fact in [
+        &mut e.submission,
+        &mut e.acceptance,
+        &mut e.selection,
+        &mut e.withholding,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        fact.execution_mode = Mode::Surfpool;
+    }
+    e.acceptance.as_mut().unwrap().source = "surfpool".into();
+    let result = evaluate(Rule::SurfpoolResponseWithheld, &e);
+    assert_eq!(result.state, State::Matched);
+    let finding = result.finding.unwrap();
+    assert!(
+        finding
+            .statement
+            .contains("Surfpool returned transaction signature A")
+    );
+    assert_eq!(finding.supporting_events.len(), 4);
+    e.acceptance.as_mut().unwrap().source = "rpc_simulator".into();
+    assert_eq!(
+        evaluate(Rule::SurfpoolResponseWithheld, &e).state,
+        State::InsufficientEvidence
+    );
+    e.acceptance.as_mut().unwrap().source = "surfpool".into();
+    e.withholding = None;
+    assert_eq!(
+        evaluate(Rule::SurfpoolResponseWithheld, &e).state,
+        State::InsufficientEvidence
+    );
+    e.withholding = Some(fact(4, FactKind::Withholding, "original", 1));
+    e.withholding.as_mut().unwrap().execution_mode = Mode::Surfpool;
+    e.withholding.as_mut().unwrap().request_id = "other-request".into();
+    assert_eq!(
+        evaluate(Rule::SurfpoolResponseWithheld, &e).state,
+        State::NoMatch
+    );
+}

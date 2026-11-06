@@ -1,10 +1,12 @@
 # Explanation-first outcomes
 
-Status: accepted. The earlier paired-run default is superseded by [ADR-0008](./0008-chaos-run-first-optional-control.md).
+Application Checks and business Verdict evaluation were removed by user decision. References to them below are historical and do not authorize reimplementation. See [current scope](../product/overview.md) and [task 36](../../tasks/todo.md#36-remove-application-checks).
+
+Status: accepted. The earlier paired-run default is superseded by [ADR-0008](0008-chaos-run-first-optional-control.md).
 
 Ronchi will treat causally ordered Journal Evidence, deterministic Findings, and the Timeline as the primary product output, not reduce an Investigation to a conventional test result. A Finding summarizes a known causal pattern and links directly to its supporting evidence. An automated `pass`, `fail`, or `inconclusive` Verdict is produced only when explicit Checks provide enough evidence. This makes the tool useful for interactive investigation, avoids false certainty about unobserved application internals, and requires missing evidence to remain visible.
 
-The primary workflow is a persistent Lab with an armed Case and an independently running System Under Test, as clarified by [ADR-0015](./0015-persistent-lab-first.md) and [ADR-0016](./0016-continuous-lab-journal.md). Investigations are filtered views over the Lab Journal. An optional bounded Chaos or Control Run may support automation or comparison when the developer or Coding Agent can establish Comparability.
+The primary workflow is a persistent Lab with an armed Case and an independently running System Under Test, as clarified by [ADR-0015](0015-persistent-lab-first.md) and [ADR-0016](0016-continuous-lab-journal.md). Investigations are filtered views over the Lab Journal. An optional bounded Chaos or Control Run may support automation or comparison when the developer or Coding Agent can establish Comparability.
 
 ## Considered Options
 

@@ -132,20 +132,16 @@ _Avoid_: Network fault
 A portable declarative Case composed from published Fault Primitives, bounded conditions, and evidence-linked Finding rules. It contains no arbitrary executable extension code and is evaluated by the Ronchi core.
 _Avoid_: Plugin, user script, built-in Case
 
-**Check**:
-An explicitly configured observation and deterministic requirement evaluation over application facts and Journal Evidence for a bounded Run or Investigation. A Check keeps source observations distinct from the Verdict derived from them.
-_Avoid_: Assertion when it only observes external state
-
 **Business Invariant**:
 A domain rule that must remain true despite retries, ambiguity, reordering, or reconciliation, such as executing one withdrawal at most once.
-_Avoid_: Check, assertion
+_Avoid_: RPC result
 
 **Observation Boundary**:
-The explicit set of surfaces from which Ronchi can collect Journal Evidence. The base boundary contains requests received by Ronchi, simulator decisions, and actions taken at its RPC boundary; the SDK and Checks may add client and application evidence.
+The explicit set of surfaces from which Ronchi can collect Journal Evidence. The base boundary contains requests received by Ronchi, simulator decisions, and actions taken at its RPC boundary; future SDK instrumentation may add client and application evidence.
 _Avoid_: Full observability, everything Ronchi knows
 
 **Evidence Gap**:
-An observation required for a requested Finding, comparison, or Verdict that is outside the current Observation Boundary or was not collected successfully.
+An observation required for a requested Finding or comparison that is outside the current Observation Boundary or was not collected successfully.
 _Avoid_: Failure, assumed state
 
 **Application Checkpoint**:
@@ -165,7 +161,7 @@ The result observed by an application's RPC client, such as a returned signature
 _Avoid_: RPC Boundary Result, inferred outcome
 
 **Observed Application Action**:
-An application action present in Journal Evidence after an RPC Fault. Its evidence source must be explicit: a later RPC request, an SDK event or Application Checkpoint, or a configured Check.
+An application action present in Journal Evidence after an RPC Fault. Its evidence source must be explicit: a later RPC request, an SDK event or Application Checkpoint.
 _Avoid_: Application reaction, inferred decision
 
 **Coverage Claim**:
@@ -181,7 +177,7 @@ The append-only structured evidence record for one Lab, finalized after a clean 
 _Avoid_: Run, capture, application log
 
 **Journal Evidence**:
-The correlated facts actually recorded in the Lab Journal and available to Investigations, Findings, Evidence Slices, and optional Verdicts.
+The correlated facts actually recorded in the Lab Journal and available to Investigations, Findings, and Evidence Slices.
 _Avoid_: Full internal state, telemetry
 
 **Run Evidence**:
@@ -193,12 +189,8 @@ A bounded projection of Journal Evidence selected by relevance, such as particul
 _Avoid_: Filtered log dump, partial truth
 
 **Finding**:
-A deterministic interpretation of observed relationships in Journal Evidence, linked back to the supporting facts, such as "the simulator recorded the transaction as successful, Ronchi withheld the submission response, and the application later queried the same signature." A Finding explains what happened without claiming real chain execution, an unobserved Client Outcome, hidden application intent, or necessarily producing a Verdict.
-_Avoid_: AI diagnosis, Verdict, guess
-
-**Verdict**:
-A justified `pass`, `fail`, or `inconclusive` conclusion produced only when configured Checks can evaluate a bounded automated Run or explicit Investigation from complete-enough evidence.
-_Avoid_: Test result
+A deterministic interpretation of observed relationships in Journal Evidence, linked back to the supporting facts, such as "the simulator recorded the transaction as successful, Ronchi withheld the submission response, and the application later queried the same signature." A Finding explains what happened without claiming real chain execution, an unobserved Client Outcome, hidden application intent or business correctness.
+_Avoid_: AI diagnosis, business correctness claim, guess
 
 **Chaincase**:
 A portable artifact containing enough versioned input and a bounded Journal Evidence selection to reproduce and inspect an Investigation or automated Run.

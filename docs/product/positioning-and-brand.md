@@ -28,9 +28,9 @@ The product analogy is direct:
 | Controlled optical probe | Controlled RPC fault policy |
 | Observed band pattern | Continuous Lab Journal and Timeline |
 | Visible distortion | Evidence-linked Finding |
-| Interpretation in test context | Checks, Evidence Gaps, and explicit limits |
+| Interpretation in test context | Evidence Gaps and explicit limits |
 
-The scientific analogy also sets an important trust boundary. An observed deviation does not automatically justify a universal quality verdict. Likewise, Ronchi shows observable behavior and produces deterministic Findings, but reports `PASS` or `FAIL` only when explicit Checks and sufficient evidence justify it.
+The scientific analogy also sets an important trust boundary. An observed deviation does not automatically justify a universal quality verdict. Likewise, Ronchi shows observable behavior and produces deterministic Findings, without evaluating application business requirements.
 
 ## Positioning
 
@@ -62,7 +62,7 @@ RPC-focused supporting line:
 
 ### 1. A fault is a probe, not a verdict
 
-Applying a fault proves only that Ronchi changed a supported boundary. Correctness conclusions require observable application evidence and, when appropriate, explicit Checks.
+Applying a fault proves only that Ronchi changed a supported boundary. Correctness conclusions require observable application evidence .
 
 ### 2. Evidence over assumptions
 
@@ -96,9 +96,9 @@ The self-contained command remains a useful first proof:
 ronchi demo tx-response-lost
 ```
 
-The bundled Reference Application may provide known correlation and Checks, allowing the Demo to show a stronger conclusion than an uninstrumented user backend. For example, it may show that an ambiguous submission was followed by a second transaction for the same Withdrawal Intent.
+The bundled Reference Application may provide a known workload for interpreting RPC behavior. For example, it may show that an ambiguous submission was followed by a second transaction for the same Withdrawal Intent.
 
-For a backend connected only by changing its RPC URL, Ronchi may show two observed submissions but must not claim that they represent one economic operation. That relationship remains an Evidence Gap unless an SDK, Check, or adapter supplies it.
+For a backend connected only by changing its RPC URL, Ronchi may show two observed submissions but must not claim that they represent one economic operation. That relationship remains an Evidence Gap unless future instrumentation supplies explicit correlation.
 
 The initial Reference Application does not promise real SOL or SPL transfers. Copy such as “two transfers finalized” is valid only when a selected local Execution Backend and collected evidence actually support that conclusion.
 
@@ -106,9 +106,9 @@ The initial Reference Application does not promise real SOL or SPL transfers. Co
 
 - “Every experiment compares Control and Chaos.” Control is optional.
 - “Ronchi runs every application against a disposable blockchain.” The default mode is an RPC Simulator; Surfpool is an optional Execution Backend.
-- “Ronchi detects application bugs automatically.” It explains supported observable behavior and adds Verdicts only when Checks justify them.
+- “Ronchi detects application bugs automatically.” It explains supported observable behavior and leaves business correctness to the developer.
 - “Ronchi provides full internal observability.” Its visibility is complete only within the declared Observation Boundary.
-- “Ronchi currently tests WebSocket behavior.” Initial Traffic scope is one Solana HTTP JSON-RPC path.
+- “Ronchi currently tests blockchain WebSocket behavior.” Initial Traffic scope is one Solana HTTP JSON-RPC path.
 - “Ronchi reproduces consensus or mainnet.” It does not claim production consensus, validator topology, or an authoritative mainnet fork.
 
 ## Visual identity

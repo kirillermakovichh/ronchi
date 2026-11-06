@@ -148,6 +148,7 @@ fn explicit_read_through_and_final_boundary_write_firewall() {
         json!({"context":{"slot":987},"value":123})
     );
     let denied = [
+        "getProgramAccounts",
         "requestAirdrop",
         "simulateTransaction",
         "sendTransaction",

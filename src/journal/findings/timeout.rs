@@ -188,7 +188,7 @@ impl JournalReader {
                 .expect("typed finding identity serializes"),
             );
             rule.matched += 1;
-            report.findings.push(Finding{finding_id:format!("f1-{id}"),rule_id:"provider-timeout-burst.later-rpc-attempt".into(),version:1,lab_id:lab.into(),scope,supporting_events,statement:format!("Ronchi prevented dispatch of {method}, withheld its HTTP response, and later registered another {method} request."),guidance:"Inspect the application's retry deadline and recovery behavior using the linked RPC records.".into(),limitations:vec!["The RPC boundary does not establish a client timeout, causal retry, hidden intent, or application completion.".into(),"Non-dispatch excludes acceptance from this attempt; an earlier attempt may already have been accepted.".into()]});
+            report.findings.push(Finding{observation_window:None,finding_id:format!("f1-{id}"),rule_id:"provider-timeout-burst.later-rpc-attempt".into(),version:1,lab_id:lab.into(),scope,supporting_events,statement:format!("Ronchi prevented dispatch of {method}, withheld its HTTP response, and later registered another {method} request."),guidance:"Inspect the application's retry deadline and recovery behavior using the linked RPC records.".into(),limitations:vec!["The RPC boundary does not establish a client timeout, causal retry, hidden intent, or application completion.".into(),"Non-dispatch excludes acceptance from this attempt; an earlier attempt may already have been accepted.".into()]});
         }
         report.rules.push(rule);
         Ok(())

@@ -1,10 +1,12 @@
 //! Bounded durable event storage. Callers supply validated, redacted event facts.
 //! This module does not infer application outcomes or restore a running Lab.
+mod traffic;
+pub use traffic::RpcTraffic;
+mod activity;
+pub use activity::CaseActivity;
 mod budget;
 mod cases;
-mod checks;
 pub use budget::{DEFAULT_DISK_BYTES, DiskLimits, DiskUsage, MIN_SHUTDOWN_RESERVE};
-mod evaluate;
 mod findings;
 mod nonces;
 mod query;

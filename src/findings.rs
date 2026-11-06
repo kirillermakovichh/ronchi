@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum Rule {
     LookupAfterWithholding,
     SubmissionAfterWithholding,
+    SurfpoolResponseWithheld,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -48,9 +49,14 @@ impl Rule {
             rule_id: match self {
                 Self::LookupAfterWithholding => "tx-response-lost.lookup-after-withholding",
                 Self::SubmissionAfterWithholding => "tx-response-lost.submission-after-withholding",
+                Self::SurfpoolResponseWithheld => "tx-response-lost.surfpool-response-withheld",
             },
             version: 1,
-            execution_mode: Mode::Simulator,
+            execution_mode: if self == Self::SurfpoolResponseWithheld {
+                Mode::Surfpool
+            } else {
+                Mode::Simulator
+            },
             required_facts: [
                 Requirement {
                     kind: FactKind::Submission,
@@ -59,7 +65,11 @@ impl Rule {
                 },
                 Requirement {
                     kind: FactKind::Acceptance,
-                    source: "rpc_simulator",
+                    source: if self == Self::SurfpoolResponseWithheld {
+                        "surfpool"
+                    } else {
+                        "rpc_simulator"
+                    },
                     role: "acceptance",
                 },
                 Requirement {
@@ -74,8 +84,15 @@ impl Rule {
                 },
             ],
             later_source: "ronchi",
-            later_role: "later_action",
+            later_role: if self == Self::SurfpoolResponseWithheld {
+                "not_required"
+            } else {
+                "later_action"
+            },
             guidance: match self {
+                Self::SurfpoolResponseWithheld => {
+                    "Inspect the linked HTTP boundary and later requests for this signature. Check application logs for the client outcome."
+                }
                 Self::LookupAfterWithholding => {
                     "Inspect how the application reconciles the original signature and completes its operation after this lookup."
                 }
@@ -83,22 +100,51 @@ impl Rule {
                     "Inspect retry and reconciliation behavior for the original transaction identity. Another attempt does not establish a second transaction or transfer."
                 }
             },
-            limitations: &[
-                "RPC-only evidence does not establish a client timeout, operation completion, or business intent.",
-                "Simulator acceptance does not establish instruction execution, balance changes, or an economic transfer.",
-                "Event and registration order establish observation order, not application causality.",
-            ],
+            limitations: if self == Self::SurfpoolResponseWithheld {
+                surfpool_limits()
+            } else {
+                &[
+                    "RPC-only evidence does not establish a client timeout, operation completion, or business intent.",
+                    "Simulator acceptance does not establish instruction execution, balance changes, or an economic transfer.",
+                    "Event and registration order establish observation order, not application causality.",
+                ]
+            },
             later_kinds: match self {
+                Self::SurfpoolResponseWithheld => &[],
                 Self::LookupAfterWithholding => {
                     &[FactKind::StatusRequest, FactKind::TransactionRequest]
                 }
                 Self::SubmissionAfterWithholding => &[FactKind::Submission],
             },
             correlation_keys: &["lab_id", "signature", "request_id", "registration_seq"],
-            order: "submission < acceptance < selection < withholding < later; later registration > incident registration",
-            incident_key: "Lab + signature + accepted request + acceptance event; earliest eligible later event per rule",
+            order: if self == Self::SurfpoolResponseWithheld {
+                "submission < acceptance < selection < withholding"
+            } else {
+                "submission < acceptance < selection < withholding < later; later registration > incident registration"
+            },
+            incident_key: if self == Self::SurfpoolResponseWithheld {
+                "Lab + signature + accepted request + acceptance event + observed withholding"
+            } else {
+                "Lab + signature + accepted request + acceptance event; earliest eligible later event per rule"
+            },
         }
     }
+    pub fn definition_for(self, mode: Mode) -> Definition {
+        let mut definition = self.definition();
+        if mode == Mode::Surfpool {
+            definition.execution_mode = Mode::Surfpool;
+            definition.required_facts[1].source = "surfpool";
+            definition.limitations = surfpool_limits();
+        }
+        definition
+    }
+}
+fn surfpool_limits() -> &'static [&'static str] {
+    &[
+        "A Surfpool signature return does not establish execution, finality, balance changes, or an economic transfer.",
+        "RPC-only evidence does not establish a client timeout, operation completion, or business intent.",
+        "Event and registration order establish observation order, not application causality.",
+    ]
 }
 #[derive(Clone, Debug)]
 pub struct Fact {
@@ -156,6 +202,17 @@ pub enum FindingScope {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ObservationWindow {
+    pub from_seq: u64,
+    pub to_seq: u64,
+    pub from_recorded_at: String,
+    pub to_recorded_at: String,
+    pub status_lookup_count: u64,
+    pub later_rpc_count: u64,
+    pub complete_for_selected_records: bool,
+    pub coverage: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct Finding {
     pub finding_id: String,
     pub rule_id: String,
@@ -166,6 +223,8 @@ pub struct Finding {
     pub statement: String,
     pub guidance: String,
     pub limitations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_window: Option<ObservationWindow>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Evaluation {
@@ -189,7 +248,12 @@ impl Evaluation {
 /// Evaluate one candidate incident using only facts at or below its committed watermark.
 /// Missing facts do not establish negative application behavior.
 pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
-    let definition = rule.definition();
+    let mode = evidence
+        .acceptance
+        .as_ref()
+        .map(|f| f.execution_mode)
+        .unwrap_or(rule.definition().execution_mode);
+    let definition = rule.definition_for(mode);
     let facts = [
         evidence.submission.as_ref(),
         evidence.acceptance.as_ref(),
@@ -262,6 +326,13 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
     {
         return Evaluation::empty(rule, State::NoMatch, None);
     }
+    if rule == Rule::SurfpoolResponseWithheld {
+        return withheld_evaluation(
+            &definition,
+            evidence,
+            [submission, acceptance, selection, withholding],
+        );
+    }
     let Some(later) = later else {
         return Evaluation::empty(rule, State::NoMatch, None);
     };
@@ -293,6 +364,7 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
     let mut limitations: Vec<String> = definition.limitations.iter().map(|s| (*s).into()).collect();
     let signature = &acceptance.signature;
     let statement = match rule {
+        Rule::SurfpoolResponseWithheld => unreachable!("handled before later-action rules"),
         Rule::LookupAfterWithholding => format!(
             "Ronchi received a status or transaction lookup for {signature} after observing response withholding for its accepted submission."
         ),
@@ -349,6 +421,7 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
         statement,
         guidance: definition.guidance.into(),
         limitations,
+        observation_window: None,
     };
     let mut result = Evaluation::empty(rule, State::Matched, None);
     if rule == Rule::SubmissionAfterWithholding && !same_bytes {
@@ -356,4 +429,56 @@ pub fn evaluate(rule: Rule, evidence: &Evidence) -> Evaluation {
     }
     result.finding = Some(finding);
     result
+}
+
+fn withheld_evaluation(
+    definition: &Definition,
+    evidence: &Evidence,
+    facts: [&Fact; 4],
+) -> Evaluation {
+    let [submission, acceptance, _, withholding] = facts;
+    let supporting_events: Vec<_> = definition
+        .required_facts
+        .iter()
+        .zip(facts)
+        .map(|(expected, fact)| Support {
+            role: expected.role.into(),
+            event_ref: fact.event_ref.clone(),
+        })
+        .collect();
+    let scope = FindingScope::AcceptedTransaction {
+        signature: acceptance.signature.clone(),
+        accepted_request_id: acceptance.request_id.clone(),
+        from_seq: submission.event_ref.event_seq,
+        to_seq: withholding.event_ref.event_seq,
+    };
+    let identity = serde_json::to_vec(&(
+        definition.rule_id,
+        definition.version,
+        &evidence.lab_id,
+        &scope,
+        &supporting_events,
+    ))
+    .expect("typed identity serializes");
+    Evaluation {
+        rule: Rule::SurfpoolResponseWithheld,
+        version: 1,
+        state: State::Matched,
+        evidence_gaps: vec![],
+        finding: Some(Finding {
+            finding_id: format!("f1-{}", crate::query::digest(&identity)),
+            rule_id: definition.rule_id.into(),
+            version: 1,
+            lab_id: evidence.lab_id.clone(),
+            scope,
+            supporting_events,
+            statement: format!(
+                "Surfpool returned transaction signature {}; Ronchi recorded response withholding for that submission.",
+                acceptance.signature
+            ),
+            guidance: definition.guidance.into(),
+            limitations: definition.limitations.iter().map(|s| (*s).into()).collect(),
+            observation_window: None,
+        }),
+    }
 }

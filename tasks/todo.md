@@ -1,26 +1,25 @@
-# Initial development queue
+# Development queue
 
-Status: implementation in progress. Completed slices and verification are recorded below.
-The [product plan](plan.md) records decisions and risks; this file owns implementation progress.
-The user delegated routine decisions in the [baseline brief](design-baseline-brief.md).
-The [development stack](../docs/development.md) fixes the toolchain and core/dashboard technology choices.
-No further design interview is required to start.
+The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
+The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
+Current maintenance: [task 38](#38-documentation-organization).
+
+## Remaining validation
+
+- [ ] Repeat the complete independent stateful-backend/pool-discovery workflow after the task-28 fixes and current UI changes. The earlier manual Solana-backend trial provides bounded evidence, not complete compatibility.
+
+Checkpoint C/E's initial manual workflow criterion is recorded below. This full retest remains separate.
+SDK, CI wrappers, replay, distribution and later capabilities remain [open questions](../docs/open-questions.md), not an implicitly started implementation queue.
 
 ## Working rules
 
-Implement one slice at a time through public behavior.
-An early partial slice does not narrow the accepted format, method, mode, or Case scope.
-Use the relevant project skills and [Definition of Done](../.agents/references/definition-of-done.md).
-Run focused protocol, process, and persistence tests; avoid tests that only mirror implementation.
-After a code slice, run `cargo fmt --check`, its focused `cargo test` target, and `cargo check`.
-At checkpoints, run the accumulated suite and `cargo clippy --all-targets -- -D warnings`.
-These commands become available after task 1; this documentation task has not run them.
+Follow [development rules](../docs/development.md#working-rules) and the project [Definition of Done](../.agents/references/definition-of-done.md).
+Record scoped checks with each task. Keep a task incomplete if required verification is blocked.
+Historical paths, commands and proposed module homes below describe their implementation stage. Current contracts take precedence.
+Application Checks were removed by task 36; task 30 superseded browser polling; task 34 superseded hidden/collapsible widgets.
+Historical authorization and the completed parallel run do not create a new assignment.
 
-Paths below are proposed module homes, not frozen interfaces.
-Each task targets small or medium scope with about five substantive files at most.
-Task 1 establishes shared build files; later slices reuse them.
-If a slice exceeds one focused session, split its remaining work into adjacent subtasks here.
-Checkpoints record results and do not require another approval interview.
+## Completed implementation record
 
 ## First working Lab
 
@@ -303,7 +302,7 @@ Checkpoints record results and do not require another approval interview.
 - [x] **Accept:** Implement configured read-only HTTP observation and public `check.observe`; commit validated facts with source, explicit scope, deadlines, and bounded polling.
 - **Verify:** Timeouts, unavailable facts, schema errors, redirects, byte limits, cancellation, and stop; adapter failure remains an Evidence Gap.
 - **Dependencies:** 8. **Scope:** Medium. **Likely files:** `src/checks.rs`, `src/checks/http.rs`, `src/checks/schema.rs`, `src/cli/check.rs`, `tests/check_observe.rs`.
-- **Source:** [Checks and Verdicts](../docs/product/checks-and-verdicts.md).
+- **Source:** [removed application integration](#36-remove-application-checks).
 
 #### 11a. Check configuration and wire validation
 
@@ -342,7 +341,7 @@ Checkpoints record results and do not require another approval interview.
 - [x] **Accept:** Implement public `check.evaluate` over a pinned retained snapshot with bounded Verdicts, supporting facts, source authority, and gaps.
 - **Verify:** Success, correlated identity violation, authoritative unresolved state at deadline, incomplete intervals, and conflicting facts; repeat without contacting the source.
 - **Dependencies:** 9, 11. **Scope:** Medium. **Likely files:** `src/checks/evaluate.rs`, `src/checks/rules.rs`, `src/checks/verdict.rs`, `tests/check_evaluate.rs`.
-- **Source:** [Verdict rules](../docs/product/checks-and-verdicts.md#verdict-rules).
+- **Source:** [removed business evaluation](#36-remove-application-checks).
 
 #### 12a. Versioned typed definitions
 
@@ -374,7 +373,7 @@ Checkpoints record results and do not require another approval interview.
 - [x] **Accept:** Orchestrate fresh Demo-owned Lab/relayer state and public RPC/Checks; return bounded results and retain the Lab unless `--stop-after-demo` is explicit.
 - **Verify:** Both profiles offline, unsafe identity failure, evidence-backed resilient success, fresh names, JSON output, and owned-child cleanup.
 - **Dependencies:** 10, 12. **Scope:** Medium. **Likely files:** `src/demo.rs`, `src/demo/fixture.rs`, `src/cli/demo.rs`, `tests/demo.rs`.
-- **Sources:** [Demo workflow](../docs/product/workflows.md#first-proof-bundled-demo), [reference packaging](../docs/product/reference-application.md#packaging-and-configuration).
+- **Sources:** [Demo workflow](../docs/product/workflows.md#first-proof-bundled-demo), [reference packaging](../docs/product/reference-application.md#demo-configuration-and-observation-limits).
 
 #### 13a. Isolated startup and owned process
 
@@ -399,17 +398,19 @@ Checkpoints record results and do not require another approval interview.
 ### Checkpoint C
 
 - [x] The Demo distinguishes profiles from observations without trusting their labels.
-- [ ] An independently run backend yields a useful RPC-only Investigation with explicit missing business evidence.
-- **Technical reference-consumer probe:** A separately launched reference relayer used a fresh Lab RPC URL without Checks or SDK. Its intent reached `succeeded`; RPC-only Investigation returned one Finding, `application_coverage_unknown`, zero `check.observation` events, and no formal Verdict at snapshot 37. Owned processes were stopped. This verifies independent reference-process wiring only. No suitable third-party backend was available; that acceptance item remains unchecked.
+- [x] An independently run backend yields a useful RPC-only Investigation with explicit missing business evidence. User-reported manual Surfpool 1.7.0 trial: two local transfers executed while submission responses were withheld; Journal inspection identified the effects and missing status queries. No client/business conclusion is inferred from RPC evidence alone. Full Raydium discovery was blocked and remains a retest target in task 28.
+- **Technical reference-consumer probe:** A separately launched reference relayer used a fresh Lab RPC URL without Checks or SDK. Its intent reached `succeeded`; RPC-only Investigation returned one Finding, `application_coverage_unknown`, zero `check.observation` events, and no formal Verdict at snapshot 37. Owned processes were stopped. This verifies independent reference-process wiring only. At that probe, no suitable third-party backend was available. The later manual trial above supplies bounded evidence; the complete retest remains open.
 
 ## Human and agent access
 
 ### 14. Embedded dashboard
 
+Historical continuation: `b430db5` added bounded Findings pages and exact detail bookmarks; the final task-14 verification remains recorded below.
+
 - [x] **Accept:** Ship prebuilt header, summary, Timeline, and evidence views with authenticated public Case/Check controls and bounded drill-down.
 - **Verify:** No traffic, no match, Finding selection, Evidence Gaps, stopped/interrupted views, and browser closure without Lab stop.
 - **Dependencies:** 9, 12. **Scope:** Medium; split panels if needed. **Likely files:** `dashboard/`, `src/dashboard.rs`, `tests/dashboard_flow.rs`.
-- **Source:** [First dashboard](../docs/product/investigation-interfaces.md#first-dashboard).
+- **Source:** [First dashboard](../docs/product/dashboard.md#workspace).
 - [x] 14a. Reproducible React package and embedded asset serving.
 - [x] 14b. Bounded browser tickets and Lab-scoped sessions.
 - [x] 14c. Summary, Timeline, Findings, and evidence detail.
@@ -421,8 +422,8 @@ Checkpoints record results and do not require another approval interview.
 - **Earlier controls/viewer verification:** Four Vitest/Testing Library tests and three real native Playwright flows passed. Browser flows cover Case mutations, two Lab sessions on one host, ticket reuse, client cookie expiry, response-loss Finding evidence, actual relayer collection/evaluation, and retained replay after source/Lab stop. Retained name reuse keeps the original identity. Desktop, narrow, and visible narrow evidence screenshots were inspected. The full Rust suite and release build passed. One pre-viewer `down` failure did not reproduce in ten focused runs; the harness now retains CLI error envelopes. Its cause remains unconfirmed.
 - **Final acceptance:** `npm --prefix dashboard ci`, `run typecheck`, `test -- --run` (13 tests), `run build`, `cargo build --locked`, and `run test:browser` (8 native Chromium flows) passed. `cargo fmt --check`, `cargo check --locked`, `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --release --locked` passed with built embedded assets. A focused real-process viewer test confirms stdout closure exits the owner, releases its listener, preserves Journal bytes, and leaves another Lab ready. Desktop and 390px screenshots, including connection loss and retained recovery controls, were viewed. Long recovery commands now wrap without overflow.
 - **Coverage boundary:** Native browser flows cover no selected Lab, no traffic/waiting for match, more than five real Findings, event/Finding bookmarks, retained name reuse, late-read cancellation, keyboard focus, source collection with lost response, status inspection without retry, confirmed collection cancellation, Unicode payload byte continuation, operational errors, connection loss, and browser closure with the same armed Case. Visibility uses a controlled `document.hidden` signal in real Chromium with native HTTP. Starting, unsupported capability, analysis-limit, and core-failure renderer branches use controlled DTO tests; native lifecycle was not fabricated for those branches.
-- **Known observation:** The earlier isolated normal-down failure remains unconfirmed, not fixed. No original structured envelope was found. The harness now preserves known IDs, original command/output, operation sequence, and read-only resource inspection before owned failure cleanup. See [unconfirmed-down-observation.md](unconfirmed-down-observation.md). No runtime retry or speculative Lab fix was added.
-- **Preserved boundaries:** HTTP-only source collection; 32 KiB effective source cap; one intent/signature per evaluation; 512 records and 4 MiB evaluation evidence; read-only retained viewing; no runtime Node dependency. Checkpoint C's external-backend item remains unchecked. Task 14 completed after the explicit detail-error recovery regression passed. The subsequent tasks15–24 run is recorded in parallel-run-state.md.
+- **Known observation:** The earlier isolated normal-down failure remains unconfirmed, not fixed. No original structured envelope was found. The harness now preserves known IDs, original command/output, operation sequence, and read-only resource inspection before owned failure cleanup. See [unconfirmed-down-observation.md](history/unconfirmed-down-observation.md). No runtime retry or speculative Lab fix was added.
+- **Preserved boundaries:** HTTP-only source collection; 32 KiB effective source cap; one intent/signature per evaluation; 512 records and 4 MiB evaluation evidence; read-only retained viewing; no runtime Node dependency. Checkpoint C's external-backend item remains unchecked. Task 14 completed after the explicit detail-error recovery regression passed. The subsequent tasks 15–24 run is recorded in [the historical ledger](history/implementation-run-2026-11-03.md).
 
 ### 15. Local MCP adapter
 
@@ -526,10 +527,10 @@ Checkpoints record results and do not require another approval interview.
 ### Checkpoint E
 
 - [x] Record verified capabilities and remaining gaps without claiming production fidelity or adoption.
-- [ ] Validate one independent backend workflow and select the next improvement from its results.
+- [x] Validate one independent backend workflow and select the next improvement from its results. The user-reported Solana-backend trial selected task 28. This is bounded manual evidence, not a claim of full backend compatibility.
 - [x] Preserve deferred CI wrappers, replay, SDK, distribution, and later transports in [open questions](../docs/open-questions.md).
 
-- **Remaining external validation:** Checkpoints C/E still require a suitable independent third-party application. The bundled relayer and local fake sources do not close that criterion. No unrelated repository was searched or changed to manufacture this evidence.
+- **External validation update:** The subsequent user-reported Solana-backend trial supplies independent evidence for Checkpoints C/E. Task 28 tracks the discovered gaps. A complete pool-discovery workflow and a repeat of the fixed UI with that backend remain external retest work. The bundled relayer and local fixtures do not substitute for that retest.
 
 ## Foreground terminal experience
 
@@ -539,7 +540,7 @@ Checkpoints record results and do not require another approval interview.
 - [x] **25b:** Authenticated live Case, Journal watermark, and held-request status; normal animated shutdown; truthful completion and unavailable states. No Findings polling or raw terminal mode.
 - [x] **25c:** Native PTY verification for Ctrl-C, external stop, narrow resize, `NO_COLOR`, `--no-animation`, interrupted evidence, and machine output. Rebuild the release executable.
 - **Dependencies:** Existing foreground lifecycle. **Scope:** `src/lab/terminal.rs`, `src/lab/foreground.rs`, CLI parsing, dependencies, and focused process tests.
-- **Sources:** [Concept and implementation plan](plan.md#foreground-terminal-experience), [CLI interfaces](../docs/product/investigation-interfaces.md), and [brand](../docs/product/positioning-and-brand.md#visual-identity).
+- **Sources:** [Concept and implementation plan](../docs/product/investigation-interfaces.md#foreground-terminal-presentation), [CLI interfaces](../docs/product/investigation-interfaces.md), and [brand](../docs/product/positioning-and-brand.md#visual-identity).
 
 - **Implemented / verified:** Console/Indicatif inline panel with Tokio-driven animation, one bounded authenticated status request at a time, short dashboard hyperlinks, opt-outs, and verified completion labels. `cargo fmt --check`, `cargo check --locked`, 300 Rust tests, Clippy with `-D warnings`, and release build passed. Five native PTY tests verify live Case and missing-status behavior, 36/88-column layouts, actual Ctrl-C, external stop, static/NO_COLOR/JSON/CI/dumb output, real held-RPC Fault color and drain, and interrupted completion. Release PTY smoke checks passed in simulator and real pinned Surfpool, including owned-child cleanup.
 - **Visual verification:** Reviewed rendered VT100 screens from actual PTY output. Resize synchronizes pending frames with the emulator width; it does not emulate a particular window manager's scrollback reflow. Actual Zed rendering and hyperlink clicks were not automated. No frontend application changes or new business Verdicts were added. Checkpoints C/E remain open.
@@ -549,7 +550,7 @@ Checkpoints record results and do not require another approval interview.
 
 - [x] **Accept:** Repeated dashboard commands return the same link; that link and browser authorization remain reusable until Lab stop. Viewer access lasts until viewer exit.
 - [x] **Verify:** Repeated native HTTP exchanges, real browser reopen after cookie removal, stale-key rejection after same-port Lab restart, former-timeout smoke check, terminal copy, full checks and release build.
-- **Sources:** [Access decision](plan.md#lab-lifetime-dashboard-access), [browser contract](../docs/development.md#dashboard-build-and-launch), and [lifecycle](../docs/product/lab-lifecycle.md).
+- **Sources:** [Access decision](../docs/product/dashboard.md#access-and-retained-viewing), [browser contract](../docs/product/dashboard.md#access-and-retained-viewing), and [lifecycle](../docs/product/lab-lifecycle.md).
 
 - **Implemented / verified:** One reusable launch key and one distinct browser key per live Lab or retained viewer, held only in runtime memory. Launch metadata reports null seconds and an explicit stop boundary. Native HTTP tests cover 40 repeated launches/exchanges, bearer/Host/Origin separation, and old-link/cookie rejection after a same-port name reuse. All 301 Rust tests, 17 UI tests, 8 native Chromium flows, fmt/check/Clippy, frontend production build and release build passed. A release smoke check confirmed the original link and cookie still work after 62 seconds, then stopped its isolated Lab normally. Browser flows reopen the original link after cookie removal. The former 30-minute server timer was removed; no 30-minute wall-clock soak was performed.
 
@@ -591,3 +592,138 @@ Dependencies: tasks 8, 9, 14, 22 and 26. Preserve open Checkpoints C/E.
 
 - **Implemented / verified:** Five-page navigation, guided first connection, readable Findings, same-snapshot RPC exchange projection and request-ID filtering. Existing bounded queries, Custom Case authoring, Check collection/evaluation, retained recovery and payload byte continuation remain available. Full Rust suite: 303 tests. After boxing the expanded CLI selection, 37 affected CLI/query/MCP/session tests were repeated. UI typecheck, 21 UI tests, 9 native Chromium flows, fmt/check/Clippy with `-D warnings`, production assets and release build passed.
 - **Visual and release checks:** Reviewed desktop and narrow Overview, RPC inspector and Finding detail, plus Case/Checks screens from the release Demo. Verified long-signature wrapping, saved Findings page on Back, same-tab launch reauthorization after cookie loss, preserved YAML/intent forms, exact CLI request filtering and offline schema. Temporary verification Labs were stopped and removed. Research, mockups and screenshots remain local and excluded from commits. Checkpoints C/E remain open.
+
+## Independent backend feedback
+
+### 28. Surfpool discovery and response-loss investigation
+
+- [x] **28a:** Forward `getProgramAccounts` to owned Surfpool with unchanged supported parameters and existing bounds. Verify filters, local state, source errors and simulator non-forwarding.
+- [x] **28b:** Explain Surfpool signature return and observed withholding without requiring later activity. Preserve evidence links, deterministic IDs, mode/source checks and bounded observation windows. Verify replay and near-miss histories.
+- [x] **28c:** Confirm successful Case mutations. Show activation time and committed application count for the current activation. Verify waiting/applied states and replacement.
+- [x] **28d:** Explain empty Observations and link to relevant Fault records. Show a bounded transaction chain and later same-signature requests with exact record links, times and durations.
+- [x] **28e:** Update contracts, run focused and full checks, inspect browser states and rebuild release. Record external retest limits.
+
+Dependencies: tasks 15, 22 and 27. Source: [manual integration follow-up](../docs/product/dashboard.md#case-activity-and-history).
+
+- **Verification record:** The original preparation test reproduced `getProgramAccounts` rejection. A retained schema-1 Surfpool history reproduced empty unsupported Findings. The fixes passed 308 Rust tests, including the 15-test real Surfpool 1.7.0 suite, plus 25 UI tests and 10 native Chromium flows. Native histories cover local account discovery and source errors, actual transfer response loss before any lookup, later signature lookup, Case counters, and owned cleanup. UI histories cover acknowledgment, applied state, observation-window bookmarks, exact source links and narrow layout. Screenshots remain ignored local QA artifacts.
+- **Test corrections:** Surfpool can expose executed balances and `getTransaction` before its status-cache entry; the stale-status fixture now waits for the first actually observed status. An intermediate whole-suite run compared process executable inodes while another verification rebuilt the debug binary. The final complete suite ran without concurrent binary replacement and passed.
+- **Release verification:** Rust fmt/check/Clippy with `-D warnings` and the optimized build passed. A temporary release Surfpool Lab verified advertised `getProgramAccounts`, a context-wrapped account query, activation time, committed activity, and the offline Finding schema. The Lab stopped normally. No user Lab was restarted.
+- **External limit:** These fixes have not been rerun against the user's full backend/Raydium workflow. The manual integration report is retained as user-supplied evidence; native fixtures do not replace that external retest.
+
+### 29. Live dashboard by default
+
+- [x] **29a:** Add bounded descending record/Findings queries and Finding offsets. Preserve ascending defaults, snapshot isolation, cursor binding and response limits.
+- [x] **29b:** Keep ordinary navigation and detail selection live. Update traffic, Findings, transaction chains, Case and collection status automatically. Preserve tabs, forms, payloads and focus.
+- [x] **29c:** Add explicit pause/resume and retained bookmark behavior. Verify new traffic beyond 50 registrations, delayed boundaries, older pages, connection recovery, hidden tabs and cancellation.
+- [x] **29d:** Update documentation, pass focused and required checks, inspect browser results and rebuild release.
+
+Dependencies: tasks 27–28. Source: [Live dashboard plan](../docs/product/dashboard.md#live-investigation-and-recent-pages).
+
+- **Implemented / verified:** Default-live navigation and details; explicit pause/resume; newest bounded Traffic/Journal pages and live same-signature history; descending core queries and bounded Finding offsets; watermark-driven analysis and visible-page polling. Runtime polling continues through `stopping` while the control API is available. Background refresh preserves detail tabs, form state, payloads and focus. Hidden destinations do not initiate list reads.
+- **Checks:** 310 Rust tests passed, including the real Surfpool suite. UI typecheck/build and 28 UI tests passed. All 12 native Chromium scenarios passed, including live traffic beyond 50 requests, older pages, explicit pause/resume, late HTTP-boundary updates, live Surfpool Finding windows, retained bookmarks, hidden-tab behavior and connection recovery. Rust fmt/check/Clippy with `-D warnings` and the release build passed. Desktop/narrow views were inspected. Release smoke verified default/latest ordering, Finding offset, a live detail URL and embedded assets in an isolated Lab; that Lab stopped normally.
+- **Limits:** Updates use serialized one-second status polling and finite Journal queries, not a new push transport. Existing query, response, payload and Finding-analysis limits remain in force. Saved evidence links retain explicit snapshots. Checks still require explicit collection/evaluation; live rendering does not repeat mutations or claim new Verdicts. No user Lab was restarted and no independent backend was launched.
+
+### 30. Server-pushed WebSocket dashboard
+
+- [x] **30a:** Add an owned, bounded WebSocket transport for live and retained views. Reuse core operations and committed/runtime/collection notifications. Verify authentication, command validation, cancellation, capacity and shutdown.
+- [x] **30b:** Move browser reads, subscriptions and commands onto one socket. Remove browser polling code and polling-specific tests. Preserve selection, evidence bounds, payload continuation, pause and automatic reconnect without replaying mutations.
+- [x] **30c:** Remove browser-only HTTP API duplicates. Preserve useful existing agent routes and bootstrap/static infrastructure. Replace affected HTTP/browser tests with push, idle, reconnect, visibility and agent-API checks.
+- [x] **30d:** Update maintained contracts and verification records. Pass focused/full checks, inspect actual browser views and rebuild release.
+
+Source: [WebSocket transport plan](../docs/product/dashboard.md#browser-websocket-transport). Task 29's polling transport is superseded; its earlier test record remains historical.
+
+- **Implemented / verified:** One cookie-authenticated WebSocket carries bounded read subscriptions and explicit commands for live Labs and retained viewers. Commit/runtime/collection notifications push new data. Browser polling and duplicate browser HTTP data routes are removed. Existing bearer APIs remain unchanged. Read subscriptions resynchronize after visibility restoration and reconnect; mutations are never replayed.
+- **Checks:** 313 Rust tests passed, including 15 Surfpool tests. After final query-admission and shutdown changes, all six native dashboard transport/session tests passed again. UI typecheck/build and 32 tests passed. All 13 native Chromium scenarios passed, including idle with no periodic frames or HTTP data requests, native push, visibility catch-up, reconnect, lost mutation acknowledgement without replay, payload continuation, late boundaries, Findings and retained viewing. Rust fmt/check/Clippy with `-D warnings` and release build passed. Desktop/narrow screenshots were inspected. An isolated release smoke verified the socket, commit push, Case command, bearer status and exact-ID normal stop.
+- **Limits:** Live views coalesce changes into finite query results; they do not deliver every Journal event to the browser. Existing response/payload/analysis budgets remain. Initial cookie exchange and static assets remain HTTP. Explicit bounded server Check collection polling remains available. No user Lab was restarted. Independent-backend retesting was not performed in this task.
+
+### 31. Human-readable Observations
+
+- [x] **31a:** Add family-specific plain-language copy and a deterministic grouped story with exact evidence links and request counters.
+- [x] **31b:** Integrate bounded pushed history, completeness/unknown states and one technical-details disclosure without changing Journal or Finding rules.
+- [x] **31c:** Verify all maintained Finding families, Custom/fallback behavior, counting, limits, live updates, disclosure and the supplied snapshot. Update contracts and rebuild release.
+
+- **Implemented / verified:** Plain-language cards and stories for every maintained Finding family, the Custom lookup template and conservative unknown-rule fallback. Detail opens with request counters, grouped evidence-linked steps, observed results and unknowns. One Technical details disclosure retains the former technical panels, exact records, transaction history and payload pagination. Only the UI and documentation changed in this task; Journal facts, core Finding rules and APIs are unchanged.
+- **Checks:** UI typecheck, 47 UI tests, production build, all 13 native Chromium flows and six native Rust dashboard/session tests passed. Rust fmt/check/Clippy with `-D warnings` and the release build passed. Desktop/narrow screenshots were inspected. Release smoke confirmed the new embedded story assets, authenticated socket, commit push, Case command, existing bearer API and normal exact-ID stop.
+- **Supplied example:** Read-only metadata from Lab `La056ac3064640eaa9200d5c4dd363726faa0c4e1a5464452553c90bc2dab2096` through snapshot `629` produced five steps, one submission, two status checks and one transaction lookup. The first follow-up is approximately 15 seconds after the original request. The final step links to event 629. The original Lab was not restarted or modified; its data and screenshots were not added as repository fixtures.
+- **Limits:** The readable story uses at most 200 metadata records under existing response limits. Partial, restricted, legacy or interrupted evidence exposes lower-bound counts and does not support absence claims. Full technical history remains paginated. English copy follows the existing dashboard language. No unrelated backend integration or full Rust suite rerun was required for this presentation-only change.
+
+### 32. Compact Observation timeline and actual RPC results
+
+- [x] **32a:** Resolve bounded retained lookup replies with exact request/signature correlation and separate source, prepared and HTTP-boundary evidence.
+- [x] **32b:** Add compact outcome/counts/timestamps and accessible state icons/colors for all Observation families. Move caveats and evidence below Technical details.
+- [x] **32c:** Verify reply states, overrides, missing/redacted evidence, live updates, the supplied snapshot, native browser flows and rebuilt release.
+
+- **Implemented / verified:** Compact outcome and inline counts above a timed, icon/text/color timeline. Intentional Faults are blue; confirmation success is green, execution errors red, processed amber, unavailable/RPC/null/delivery states neutral. Equivalent consecutive outcomes use counts and a real time range. Repeat submissions remain visible after earlier lookups. Caveats, identifiers, source links and retained replies are behind Technical details; snapshot and partial-evidence limits remain visible. Journal/runtime formats and Finding rules are unchanged.
+- **Reply evidence:** Existing WebSocket evidence reads resolve exact request/signature positions, prepared results, verified replacements and complete retained source chunks. No simulator transition is substituted for an RPC reply. A getTransaction without a confirmation level does not invent finality. Simulated states are labelled. Missing, redacted, oversized, uncorrelated or unverifiable data stays unknown. Failed reads can recover on pushed resynchronization without polling.
+- **Checks:** Typecheck, 66 UI tests, production build, 13 native Chromium flows, six native dashboard/session tests, fmt/check/Clippy with `-D warnings`, and release build passed. The native Surfpool flow compared the displayed status with the actual RPC response. Desktop/narrow screenshots were inspected. The release smoke verified new compact assets, cookie-authenticated WebSocket, commit push, Case command, existing bearer API and normal exact-ID cleanup.
+- **Supplied history:** Read-only replay of the original Lab through snapshot 629 resolved both getSignatureStatuses replies to finalized with null err. getTransaction returned a transaction with null meta.err but supplied no new confirmation level. The compact result remains finalized, with one submission, two status checks, one transaction lookup and the original no-response boundary at 20 seconds. No user Lab was restarted or modified; replay data/screenshots remain outside tracked sources.
+- **Bounds:** Up to 200 history metadata records, 16 recent lookup resolutions, 32 KiB/two chunks per automatically loaded source response, two workers and 32 cached entries. Longer/partial histories retain explicit limits and existing technical pagination. No business-completion Verdict is inferred.
+
+### 33. Solid widget Workspace rewrite
+
+- [x] **33a:** Replace React tooling and screens with a structured Solid app, authenticated live transport, default Workspace and virtualized Traffic. Verify exact coordinates, subscription lifecycle and production build.
+- [x] **33b:** Add movable/resizable/collapsible/hideable widgets, project-scoped layout persistence, reset/maximize and live Case controls. Verify pointer/keyboard behavior, mutation feedback and laptop/monitor layouts.
+- [x] **33c:** Group confirmed fault applications into live episodes, link Findings, highlight/filter related Traffic and add expandable timed Inspector steps. Verify repeat applications, missing evidence and late replies without invented outcomes.
+- [x] **33d:** Preserve request/record/payload inspection, bounded history navigation, bookmarks, retained viewing, Custom Cases, Checks and Lab diagnostics. Verify cancellation, errors, Unicode continuation and reconnect without mutation replay.
+- [x] **33e:** Run focused/full frontend and native checks, inspect desktop browser screenshots, update maintained contracts and rebuild the embedded release. Remove obsolete React code/dependencies and document verification limits.
+
+Source: [accepted widget redesign and rewrite](../docs/product/dashboard.md#workspace). No comparative framework prototypes or new agent HTTP operations are required. Independent-backend Checkpoints C/E remain separate.
+
+- **Implemented / verified:** The React renderer and hooks were replaced by a Solid application organized under app, shared and feature-owned modules. Workspace opens by default with editable Cases, Observations, Traffic and Inspector widgets. Committed fault applications appear immediately as episodes; linked Findings share that episode. Inspector paths expand in place and retain expanded steps when returning from a request. Existing WebSocket/core operations, exact coordinates, source authority, explicit mutations, retained viewing and raw-payload byte continuation remain.
+- **Checks:** Strict typecheck, Prettier check, 53 frontend tests, production build and all eight native Chromium scenarios passed. Native flows cover simulator and actual Surfpool 1.7.0, immediate episodes before follow-ups, returned status, filters, pointer/keyboard layout editing, form/layout retention, reconnect without mutation replay, independent Check collection/cancellation, Unicode continuation and retained exact-ID bookmarks. All six Rust dashboard/session tests passed with loopback permission. Rust fmt/check/Clippy with `-D warnings` and the embedded release build passed. A release smoke compared served JavaScript byte-for-byte with the completed build and verified session bootstrap and exact-ID shutdown.
+- **Visual verification:** Desktop and 1280×720 laptop screenshots were inspected. Essential Case controls remain visible at the initial layout size. Screenshots, research and test artifacts remain outside tracked sources.
+- **Limits:** No comparative performance benchmark or independent-backend retest was performed. The full Rust suite was not rerun for this frontend replacement; the six native dashboard tests were rerun. Core/query/payload budgets remain. Browser layout storage is scoped to project and origin, so another viewer port has separate preferences. Reading uses bounded windows rather than accumulating the whole Journal. No worker, Wasm renderer, new agent HTTP endpoint, production forwarding or core Finding rule was added. Existing user Labs were not restarted or modified. No commits or publication were performed.
+
+### 34. Fixed widgets, reliable Solid drag and Ronchi visual identity
+
+- [x] **34a:** Reproduce title dragging with all four widgets visible. Replace the grid-fit gesture with Solid DnD, visible drop targets and fixed-panel slot exchange. Add pointer/keyboard dividers and persistence without hiding any widget.
+- [x] **34b:** Remove adding, hiding, collapsing and maximizing widgets. Restore Ronchi's readable typography, high-contrast surfaces and coral accent. Verify laptop/desktop screenshots and preserved form/Inspector state.
+- [x] **34c:** Run regression/model/browser checks, update current contracts and rebuild/verify release assets. Keep research and screenshots outside committed sources.
+
+The original regression failed on the previous build: dragging Traffic by its title with four visible widgets left its x-coordinate unchanged. The former browser test moved only the small grip after hiding Inspector and did not cover that user workflow.
+
+- **Implemented / verified:** Replaced the failed grid-fit gesture with Solid DnD header activation, drag overlay, pointer hit-testing and slot exchange. All four widgets stay mounted and visible. Adjacent split dividers resize columns/rows within the viewport; pointer previews use animation frames and preferences persist after completion. Pointer cancellation, Escape/outside drops, keyboard moves and reload persistence are covered. Obsolete add/hide/collapse/maximize controls and state are removed.
+- **Regression:** The title-drag test failed on the original build (Traffic x remained 380) and passed after the replacement with all panels present. A second native test verifies resize without hiding panels; cancellation/outside-drop tests preserve the layout. The former test's hidden-Inspector shortcut was removed.
+- **Checks:** 55 frontend tests and ten native Chromium scenarios passed, including actual Surfpool, immediate live episodes, returned replies, retained viewing, Check cancellation and Unicode payloads. Strict typecheck, production build and formatter passed. Laptop/desktop screenshots were inspected. Release assets were rebuilt; no independent-backend retest or comparative performance claim is added.
+- **Visual direction:** Restored Ronchi's original system font stack and 15px base with readable table/control text, brighter text and surfaces, coral accent and white primary actions. The blue accent is removed, including focused draggable headers. Research materials and screenshots remain outside tracked sources. No user Lab was restarted.
+
+### 35. Lab-wide RPC rates
+
+- [x] **35a:** Add constant-size committed RPC counters and retained replay without changing original Journal facts. Verify batches, exact ten-second splits, rollback and terminal bounds.
+- [x] **35b:** Show `RPS avg` and `RPS active` beside health. Verify browser-local idle updates, scope independence, missing data and stopped history without polling.
+- [x] **35c:** Update the metric contract, run focused native/browser checks and rebuild embedded release assets.
+
+- **Implemented / verified:** Header rates use all committed `rpc.registered` records. Batch members count separately. The writer maintains constant-size counters; failed commits do not publish them. Real monotonic Lab time drives average duration. The browser advances the display locally without network traffic. Retained replay freezes at the terminal record, or labels the last-record bound when termination is unknown. Missing/disconnected counters show unavailable. Filters and selected history do not scope the rates.
+- **Checks:** Full Rust suite, 65 frontend tests, strict typecheck, formatting, Clippy with `-D warnings`, production and release builds passed. The new native Chromium scenario verified batch counting, filtering independence, idle updates without socket/HTTP requests, retained reopening and fixed stopped values. The laptop screenshot was inspected. Release smoke verified embedded JavaScript byte-for-byte, session bootstrap and exact-ID shutdown. Native Surfpool fixture-dependent paths were not exercised in this run; no independent-backend performance claim is added.
+- **Limits:** Each active interval and the average denominator have a one-second minimum. Active intervals describe arrivals, not actual backend CPU work. Retained reconstruction streams the history once per status/viewer opening; it does not modify the Journal or cache the whole history. Existing user Labs remain unchanged. Nothing was committed or published.
+
+### 36. Remove application Checks
+
+- [x] **36a:** Remove collection/evaluation modules, configuration and public runtime/agent/browser surfaces. Keep generic historical Journal reads and existing RPC behavior.
+- [x] **36b:** Adapt the reference relayer and Demo; remove feature-specific tests and preserve remaining recovery/investigation coverage.
+- [x] **36c:** Remove dashboard Checks, update current docs and superseded decisions, verify remaining flows and rebuild release.
+
+- **Implemented / verified:** Removed the HTTP collector, deterministic requirement evaluator, source configuration, Journal-specific application queries, Check CLI/schema/MCP/control/socket operations and dashboard route. The reference relayer no longer serves its observation adapter. Demo awaits its ordinary intent endpoint and reports only RPC summary, Findings and evidence commands. Retained generic Journal reads remain available, including original retired records. New configurations reject removed source settings. No current application-fact collection or business Verdict surface remains.
+- **Checks:** 284 Rust tests, 65 frontend tests and all ten native Chromium scenarios passed. Browser coverage includes real Surfpool, live fault episodes, retained viewer, layout editing, WebSocket reconnect and Lab-wide RPS. Negative checks cover removed CLI/schema/config/control routes and MCP catalog; generic retired record readback remains intact. Typecheck, frontend formatting/build, Rust fmt/Clippy with `-D warnings` and release build passed. The release smoke compared served JavaScript byte-for-byte with the current build and confirmed the absent Checks navigation/configuration. All 404 local Markdown links and heading targets passed. The final laptop screenshot was inspected. Fixture-dependent native Rust Surfpool paths were not separately exercised; the real Surfpool browser scenario passed.
+- **Documentation:** Deleted the dedicated feature contract and removed current product, interface, setup and glossary claims. Updated the project Finding-validation reference. Existing ADR/research/task records preserve history with explicit retirement notices; they do not authorize restoring the feature. No original Lab files or user backend data were changed. No commits or publication were performed.
+
+### 37. Remove confirmed dead code
+
+- [x] **37a:** Audit backend, test fixtures and dashboard reachability; remove unused presentation helpers, styles, icons and retired metadata without dropping active schemas or evidence readers.
+- [x] **37b:** Run affected verification, inspect the dashboard and rebuild release. Record findings and limits.
+
+- **Removed:** The unused parallel Finding title/description table, helpers and their obsolete test/assertions; nine unused SVG entries; retired application-event labels and two unreachable generic title entries; unused checkbox/tooltip styles; the unread relayer readiness field in the shared integration fixture; four retired completeness/clock response fields and their unnecessary terminal-time query in the reference store. Original relayer observations, schema-only Rust types, dynamic outcome styles and active source/RPC behavior remain.
+- **Audit:** All backend/test Rust files resolve through crate roots, modules or `include!`; dashboard source/test files resolve through entrypoints or test roots. No detached source file was confirmed. Declared Rust dependencies have active source uses; frontend dependencies also retain consumers. Existing TypeScript unused-local/parameter checks and all-target Rust Clippy passed. This is a scoped static/caller audit, not a proof that every possible unreachable branch has been found.
+- **Checks:** 284 Rust tests and 64 frontend tests passed. The native Chromium response-loss/lookup scenario passed after cleanup. Production typecheck/build, Prettier, Rust fmt, all-target Clippy with `-D warnings` and release build passed. The final embedded release was rebuilt after the last title-table cleanup. No runtime schema migration, new test dependency, comparative performance claim or original Lab mutation was introduced.
+
+## Current documentation maintenance
+
+### 38. Documentation organization
+
+- [x] **38a:** Consolidate current dashboard, shared interfaces, development and reference-consumer docs with one owner per topic. Remove obsolete launch guides after preserving durable rules and unique evidence.
+- [x] **38b:** Keep ADR addresses and completed task evidence stable, isolate historical run logs, update agent routes and verify paths, anchors and retained contracts.
+
+- **Consolidated:** Browser behavior/access/transport/RPS now live in `docs/product/dashboard.md`; shared query and CLI/MCP contracts remain at `investigation-interfaces.md`. Development owns build/verification/source layout and durable commit rules. The reference relayer document keeps its process, storage, recovery and evidence limits without repeating Demo orchestration. Root navigation and AGENTS route directly to these owners.
+- **Removed / retained:** Removed four obsolete initial-run/editor launch guides after extracting durable rules. Shortened plan and progress to current roles; completed evidence remains in this checklist. Moved the completed run ledger and unconfirmed diagnostic record into `tasks/history`. Preserved commit IDs from the old progress snapshots. All 19 numbered ADR addresses and non-link decision text remain; a dedicated ADR index makes current relationships explicit. Research sources and external links remain in their research owners.
+- **Corrections:** Documented twelve current MCP tools, implemented MCP/Solid modules, coral Fault styling and current dependencies. Removed nonexistent module names, removed-Check actions and unsupported example response fields. Clarified that deferred blockchain WebSocket is distinct from the implemented dashboard socket. The full independent-backend retest remains open; bounded earlier manual evidence is retained.
+- **Verification:** All 326 local Markdown links/heading targets passed. ADR paths/decision text and CONTEXT were checked against a temporary pre-edit snapshot. Cases, Custom Cases, RPC and evidence contracts remain unchanged, including candidate/Pack names and numeric limits. All UI/query/transport bounds remain in their consolidated owners; obsolete single-host Node/npm observations were not turned into support requirements. Commit references and research external sources were compared. `git diff --check` passed. Runtime/tests/assets were unchanged by this task, so no runtime test or native rebuild was performed. No commits or publication.

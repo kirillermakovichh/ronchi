@@ -32,7 +32,7 @@ where
     S: Service<Request<Incoming>, Response = Response<B>> + 'static,
     S::Future: Send,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    B: Body<Data = Bytes> + 'static,
+    B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let mut builder = hyper::server::conn::http1::Builder::new();
@@ -41,7 +41,9 @@ where
         .header_read_timeout(Duration::from_secs(30))
         .max_buf_size(32 * 1024)
         .max_headers(64);
-    let future = builder.serve_connection(TokioIo::new(stream), service);
+    let future = builder
+        .serve_connection(TokioIo::new(stream), service)
+        .with_upgrades();
     tokio::pin!(future);
     tokio::select! { _=force.cancelled()=>"cancelled", result=&mut future=>if result.is_ok(){"http_write_completed"}else{"transport_failed"}, _=stop.cancelled()=>{
         future.as_mut().graceful_shutdown();

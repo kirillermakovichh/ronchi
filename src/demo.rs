@@ -2,10 +2,9 @@
 mod child;
 mod http;
 use crate::{
-    checks,
     config::Mode,
     lab::{self, Manifest},
-    query::{self, Arguments, Operation, Request, Scope},
+    query::{self, Arguments, Operation, Request},
     workspace::Workspace,
 };
 use serde::{Deserialize, Serialize};
@@ -40,7 +39,6 @@ pub struct Report {
     pub lab_state: String,
     pub intent_id: String,
     pub snapshot_seq: u64,
-    pub check: checks::evaluate::Result,
     pub summary: Value,
     pub findings: Value,
     pub evidence_gaps: Vec<query::Gap>,
@@ -62,7 +60,6 @@ pub struct Error {
     pub reference_stopped: bool,
     pub lab_state: String,
     pub lab_stopped: bool,
-    pub collection_id: Option<String>,
     pub intent_id: Option<String>,
     pub snapshot_seq: Option<u64>,
     pub recovery: String,
@@ -86,7 +83,6 @@ impl Error {
             reference_stopped: true,
             lab_state: "not_started".into(),
             lab_stopped: false,
-            collection_id: None,
             intent_id: None,
             snapshot_seq: None,
             cleanup_error: None,
@@ -118,7 +114,6 @@ struct Owner {
     known_lab_id: Option<String>,
     child: Option<child::Owned>,
     reference_name: String,
-    collection: Option<String>,
     intent_id: Option<String>,
     snapshot_seq: Option<u64>,
     cancel: CancellationToken,
@@ -131,7 +126,6 @@ impl Owner {
         let mut error = Error::new(code, phase);
         error.reference_name = Some(self.reference_name.clone());
         error.artifacts = Some(self.project.join("ronchi/demos").join(&self.reference_name));
-        error.collection_id = self.collection.clone();
         error.intent_id = self.intent_id.clone();
         error.snapshot_seq = self.snapshot_seq;
         if let Some(id) = &self.known_lab_id {
@@ -228,93 +222,8 @@ impl Owner {
         .await
         .map_err(|e| self.error(&e.code, "investigation"))
     }
-    async fn settle_collection(&self, cancel: bool) -> Result<checks::Report, Box<Error>> {
-        let m = self
-            .manifest
-            .as_ref()
-            .ok_or_else(|| self.error("internal_error", "collection"))?;
-        let id = self
-            .collection
-            .as_ref()
-            .ok_or_else(|| self.error("internal_error", "collection"))?;
-        let ws = Workspace::new(&self.project);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-        if cancel {
-            tokio::time::timeout_at(
-                deadline,
-                crate::control::check_request(&ws, m, None, id, true),
-            )
-            .await
-            .map_err(|_| self.error("cleanup_failed", "collection_cancel"))?
-            .map_err(|_| self.error("cleanup_failed", "collection_cancel"))?;
-        }
-        loop {
-            let reply = tokio::time::timeout_at(
-                deadline,
-                crate::control::check_request(&ws, m, None, id, false),
-            )
-            .await
-            .map_err(|_| self.error("deadline_exceeded", "collection_terminal"))?
-            .map_err(|e| self.error(&e.code, "collection_terminal"))?;
-            if reply.result.status != "running" {
-                return Ok(reply.result);
-            }
-            if self.cancel.is_cancelled() && !cancel {
-                return Err(self.error("cancelled", "collection"));
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-    async fn collect(&mut self, intent: &str) -> Result<checks::Report, Box<Error>> {
-        let m = self
-            .manifest
-            .as_ref()
-            .ok_or_else(|| self.error("internal_error", "collection"))?;
-        let id = format!(
-            "demo-{}",
-            crate::workspace::nonce().map_err(|_| self.error("internal_error", "collection"))?
-        );
-        self.collection = Some(id.clone());
-        let request = checks::Request {
-            contract_version: 1,
-            operation: "check.observe".into(),
-            request_id: id.clone(),
-            lab_id: m.lab_id.clone(),
-            arguments: checks::Arguments {
-                collection_id: id.clone(),
-                check_id: "reference-intent".into(),
-                scope: checks::Scope {
-                    intent_ids: vec![intent.into()],
-                    ..Default::default()
-                },
-                poll: false,
-                horizon_seconds: None,
-            },
-        };
-        crate::control::check_request(
-            &Workspace::new(&self.project),
-            m,
-            Some(&request),
-            &id,
-            false,
-        )
-        .await
-        .map_err(|e| self.error(&e.code, "collection_start"))?;
-        let result = self.settle_collection(false).await;
-        if result.is_ok() {
-            self.collection = None;
-        }
-        result
-    }
     async fn cleanup(&mut self, force: bool) -> Result<(), Box<Error>> {
         let mut failed = false;
-        if self.collection.is_some() {
-            if self.settle_collection(true).await.is_err() {
-                failed = true;
-            } else {
-                self.collection = None;
-            }
-        }
         if let Some(child) = &mut self.child
             && child.stop(force).await.is_err()
         {
@@ -391,8 +300,6 @@ impl Owner {
         let source_address = reservation
             .local_addr()
             .map_err(|_| self.error("source_port_unavailable", "configuration"))?;
-        let definition =
-            checks::reference::definition(format!("http://{source_address}/checks/observe"));
         let rpc_listen = ([127, 0, 0, 1], 0).into();
         #[cfg(debug_assertions)]
         let rpc_listen = if let Ok(port) = std::env::var("RONCHI_DEMO_TEST_RPC_PORT") {
@@ -408,10 +315,6 @@ impl Owner {
         let configuration = crate::config::from_settings(
             self.project.clone(),
             crate::config::Settings {
-                checks: Some(checks::Config {
-                    concurrency: 4,
-                    sources: vec![definition],
-                }),
                 mode: Some(Mode::Simulator),
                 rpc_listen: Some(rpc_listen),
                 control_listen: Some(([127, 0, 0, 1], 0).into()),
@@ -517,10 +420,14 @@ impl Owner {
             })?;
         self.stage("intent_created", source_address).await?;
         let horizon = tokio::time::Instant::now() + Duration::from_secs(70);
-        let mut digest = None;
-        let (check, snapshot) = loop {
+        // Read only the bundled relayer's ordinary intent API to await the workload.
+        // This state is not ingested into the Journal or used to decide application correctness.
+        loop {
             if self.cancel.is_cancelled() {
-                return Err(self.error("cancelled", "collection"));
+                return Err(self.error("cancelled", "workload"));
+            }
+            if !self.child.as_mut().is_some_and(|c| c.alive()) {
+                return Err(self.error("child_unavailable", "workload"));
             }
             let state = http::request(
                 source_address,
@@ -529,88 +436,24 @@ impl Owner {
                 Value::Null,
                 &self.cancel,
             )
-            .await;
-            let terminal = state
-                .as_ref()
-                .ok()
-                .and_then(|s| s["state"].as_str())
-                .is_some_and(|s| matches!(s, "succeeded" | "failed" | "unresolved"));
-            let collected = self.collect(&intent_id).await?;
-            self.snapshot_seq = Some(collected.snapshot_seq);
-            if self.cancel.is_cancelled() {
-                return Err(self.error("cancelled", "collection"));
-            }
-            if !self.child.as_mut().is_some_and(|c| c.alive()) {
-                return Err(self.error("child_unavailable", "workload"));
-            }
-            if collected
-                .last_invocation
-                .as_ref()
-                .is_some_and(|i| i.outcome == checks::InvocationOutcome::SourceGap)
-                || state.is_err()
+            .await
+            .map_err(|code| self.error(code, "workload"))?;
+            if state["state"]
+                .as_str()
+                .is_some_and(|state| matches!(state, "succeeded" | "failed" | "unresolved"))
             {
-                return Err(self.error("source_failure", "collection"));
-            }
-            let snapshot = collected.snapshot_seq;
-            if digest.is_none() {
-                let reference = collected
-                    .last_invocation
-                    .as_ref()
-                    .ok_or_else(|| self.error("missing_evidence", "definition"))?
-                    .start_ref
-                    .clone();
-                let evidence = self
-                    .query(
-                        Operation::Evidence,
-                        snapshot,
-                        Arguments {
-                            scope: Scope {
-                                event_refs: vec![reference],
-                                ..Default::default()
-                            },
-                            fields: vec!["data".into()],
-                            limit: 1,
-                            ..Default::default()
-                        },
-                    )
-                    .await?;
-                let value = &evidence.result["items"][0]["data"]["definition"];
-                if !value.is_object() {
-                    return Err(self.error("missing_definition", "definition"));
-                }
-                digest =
-                    Some(query::digest(&serde_json::to_vec(value).map_err(|_| {
-                        self.error("missing_definition", "definition")
-                    })?));
-            }
-            let evaluated = self
-                .query(
-                    Operation::Evaluate,
-                    snapshot,
-                    Arguments {
-                        evaluation: Some(checks::evaluate::Selection {
-                            check_id: "reference-intent".into(),
-                            definition_version: 2,
-                            definition_digest: digest.clone(),
-                            scope: checks::Scope {
-                                intent_ids: vec![intent_id.clone()],
-                                ..Default::default()
-                            },
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .await?;
-            let check: checks::evaluate::Result = serde_json::from_value(evaluated.result)
-                .map_err(|_| self.error("invalid_response", "evaluation"))?;
-            if terminal {
-                break (check, snapshot);
+                break;
             }
             if tokio::time::Instant::now() >= horizon {
                 return Err(self.error("deadline_exceeded", "workload"));
             }
             tokio::select! {_=self.cancel.cancelled()=>return Err(self.error("cancelled","workload")),_=tokio::time::sleep(Duration::from_secs(1))=>()}
-        };
+        }
+        let current = lab::status(self.project.clone(), "demo", Some(&m.lab_id))
+            .await
+            .map_err(|_| self.error("lab_unavailable", "investigation"))?;
+        let snapshot = current.manifest.snapshot_seq;
+        self.snapshot_seq = Some(snapshot);
         let summary = self
             .query(Operation::Summary, snapshot, Arguments::default())
             .await?;
@@ -624,24 +467,8 @@ impl Owner {
                 },
             )
             .await?;
-        self.stage("proof_complete", source_address).await?;
-        let mut commands = drill_down(&self.project, &m.lab_id, snapshot, &intent_id);
-        if let Some(reference) = check.requirements.first().and_then(|r| r.supporting.last()) {
-            commands.push(vec![
-                executable(),
-                "--project".into(),
-                self.project.to_string_lossy().into_owned(),
-                "--lab-id".into(),
-                m.lab_id.clone(),
-                "investigate".into(),
-                "evidence".into(),
-                "--event-ref".into(),
-                format!("{}:{}", reference.lab_id, reference.event_seq),
-                "--snapshot-seq".into(),
-                snapshot.to_string(),
-                "--include-payload".into(),
-            ]);
-        }
+        self.stage("evidence_ready", source_address).await?;
+        let commands = drill_down(&self.project, &m.lab_id, snapshot);
         Ok(Report {
             dashboard_launch: None,
             dashboard_argv: vec![],
@@ -658,7 +485,6 @@ impl Owner {
             lab_state: "ready".into(),
             intent_id: intent_id.clone(),
             snapshot_seq: snapshot,
-            check,
             summary: summary.result,
             findings: findings.result,
             evidence_gaps: summary.view.evidence_gaps,
@@ -679,12 +505,7 @@ fn quoted(args: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-fn drill_down(
-    project: &std::path::Path,
-    id: &str,
-    snapshot: u64,
-    intent: &str,
-) -> Vec<Vec<String>> {
+fn drill_down(project: &std::path::Path, id: &str, snapshot: u64) -> Vec<Vec<String>> {
     let prefix = vec![
         executable(),
         "--project".into(),
@@ -703,19 +524,6 @@ fn drill_down(
         ]);
         result.push(args);
     }
-    let mut args = prefix;
-    args.extend([
-        "check".into(),
-        "evaluate".into(),
-        "reference-intent".into(),
-        "--definition-version".into(),
-        "2".into(),
-        "--intent-id".into(),
-        intent.into(),
-        "--snapshot-seq".into(),
-        snapshot.to_string(),
-    ]);
-    result.push(args);
     result
 }
 pub fn run(project: PathBuf, args: Args, json_output: bool) -> i32 {
@@ -744,7 +552,6 @@ pub fn run(project: PathBuf, args: Args, json_output: bool) -> i32 {
             known_lab_id: None,
             child: None,
             reference_name: name,
-            collection: None,
             intent_id: None,
             snapshot_seq: None,
             cancel,

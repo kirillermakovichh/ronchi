@@ -1,7 +1,8 @@
 # Investigation interfaces
 
 Status: accepted initial implementation contract, version `1`; no released API compatibility promise.
-This document owns dashboard behavior, CLI/MCP operation names, query limits, and machine responses.
+This document owns shared query semantics, CLI/MCP operation names, query limits and machine responses.
+The [dashboard contract](dashboard.md) owns browser presentation and live transport.
 The [evidence contract](evidence-and-findings.md) owns facts, correlation, Findings, and persistence limits.
 The [Lab lifecycle](lab-lifecycle.md) owns workspace resolution, process ownership, readiness, and mutation effects.
 All three interfaces call the same core operations against one Lab Journal.
@@ -43,10 +44,12 @@ Findings always retain identity, semantic scope, supporting roles, material limi
 `fields` additionally selects `statement` and `guidance`.
 `limitations` remains available as an explicit field path and is always retained.
 Each `evidence_arguments` object selects the same scope, stable `finding_id`, and `snapshot_seq`.
-Supply those arguments to `investigate.evidence` to resolve the five supporting records.
+Supply those arguments to `investigate.evidence` to resolve the rule’s supporting records.
 The CLI equivalent uses `--finding-id <id> --snapshot-seq <seq>` with the original scope filters.
 An unknown or out-of-scope ID returns `finding_unavailable` (exit 3); incomplete analysis that cannot resolve it returns `analysis_incomplete` (exit 5).
 Finding evidence requires an explicit watermark and never silently selects a newer snapshot.
+`investigate.findings` also accepts `scope.finding_id` with an explicit snapshot to resolve one exact Finding and its full selected observation window.
+This avoids recomputing a bookmarked window from only the incident's supporting records.
 All operations accept optional `snapshot_seq` (`--snapshot-seq`) to pin an existing committed watermark.
 Findings cursors additionally bind the maintained rule definitions and versions.
 The authenticated control operation uses the existing `POST /v1/labs/{id}/investigate` route.
@@ -54,7 +57,6 @@ The authenticated control operation uses the existing `POST /v1/labs/{id}/invest
 Its `maintained_case_rules` field publishes additional Case rule definitions and versions.
 Dashboard and MCP use these shared query operations.
 Follow streams and export have separate contracts.
-The sections below retain the full accepted contract.
 
 ## Operations and identity
 
@@ -67,8 +69,6 @@ The sections below retain the full accepted contract.
 | `case.arm` | `ronchi case arm <case>` / `ronchi case activate <file>` | `ronchi_case_arm` | Arm or replace a built-in or validated Custom Case |
 | `case.validate` | `ronchi case validate <file> --mode <mode>` | `ronchi_case_validate` | Inspect a bounded Custom Case plan without effects |
 | `case.disarm` | `ronchi case disarm` | `ronchi_case_disarm` | Stop selecting the policy for new requests |
-| `check.observe` | `ronchi check observe <check-id>` | `ronchi_check_observe` | Collect bounded observations from a configured source into a live Journal |
-| `check.evaluate` | `ronchi check evaluate <check-id>` | `ronchi_check_evaluate` | Evaluate retained evidence at a pinned snapshot without contacting the source |
 | `investigate.summary` | `ronchi investigate summary` | `ronchi_investigate_summary` | Return compact counts, up to five Findings, gaps, and drill-down references |
 | `investigate.requests` | `ronchi investigate requests` | `ronchi_investigate_requests` | Return a bounded page of received RPC requests with related exchange facts |
 | `investigate.timeline` | `ronchi investigate timeline` | `ronchi_investigate_timeline` | Return a bounded Timeline page |
@@ -116,7 +116,7 @@ One authenticated status request at a time updates the Case, held RPC count, and
 Requests start no more than once per second and never evaluate Findings or scan Journal history.
 The panel validates the returned Lab ID, process identity, and contract version.
 Missing status appears as unavailable, with any old watermark marked as last observed.
-Held RPC requests use the coral signal accent; they do not imply an application failure or a Verdict.
+Held RPC requests use the coral signal accent; they do not imply an application failure or business correctness.
 
 `up --no-animation` keeps a static styled panel and disables live polling.
 It conflicts with `--detach`.
@@ -157,71 +157,6 @@ The Custom Case catalog and retained plan contract live in [Custom Cases](custom
 Status exposes `active_case`, `case_registration_seq`, and bounded `held_effects` with original policy revision and remaining real milliseconds.
 MCP exposes these controls through the operation names above.
 
-## First dashboard
-
-The embedded React interface now uses the same query, Case, and Check core as the CLI.
-`ronchi dashboard` launches a live browser session without opening a browser automatically.
-`ronchi dashboard --serve --lab-id <id>` serves retained evidence without starting a Lab.
-See [build and launch](../development.md#dashboard-build-and-launch) for commands and session limits.
-The browser keeps live status separate from its pinned query prefix.
-It uses server filtering, 50-item pages, and explicit payload previews.
-Application collection and evaluation require explicit actions.
-The current Check form selects one intent and a configured definition version.
-HTTP-only collection, its 32 KiB cap, and evaluation budgets remain unchanged.
-Findings use explicit five-item continuation after the bounded summary.
-Copied event/Finding links retain the exact scope and pinned prefix, without cursors or credentials.
-`dashboard --selection` moves that query to a fresh live session or retained viewer.
-Collection cancellation is distinct from UI request cancellation.
-Unknown mutation outcomes retain an identity for public status inspection.
-See the [acceptance coverage](../development.md#dashboard-cancellation-and-acceptance-coverage) for native and controlled renderer test boundaries.
-
-
-The dashboard has five destinations: Overview, Observations, Traffic, Case and Checks.
-Overview explains the current state and the next useful action.
-With no RPC traffic, it shows the RPC URL and instructions for the independently started backend.
-With evidence, it shows readable Findings and direct access to Traffic.
-The header shows current Lab state and the current runtime Case.
-Overview labels historical Case context separately at the selected snapshot.
-Full Lab identity, analysis metadata and retained-viewer recovery stay available in expandable details.
-
-Observations presents Findings with readable titles, statements and linked supporting records.
-A selected Finding separates observed facts, unknown application outcomes, developer guidance and evidence.
-Record order is not presented as application causality.
-Traffic lists received RPC requests with observed boundary results.
-Its detail tabs are Overview, Request, Response and Records.
-Request shows retained metadata and explicitly states that the original request body was not retained.
-Prepared content, HTTP transport outcome and unknown client receipt remain separate facts.
-The advanced Journal view preserves access to Lab, Case, Fault and application records without a Finding.
-
-Shared filters cover signature, RPC method, request ID, Case activation, record kind and time or sequence interval.
-Applied filters are visible and removable.
-A request detail follows its exact request ID at the pinned snapshot, including related records outside the list filters.
-Links retain page, exact Lab identity, filters, snapshot and selected event or Finding.
-Older links without a page still open the corresponding Finding or Journal detail.
-Browser Back restores the previous selection.
-Case and Check forms retain their state across navigation.
-
-Case controls expose catalog capabilities, arm, replace, disarm and independently validated Custom YAML.
-Changing a Case preserves the Lab, Journal and pinned Investigation.
-Check collection and evaluation remain explicit separate actions.
-Collect requires a live Lab; evaluate reads the selected retained snapshot.
-Payload previews are fetched only by explicit action and retain byte-offset continuation.
-The dashboard polls bounded summaries while live and suspends polling in a hidden browser tab.
-Hidden pages do not initiate Investigation list queries.
-Opening detail or continuing a page pins the snapshot; Refresh explicitly selects the latest evidence.
-A pinned view polls only current runtime status and labels possible newer Journal records without shifting the selected evidence.
-
-| State | Visible behavior |
-| --- | --- |
-| No Lab | Show startup options; do not imply a running capture |
-| Starting | Show readiness phase and bounded startup progress |
-| Ready, no traffic | Show the RPC URL and the instruction to drive the independently running backend |
-| Armed, no traffic | Explain that the continuing Case is waiting for matching calls; do not show a resilience success |
-| Traffic, no Finding | Offer Traffic and Journal with a clear no-Finding explanation; do not invent a defect or Verdict |
-| Evidence Gap | Show the missing source and the conclusions it prevents |
-| Stopped/interrupted | Keep retained evidence readable and label Journal state and last committed sequence |
-| Core failure | Show a product failure separately from an injected RPC Fault or an observed application action |
-
 ## Bounded query contract
 
 Requests use `contract_version:1`, a transport-specific `request_id`, an operation, and typed arguments.
@@ -249,6 +184,16 @@ Projection always retains identity, kind, source, necessary correlation referenc
 If a payload cannot fit, return its bounded preview, retained byte length, and `payload_truncated:true`; never imply that preview is complete.
 If one projected item still cannot fit, return `result_too_large` with a smaller projection or interval as the recovery step.
 Exhaustive evidence retrieval is an explicit client traversal of bounded pages, not an unbounded response.
+
+### Ordering
+
+Shared queries accept optional `order:asc|desc` (`--order`).
+Omitted order remains ascending for CLI/MCP compatibility.
+Descending record cursors bind direction and snapshot.
+Summary and Findings can order incidents by descending start sequence, with stable Finding-ID tie-breaking.
+`investigate.findings` accepts an optional 0..4096 `offset` (`--offset`) inside the bounded evaluated result.
+New live query results can shift incident positions; an explicit snapshot holds a fixed selection.
+Existing response, preview, analysis and candidate limits apply.
 
 ### RPC request projection
 
@@ -339,12 +284,12 @@ The adapter contains no model, registration, cloud call, or remote transport req
 
 ### Implemented stdio adapter
 
-`ronchi --project <directory> mcp stdio` serves the fourteen tools in the operation table with official `rmcp` 3.8.0.
+`ronchi --project <directory> mcp stdio` serves the twelve tools in the operation table with official `rmcp` 3.8.0.
 The adapter selects only a Project Workspace.
 Global `--lab` and `--lab-id` are rejected; each scoped tool requires its own immutable `lab_id`.
 `lab.up` accepts `name` and typed configuration `arguments`.
 `lab.status` accepts either `name` or `lab_id`.
-Case arm, Investigation, evaluation, and collection tools accept their shared typed `arguments`.
+Case arm and Investigation tools accept their shared typed `arguments`.
 Tool listing includes generated input/output schemas and effect annotations.
 The adapter supports legacy initialization and modern discovery through the SDK.
 Process checks use protocol `2025-11-25` initialization and `2026-07-28` discovery.
@@ -359,37 +304,9 @@ Structured result data is limited to 256 KiB.
 If a completed mutation exceeds the result budget, its error retains the resolved identity and reports `effects:applied`.
 The caller must inspect status before another mutation.
 
-`ronchi_check_observe` requires a caller-selected stable `arguments.collection_id`.
-Its default `action:collect` admits one collection and waits for its bounded completion.
-`action:status` and `action:cancel` inspect or cancel that identity without starting another collection.
-They use the same arguments model; only collection identity selects the existing collection.
-Protocol cancellation requests collection cancellation and waits up to five seconds for terminal status.
 Startup cancellation uses the ordinary owned startup cleanup path.
 Cancellation of a control mutation wait reports unknown effects because the Lab may have accepted it.
 EOF drains SDK responses and detaches; a ready Lab and its continuing Case remain alive.
-
-## Public Check operations
-
-Both Check operations select a configured `check_id`, its definition version, immutable `lab_id`, and explicit bounded `scope`.
-Check scope includes the relevant intent IDs or signatures and the observation interval; it does not infer business correlation from a Timeline selection.
-`check.observe` pins the current committed `snapshot_seq` for the source request and invokes the configured read-only HTTP adapter.
-The implemented CLI returns bounded collection metadata, the last `invocation_id`, committed observation references, and the new watermark after collection.
-An ordinary call collects once; `--poll --horizon-seconds 60` explicitly enables bounded polling.
-The authenticated control start/status/cancel paths are documented in the [Check contract](checks-and-verdicts.md).
-For a complete retained observation, select its exact event and follow bounded `payload.next_offset` values with `--include-payload --payload-offset N`.
-The first offset is zero; keep the same pinned snapshot for subsequent chunks.
-If collection uses polling, each HTTP invocation has its own ID and timeout within the declared bounded horizon.
-Cancellation stops the remaining polls.
-The ordinary query deadline does not replace the explicit Check invocation and horizon limits.
-`check.evaluate` is implemented as `ronchi check evaluate <check-id> --definition-version N --snapshot-seq N`.
-It requires one explicit intent/signature scope and `snapshot_seq` and evaluates only retained facts through that watermark.
-It returns the pinned definition version/digest, evaluation version, source authority, bounded Verdict, supporting references, and Evidence Gaps without appending observations or calling external sources.
-Its authenticated control path is `POST /v1/labs/{id}/checks/evaluate`.
-The JSON request uses `arguments.evaluation` for Check identity/version/digest and exact normalized source scope.
-An empty requirement set has no Verdict.
-Exit 0 means completed evaluation, including a fail or inconclusive result.
-Re-evaluation is available for stopped or interrupted Journals and preserves their completeness limits.
-The [Check contract](checks-and-verdicts.md) owns adapter limits, rules, and Verdict meanings.
 
 ## Example paths
 
@@ -399,8 +316,6 @@ ronchi investigate summary --lab default --json
 ronchi investigate timeline --lab-id L1 --signature A --limit 50 --json
 ronchi investigate evidence --lab-id L1 --event-seq 12 --fields kind,source,transaction_signature --json
 ronchi investigate findings --lab-id L1 --cursor '<opaque-cursor>' --json
-ronchi check observe intent-state --lab-id L1 --intent-id W1 --json
-ronchi check evaluate intent-state --lab-id L1 --intent-id W1 --snapshot-seq 42 --json
 ronchi down --lab default --json
 ```
 
@@ -408,7 +323,7 @@ Normal summary: `L1 · simulator · tx-response-lost · 1 matching submission`; 
 Its separate guidance asks the developer to check how the backend completes the operation after that status; it does not claim a Client Outcome or economic completion.
 No RPC traffic: the Journal still contains startup/control records; a matching RPC selection returns `items:[]`, no Finding, and `selection_complete:true` at its actual watermark.
 Text asks the developer to drive backend traffic.
-No match: the Lab has traffic, `case_state:waiting_for_match`, and `matched_requests:0`; exit remains `0`.
+No matching Fault: traffic can exist without a selected/applied Fault. Report the actual Case context and retained evidence; absence of a match is not a successful resilience result.
 No Finding: matching evidence exists, but no versioned rule has enough facts; the Timeline remains available.
 Capability example: a requested execution-only conclusion in simulator mode returns `unsupported_capability`, exit `4`, and Surfpool guidance; ordinary simulator queries still succeed with their stated limits.
 Product failure example: a Journal read fails with `internal_error`, exit `6`, `effects:none`, and a Lab status/health inspection path; it never becomes a System Under Test Finding.

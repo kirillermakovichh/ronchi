@@ -116,6 +116,7 @@ pub(super) fn execute(clock: &Clock, method: &str, params: &Value) -> Result<Val
         | "getBalance"
         | "getAccountInfo"
         | "getMultipleAccounts"
+        | "getProgramAccounts"
         | "getTokenAccountBalance"
         | "getTokenAccountsByOwner"
         | "getMinimumBalanceForRentExemption"

@@ -34,10 +34,9 @@ impl Settings {
         if !(1..=120000).contains(&self.outage_ms)
             || !(1..=120000).contains(&self.recovery_ms)
             || self.methods.len() > 32
-            || self
-                .methods
-                .iter()
-                .any(|m| !crate::backend::METHODS.contains(&m.as_str()))
+            || self.methods.iter().any(|m| {
+                !crate::backend::METHODS.contains(&m.as_str()) || m == "getProgramAccounts"
+            })
         {
             return Err(RpcError::params(
                 "Timeout intervals must be 1..120000 ms; method filters require at most 32 supported methods",

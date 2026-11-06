@@ -1,3 +1,4 @@
+pub(crate) mod socket;
 pub mod viewer;
 // Browser transport. Static files come only from the build-time asset map.
 use axum::{
@@ -199,7 +200,7 @@ pub async fn authenticate(
     let result = same_origin(
         control.snapshot().control_address,
         request.headers(),
-        request.method() != axum::http::Method::GET,
+        request.method() != axum::http::Method::GET || request.uri().path().ends_with("/socket"),
     );
     if let Err(status) = result {
         return status.into_response();
@@ -373,7 +374,7 @@ mod session_tests {
 pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
     let invalid = || {
         crate::lab::LabError::invalid(
-            "Invalid dashboard selection; use a credential-free pinned bookmark query",
+            "Invalid dashboard selection; use a credential-free dashboard selection",
         )
     };
     if input.len() > 8192 {
@@ -385,7 +386,6 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
         return Err(invalid());
     }
     let mut singleton = std::collections::HashSet::new();
-    let mut snapshot = false;
     let mut finding = false;
     let mut event = false;
     for (key, value) in &pairs {
@@ -404,9 +404,6 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
                     || !value.bytes().all(|b| b.is_ascii_digit())
                 {
                     return Err(invalid());
-                }
-                if key == "snapshot" {
-                    snapshot = true
                 }
                 if key == "event" {
                     if number == 0 {
@@ -431,7 +428,8 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
                     "traffic",
                     "journal",
                     "case",
-                    "checks",
+                    "workspace",
+                    "lab",
                 ]
                 .contains(&value.as_ref())
                 {
@@ -446,7 +444,7 @@ pub fn bookmark_query(input: &str) -> Result<String, crate::lab::LabError> {
             _ => return Err(invalid()),
         }
     }
-    if (finding || event) && !snapshot || finding && event {
+    if finding && event {
         return Err(invalid());
     }
     Ok(query.into())

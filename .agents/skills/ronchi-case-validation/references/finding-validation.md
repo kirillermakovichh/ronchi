@@ -1,6 +1,6 @@
 # Validating Findings against evidence
 
-Use the glossary and ADR-0005 for the Finding, Verdict, and Observation Boundary contracts.
+Use the glossary and ADR-0005 for the Finding and Observation Boundary contracts.
 The initial no-SDK boundary observes RPC requests, simulator decisions, applied Faults, and RPC Boundary Results.
 It does not observe every application decision or client-library outcome.
 
@@ -20,7 +20,7 @@ Distinguish:
 | Surfpool execution evidence | A statement about observed local execution within that mode |
 | Ronchi withholding a response | The RPC Boundary Result, not an assumed client timeout |
 | Later RPC request | An Observed Application Action with that request as its source |
-| SDK event, Checkpoint, or configured Check | Only the client/application facts that source actually observes |
+| Future SDK event or Checkpoint | Only the client/application facts that source actually observes |
 
 Different transaction signatures do not alone prove duplicate business intent or economic execution.
 The same business correlation identifier does not itself prove an on-chain transfer happened.
@@ -45,7 +45,7 @@ For the same relevant evidence and rule/configuration version, check the determi
 Do not introduce an embedded model or generated speculation as a Finding mechanism.
 Missing evidence is not proof of backend success or failure.
 An intentionally injected RPC error is not automatically a defect in Ronchi or the connected backend.
-Keep formal Verdicts conditional on configured Checks and sufficient evidence.
+Do not evaluate application business requirements or restore the removed application Check mechanism.
 Control comparison remains optional; differences between non-comparable application states do not establish fault causation.
 
 ## Example boundary

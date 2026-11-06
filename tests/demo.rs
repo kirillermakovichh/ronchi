@@ -2,7 +2,7 @@ mod reference_support;
 use reference_support::{base, command};
 use serde_json::Value;
 #[test]
-fn resilient_demo_collects_public_proof_and_retains_only_its_lab() {
+fn resilient_demo_retains_rpc_evidence_and_only_its_lab() {
     let project = tempfile::tempdir().unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_ronchi"))
         .current_dir(project.path())
@@ -12,8 +12,13 @@ fn resilient_demo_collects_public_proof_and_retains_only_its_lab() {
     assert!(output.status.success(), "{output:?}");
     let demo: Value = serde_json::from_slice(&output.stdout).unwrap();
     let result = &demo["result"];
-    assert_eq!(result["check"]["verdict"], "pass", "{demo}");
-    assert_eq!(result["check"]["definition_version"], 2);
+    assert!(result.get("check").is_none());
+    assert!(
+        result["summary"]["counts"]["rpc_registrations"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(result["reference_stopped"], true);
     assert_eq!(result["lab_name"], "demo");
     assert_eq!(result["lab_state"], "ready");
@@ -59,24 +64,18 @@ fn resilient_demo_collects_public_proof_and_retains_only_its_lab() {
     }
     let id = result["lab_id"].as_str().unwrap();
     let snapshot = result["snapshot_seq"].as_u64().unwrap().to_string();
-    let intent = result["intent_id"].as_str().unwrap();
     let replay = command(
         project.path(),
         &[
             "--lab-id",
             id,
-            "check",
-            "evaluate",
-            "reference-intent",
-            "--definition-version",
-            "2",
+            "investigate",
+            "summary",
             "--snapshot-seq",
             &snapshot,
-            "--intent-id",
-            intent,
         ],
     );
-    assert_eq!(replay["result"], result["check"]);
+    assert_eq!(replay["result"], result["summary"]);
     assert!(!project.path().join("ronchi/config.toml").exists());
     command(project.path(), &["--lab-id", id, "down"]);
     let stopped = command(
@@ -103,9 +102,12 @@ fn resilient_demo_collects_public_proof_and_retains_only_its_lab() {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let unsafe_demo: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(
-        unsafe_demo["result"]["check"]["verdict"], "fail",
-        "{unsafe_demo}"
+    assert!(unsafe_demo["result"].get("check").is_none());
+    assert!(
+        !unsafe_demo["result"]["findings"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     assert_eq!(unsafe_demo["result"]["lab_name"], "demo-2");
     assert_eq!(unsafe_demo["result"]["lab_state"], "stopped");
@@ -253,7 +255,7 @@ fn cancellation_and_child_death_preserve_exact_owned_resources() {
 }
 
 #[test]
-fn source_timeout_remains_an_observation_gap_and_cleanup_is_bounded() {
+fn relayer_status_timeout_reports_an_operational_error_and_cleanup_is_bounded() {
     use std::process::Stdio;
     let project = tempfile::tempdir().unwrap();
     let child = base(project.path())
@@ -271,23 +273,11 @@ fn source_timeout_remains_an_observation_gap_and_cleanup_is_bounded() {
     let output = wait(child);
     assert!(!output.status.success());
     let failure: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(failure["error"]["code"], "source_failure", "{failure}");
+    assert_eq!(failure["error"]["code"], "source_timeout", "{failure}");
     assert!(failure.get("result").is_none());
     assert_eq!(failure["error"]["reference_stopped"], true);
     assert_eq!(failure["error"]["lab_stopped"], true);
     assert!(ronchi::process::identity(pid).unwrap().is_none());
-    let errors = command(
-        project.path(),
-        &[
-            "--lab-id",
-            metadata["lab_id"].as_str().unwrap(),
-            "investigate",
-            "timeline",
-            "--kind",
-            "check.invocation_error",
-        ],
-    );
-    assert!(!errors["result"]["items"].as_array().unwrap().is_empty());
 }
 #[test]
 fn startup_cancellation_awaits_the_normal_operation_lock_path() {
@@ -385,7 +375,7 @@ fn concurrent_demos_preserve_user_default_config_and_text_lifecycle() {
     assert_ne!(a["result"]["lab_id"], b["result"]["lab_id"]);
     assert_ne!(a["result"]["reference_name"], b["result"]["reference_name"]);
     for result in [&a["result"], &b["result"]] {
-        assert_eq!(result["check"]["verdict"], "pass");
+        assert!(result.get("check").is_none());
         assert_eq!(result["lab_state"], "stopped");
         assert_eq!(result["reference_stopped"], true);
         let argv = result["command_argv"][0]
@@ -416,17 +406,17 @@ fn concurrent_demos_preserve_user_default_config_and_text_lifecycle() {
 }
 
 #[test]
-fn abnormal_exit_after_final_proof_is_an_operational_error() {
+fn abnormal_exit_after_evidence_is_an_operational_error() {
     use std::process::Stdio;
     let project = tempfile::tempdir().unwrap();
     let child = base(project.path())
-        .env("RONCHI_DEMO_TEST_BARRIER", "proof_complete")
+        .env("RONCHI_DEMO_TEST_BARRIER", "evidence_ready")
         .args(["demo", "tx-response-lost", "--stop-after-demo"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let (directory, metadata) = stage(project.path(), "proof_complete");
+    let (directory, metadata) = stage(project.path(), "evidence_ready");
     let pid = metadata["reference_pid"].as_u64().unwrap() as u32;
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
     std::fs::write(directory.join("release"), []).unwrap();

@@ -387,7 +387,7 @@ impl JournalReader {
                         .expect("typed finding serializes")
                 )
             );
-            report.findings.push(Finding{finding_id,rule_id:"recent-blockhash.expired-submission".into(),version:1,lab_id:lab.into(),scope,supporting_events,statement,guidance:"Inspect whether the application obtains a fresh blockhash and tracks any replacement signature.".into(),limitations:vec!["Source height and lastValidBlockHeight establish this bounded expiry comparison; they do not prove a client received a response or reused a specific RPC call.".into(),"A backend error or null status does not establish non-execution, application intent, or an economic outcome.".into()]});
+            report.findings.push(Finding{observation_window:None,finding_id,rule_id:"recent-blockhash.expired-submission".into(),version:1,lab_id:lab.into(),scope,supporting_events,statement,guidance:"Inspect whether the application obtains a fresh blockhash and tracks any replacement signature.".into(),limitations:vec!["Source height and lastValidBlockHeight establish this bounded expiry comparison; they do not prove a client received a response or reused a specific RPC call.".into(),"A backend error or null status does not establish non-execution, application intent, or an economic outcome.".into()]});
             rule.matched += 1;
         }
         report.rules.push(rule);

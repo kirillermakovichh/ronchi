@@ -23,7 +23,7 @@ struct ClientState {
     cancelled: tokio_util::sync::CancellationToken,
     client: HttpClient<HttpConnector, Full<Bytes>>,
 }
-pub const METHODS: [&str; 20] = [
+pub const METHODS: [&str; 21] = [
     "getHealth",
     "getVersion",
     "getGenesisHash",
@@ -39,6 +39,7 @@ pub const METHODS: [&str; 20] = [
     "getBalance",
     "getAccountInfo",
     "getMultipleAccounts",
+    "getProgramAccounts",
     "getTokenAccountBalance",
     "getTokenAccountsByOwner",
     "getMinimumBalanceForRentExemption",

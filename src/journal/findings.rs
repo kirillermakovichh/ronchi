@@ -46,6 +46,7 @@ impl JournalReader {
             rules: [
                 Rule::LookupAfterWithholding,
                 Rule::SubmissionAfterWithholding,
+                Rule::SurfpoolResponseWithheld,
             ]
             .into_iter()
             .map(|rule| RuleReport {
@@ -147,6 +148,7 @@ impl JournalReader {
                             "kind='rpc.registered' AND rpc_method IN ('getSignatureStatuses','getTransaction')"
                         }
                         Rule::SubmissionAfterWithholding => "kind='transaction.submission'",
+                        Rule::SurfpoolResponseWithheld => "0",
                     };
                     let n = values.len();
                     let signature_join = if self.version >= 6 {
@@ -195,7 +197,26 @@ impl JournalReader {
                     withholding: originals[3].clone(),
                     later,
                 };
-                let evaluation = findings::evaluate(rule, &evidence);
+                // The base explanation applies only to Surfpool incidents. Simulator IDs and rule output stay unchanged.
+                if rule == Rule::SurfpoolResponseWithheld
+                    && evidence
+                        .acceptance
+                        .as_ref()
+                        .is_none_or(|f| f.execution_mode != crate::config::Mode::Surfpool)
+                {
+                    continue;
+                }
+                let mut evaluation = findings::evaluate(rule, &evidence);
+                if rule == Rule::SurfpoolResponseWithheld
+                    && let Some(finding) = &mut evaluation.finding
+                {
+                    finding.observation_window = Some(self.response_loss_window(
+                        selected_cte,
+                        values,
+                        &evidence,
+                        report.complete,
+                    )?);
+                }
                 match evaluation.state {
                     State::Matched => rule_report.matched += 1,
                     State::NoMatch => rule_report.no_match += 1,
@@ -299,6 +320,8 @@ impl JournalReader {
 }
 #[path = "findings/confirmation.rs"]
 mod confirmation;
+#[path = "findings/response_loss.rs"]
+mod response_loss;
 #[path = "findings/status.rs"]
 mod status;
 #[path = "findings/timeout.rs"]

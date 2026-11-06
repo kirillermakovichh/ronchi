@@ -386,3 +386,24 @@ Unknown methods and unsupported parameter shapes fail before network dispatch wh
 Surfpool remains responsible for state-dependent preflight, account availability, execution, and native method configuration errors.
 Cancellation after dispatch records uncertainty; it does not claim backend rollback.
 Core transport limits and batch binding remain unchanged.
+
+
+### Program-account discovery in Surfpool
+
+`getProgramAccounts` is supported only in managed Surfpool mode.
+Ronchi sends the positional parameters unchanged to its owned Surfpool 1.7.0 instance.
+Surfpool validates the program key, filters, encoding, commitment, context wrapper and data-slice configuration.
+The interface follows the [official method](https://solana.com/docs/rpc/http/getprogramaccounts), subject to the pinned backend's capabilities.
+Native checks cover context-wrapped results, `dataSize`, `dataSlice`, and discovery of local account changes after execution.
+They do not establish full Raydium-pool discovery against a remote datasource.
+Missing account state and datasource enumeration remain limitations of the configured Surfpool state.
+Ronchi does not synthesize missing program accounts or combine the local result with a direct public query.
+
+Each backend exchange retains its 10-second deadline and 256 KiB response-body cap.
+A result exceeding the cap fails explicitly; Ronchi does not return a silent partial account list.
+Large program scans therefore need narrower filters or data slices.
+The method adds no pagination protocol and no WebSocket support.
+The existing HTTP request, batch, Journal and cancellation limits still apply.
+`getProgramAccounts` is not in the simulator Read-through allowlist.
+It is not eligible for `provider-timeout-burst` method selection in this version.
+Other supported Cases, including submission response loss, continue operating on their declared methods.

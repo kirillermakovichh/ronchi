@@ -1173,6 +1173,9 @@ impl Owner {
                     registration_seq: seq,
                     policy: args.map(|settings| crate::cases::Policy {
                         revision: seq,
+                        activated_at: time::OffsetDateTime::now_utc()
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .expect("current UTC time formats"),
                         custom: custom.as_ref().map(|r| r.provenance()),
                         activated_elapsed_ns: self
                             .started

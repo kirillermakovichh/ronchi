@@ -1,5 +1,5 @@
 //! Local stdio adapter. The SDK owns framing; Lab owners outlive this attachment.
-use crate::{cases, checks, config, lab, query, workspace::Workspace};
+use crate::{cases, config, lab, query, workspace::Workspace};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
@@ -66,23 +66,6 @@ struct Query {
     #[serde(default)]
     arguments: query::Arguments,
 }
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Observe {
-    lab_id: String,
-    #[serde(default)]
-    action: ObserveAction,
-    arguments: checks::Arguments,
-}
-#[derive(Default, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-enum ObserveAction {
-    #[default]
-    Collect,
-    Status,
-    Cancel,
-}
-
 #[derive(Clone)]
 struct Adapter {
     project: PathBuf,
@@ -102,9 +85,6 @@ fn lab_error(error: lab::LabError) -> query::Error {
     result.recovery =
         "Inspect ronchi_lab_status with the immutable Lab ID before retrying a mutation".into();
     result
-}
-fn check_error(error: checks::Error) -> query::Error {
-    serde_json::from_value(value(error)).unwrap_or_else(|_| query::Error::storage())
 }
 fn identity(id: &str) -> Result<(), query::Error> {
     if !crate::workspace::identifier(id) || id.len() > 128 {
@@ -141,10 +121,8 @@ enum CatalogOutput {
     Failure(query::Failure),
 }
 fn output_schema(name: &str) -> Arc<serde_json::Map<String, Value>> {
-    let mut schema = if name.starts_with("ronchi_investigate_") || name == "ronchi_check_evaluate" {
+    let mut schema = if name.starts_with("ronchi_investigate_") {
         schema::<query::Envelope>()
-    } else if name == "ronchi_check_observe" {
-        schema::<checks::Envelope>()
     } else if name == "ronchi_case_validate" {
         schema::<cases::custom::ValidationEnvelope>()
     } else if name == "ronchi_case_list" {
@@ -163,7 +141,7 @@ fn tool<T: JsonSchema>(name: &'static str, description: &'static str, read_only:
                 .read_only(read_only)
                 .destructive(name == "ronchi_lab_down")
                 .idempotent(read_only)
-                .open_world(name == "ronchi_check_observe"),
+                .open_world(false),
         )
 }
 fn tools() -> &'static [Tool] {
@@ -199,16 +177,6 @@ fn tools() -> &'static [Tool] {
             "ronchi_case_disarm",
             "Disarm future registrations on an explicit live Lab; admitted effects keep their policy.",
             false,
-        ),
-        tool::<Observe>(
-            "ronchi_check_observe",
-            "Collect bounded configured observations. Supply a stable collection_id. Use action:status or action:cancel with the same identity to inspect uncertain completion without restarting. Protocol cancellation stops remaining polls.",
-            false,
-        ),
-        tool::<Query>(
-            "ronchi_check_evaluate",
-            "Evaluate retained facts at explicit snapshot_seq with arguments.evaluation. Does not contact the source. Requires explicit Lab ID.",
-            true,
         ),
         tool::<Query>(
             "ronchi_investigate_summary",
@@ -330,82 +298,13 @@ impl Adapter {
                     request_id,
                 ))
             }
-            "ronchi_check_observe" => {
-                let mut input: Observe = parse(input)?;
-                identity(&input.lab_id)?;
-                input.arguments.normalize().map_err(check_error)?;
-                let selected = lab::status(self.project.clone(), "default", Some(&input.lab_id))
-                    .await
-                    .map_err(lab_error)?;
-                if selected.manifest.state != lab::Lifecycle::Ready {
-                    return Err(query::Error::new(
-                        "state_conflict",
-                        "Check collection requires a ready Lab",
-                    ));
-                }
-                let ws = Workspace::new(&self.project);
-                let request = checks::Request {
-                    contract_version: 1,
-                    operation: "check.observe".into(),
-                    request_id: request_id.into(),
-                    lab_id: input.lab_id,
-                    arguments: input.arguments,
-                };
-                if !matches!(input.action, ObserveAction::Collect) {
-                    return crate::control::check_request(
-                        &ws,
-                        &selected.manifest,
-                        None,
-                        &request.arguments.collection_id,
-                        matches!(input.action, ObserveAction::Cancel),
-                    )
-                    .await
-                    .map(value)
-                    .map_err(check_error);
-                }
-                // Complete start admission before observing cancellation. Never retry it blindly.
-                let mut reply = crate::control::check_request(
-                    &ws,
-                    &selected.manifest,
-                    Some(&request),
-                    &request.arguments.collection_id,
-                    false,
-                )
-                .await
-                .map_err(check_error)?;
-                while reply.result.status == "running" {
-                    tokio::select! {
-                        _=cancel.cancelled()=> {
-                            let outcome = cancel_collection(&ws, &selected.manifest, &request.arguments.collection_id).await;
-                            let mut error = query::Error::new("cancelled","Collection cancellation requested; inspect collection_id before retrying");
-                            error.effects = if outcome.is_ok() { "applied" } else { "unknown" }.into();
-                            return Err(error);
-                        }
-                        _=tokio::time::sleep(Duration::from_millis(100))=> {}
-                    }
-                    reply = crate::control::check_request(
-                        &ws,
-                        &selected.manifest,
-                        None,
-                        &request.arguments.collection_id,
-                        false,
-                    )
-                    .await
-                    .map_err(check_error)?;
-                }
-                Ok(value(reply))
-            }
             _ => {
                 let input: Query = parse(input)?;
                 identity(&input.lab_id)?;
-                let op = if tool == "ronchi_check_evaluate" {
-                    "check.evaluate".into()
-                } else {
-                    format!(
-                        "investigate.{}",
-                        tool.trim_start_matches("ronchi_investigate_")
-                    )
-                };
+                let op = format!(
+                    "investigate.{}",
+                    tool.trim_start_matches("ronchi_investigate_")
+                );
                 let mut request = query::Request {
                     contract_version: 1,
                     request_id: request_id.into(),
@@ -456,22 +355,6 @@ where
         _=cancel.cancelled()=>Err(lab::LabError { exit:130,code:"cancelled",message:"Mutation wait cancelled; inspect Lab status before retrying".into(),phase:"control",effects:"unknown",lab_id:Some(id.into()) })
     }
 }
-async fn cancel_collection(
-    ws: &Workspace,
-    manifest: &lab::Manifest,
-    collection: &str,
-) -> Result<(), checks::Error> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let mut reply = crate::control::check_request(ws, manifest, None, collection, true).await?;
-        while reply.result.status == "running" {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            reply = crate::control::check_request(ws, manifest, None, collection, false).await?;
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|_| checks::Error::new("cancelled", "unknown"))?
-}
 impl ServerHandler for Adapter {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
@@ -505,10 +388,6 @@ impl ServerHandler for Adapter {
         let input = Value::Object(request.arguments.unwrap_or_default());
         let lab_id = input
             .get("lab_id")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let collection_id = input
-            .pointer("/arguments/collection_id")
             .and_then(Value::as_str)
             .map(str::to_owned);
         let result = if query::encoded_len(&input, query::MAX_REQUEST_BYTES).is_err() {
@@ -549,16 +428,17 @@ impl ServerHandler for Adapter {
                     .unwrap_or(false)
                 {
                     error.effects = "applied".into();
-                    error.recovery = "Inspect the resolved Lab ID and collection_id before another mutation; do not retry blindly".into();
+                    error.recovery =
+                        "Inspect the resolved Lab ID before another mutation; do not retry blindly"
+                            .into();
                 }
-                let collection = value.pointer("/result/collection_id").cloned();
                 (
-                    json!({"contract_version":1,"request_id":request_id,"lab_id":resolved_id,"collection_id":collection,"error":error}),
+                    json!({"contract_version":1,"request_id":request_id,"lab_id":resolved_id,"error":error}),
                     true,
                 )
             }
             Err(error) => (
-                json!({"contract_version":1,"request_id":request_id,"lab_id":lab_id,"collection_id":collection_id,"error":error}),
+                json!({"contract_version":1,"request_id":request_id,"lab_id":lab_id,"error":error}),
                 true,
             ),
         };

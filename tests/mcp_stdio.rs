@@ -34,7 +34,8 @@ async fn sdk_stdio_lists_and_calls_offline_catalog() {
     .unwrap()
     .unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 14);
+    assert_eq!(tools.len(), 12);
+    assert!(tools.iter().all(|t| !t.name.starts_with("ronchi_check_")));
     let result = client
         .call_tool(
             CallToolRequestParams::new("ronchi_case_list")
@@ -207,7 +208,8 @@ async fn sdk_modern_discovery_has_the_same_catalog_and_schemas() {
         .await
         .unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 14);
+    assert_eq!(tools.len(), 12);
+    assert!(tools.iter().all(|t| !t.name.starts_with("ronchi_check_")));
     let oversized = client
         .call_tool(
             CallToolRequestParams::new("ronchi_case_list").with_arguments(
@@ -392,106 +394,6 @@ async fn eof_after_sent_mutation_keeps_accepted_effect_and_can_be_inspected() {
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["result"]["state"], "ready");
     assert_eq!(status["result"]["active_case"]["hold_ms"], 19);
-}
-
-#[tokio::test]
-async fn sdk_cancellation_settles_collection_and_allows_status_without_recollecting() {
-    use rmcp::{
-        model::{ClientRequest, Request},
-        service::PeerRequestOptions,
-    };
-    use tokio::io::AsyncReadExt;
-    let project = tempfile::tempdir().unwrap();
-    let _cleanup = Cleanup(project.path().into());
-    let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = source.local_addr().unwrap();
-    let (seen_tx, seen_rx) = tokio::sync::oneshot::channel();
-    let source_task = tokio::spawn(async move {
-        let (mut stream, _) = source.accept().await.unwrap();
-        let mut bytes = [0; 4096];
-        assert!(stream.read(&mut bytes).await.unwrap() > 0);
-        seen_tx.send(()).unwrap();
-        while stream.read(&mut bytes).await.unwrap_or(0) > 0 {}
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), source.accept())
-                .await
-                .is_err()
-        );
-    });
-    let mut process = Command::new(env!("CARGO_BIN_EXE_ronchi"))
-        .arg("--project")
-        .arg(project.path())
-        .args(["mcp", "stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
-    let client = Client
-        .serve((
-            process.stdout.take().unwrap(),
-            process.stdin.take().unwrap(),
-        ))
-        .await
-        .unwrap();
-    let up_args = json!({"arguments":{"rpc_listen":"127.0.0.1:0","control_listen":"127.0.0.1:0","checks":{"sources":[{"check_id":"state","version":1,"source":"independent-app","schema_version":1,"url":format!("http://{address}/observe"),"facts":{"enabled":{"type":"boolean"}}}]}}});
-    let up = client
-        .call_tool(
-            CallToolRequestParams::new("ronchi_lab_up")
-                .with_arguments(up_args.as_object().unwrap().clone()),
-        )
-        .await
-        .unwrap()
-        .structured_content
-        .unwrap();
-    let id = up["lab_id"].as_str().unwrap_or_else(|| panic!("{up}"));
-    let arguments = json!({"lab_id":id,"arguments":{"collection_id":"mcp-collection","check_id":"state","scope":{"intent_ids":["W1"]},"poll":true,"horizon_seconds":60}});
-    let handle = client
-        .send_cancellable_request(
-            ClientRequest::CallToolRequest(Request::new(
-                CallToolRequestParams::new("ronchi_check_observe")
-                    .with_arguments(arguments.as_object().unwrap().clone()),
-            )),
-            PeerRequestOptions::no_options(),
-        )
-        .await
-        .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(3), seen_rx)
-        .await
-        .unwrap()
-        .unwrap();
-    handle.cancel(Some("stop collection".into())).await.unwrap();
-    let mut status_args = arguments;
-    status_args["action"] = json!("status");
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
-    loop {
-        let reply = client
-            .call_tool(
-                CallToolRequestParams::new("ronchi_check_observe")
-                    .with_arguments(status_args.as_object().unwrap().clone()),
-            )
-            .await
-            .unwrap();
-        assert_eq!(reply.is_error, Some(false), "{reply:?}");
-        let reply = reply.structured_content.unwrap();
-        if reply["result"]["status"] != "running" {
-            assert_eq!(reply["result"]["status"], "cancelled");
-            assert_eq!(reply["result"]["invocations"], 1);
-            break;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "{reply}");
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    source_task.await.unwrap();
-    client.cancel().await.unwrap();
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), process.wait())
-            .await
-            .unwrap()
-            .unwrap()
-            .success()
-    );
 }
 
 #[test]

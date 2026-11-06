@@ -111,9 +111,9 @@ pub async fn export(
             "Export requires an identifier name and 16384..67108864 output bytes",
         ));
     }
-    if options.arguments.cursor.is_some() || options.arguments.evaluation.is_some() {
+    if options.arguments.cursor.is_some() {
         return Err(LabError::invalid(
-            "Export starts a new bounded evidence selection; cursors and evaluation are not export inputs",
+            "Export starts a new bounded evidence selection; cursors are not export inputs",
         ));
     }
     let mut request = Request {

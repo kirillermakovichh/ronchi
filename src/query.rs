@@ -20,8 +20,6 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub enum Operation {
     #[serde(rename = "investigate.summary")]
     Summary,
-    #[serde(rename = "check.evaluate")]
-    Evaluate,
     #[serde(rename = "investigate.findings")]
     Findings,
     #[serde(rename = "investigate.timeline")]
@@ -34,7 +32,6 @@ pub enum Operation {
 impl Operation {
     pub fn parse(value: &str) -> Result<Self, Error> {
         match value {
-            "check.evaluate" => Ok(Self::Evaluate),
             "summary" | "investigate.summary" => Ok(Self::Summary),
             "findings" | "investigate.findings" => Ok(Self::Findings),
             "timeline" | "investigate.timeline" => Ok(Self::Timeline),
@@ -68,29 +65,40 @@ pub struct Scope {
     pub since: Option<String>,
     pub until: Option<String>,
 }
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Order {
+    Asc,
+    Desc,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Arguments {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<Order>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u16>,
     pub scope: Scope,
     pub limit: u16,
     pub cursor: Option<String>,
     pub fields: Vec<String>,
     pub include_payload: bool,
     pub payload_offset: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub evaluation: Option<crate::checks::evaluate::Selection>,
     pub snapshot_seq: Option<u64>,
 }
 impl Default for Arguments {
     fn default() -> Self {
         Self {
+            order: None,
+            offset: None,
             scope: Scope::default(),
             limit: 50,
             cursor: None,
             fields: vec![],
             include_payload: false,
             payload_offset: 0,
-            evaluation: None,
             snapshot_seq: None,
         }
     }
@@ -175,10 +183,7 @@ impl Error {
     pub fn exit(&self) -> i32 {
         match self.code.as_ref() {
             "invalid_argument" | "invalid_field" | "invalid_cursor" => 2,
-            "journal_unavailable"
-            | "lab_unavailable"
-            | "finding_unavailable"
-            | "definition_unavailable" => 3,
+            "journal_unavailable" | "lab_unavailable" | "finding_unavailable" => 3,
             "unsupported_capability" => 4,
             "capacity_exceeded" | "state_conflict" | "analysis_incomplete" => 5,
             "deadline_exceeded" => 124,
@@ -360,6 +365,19 @@ impl Request {
                 "Invalid version, identity, page size, or projection size",
             ));
         }
+        if a.offset.is_some_and(|offset| offset > 4096)
+            || (a.offset.is_some() && self.operation != Operation::Findings)
+        {
+            return Err(Error::invalid(
+                "Finding offsets must be 0..4096 and apply only to Findings",
+            ));
+        }
+        if a.order == Some(Order::Asc) {
+            a.order = None;
+        }
+        if a.offset == Some(0) {
+            a.offset = None;
+        }
         if s.finding_id.as_ref().is_some_and(|id| {
             id.len() != 67
                 || !id.starts_with("f1-")
@@ -368,38 +386,15 @@ impl Request {
             return Err(Error::invalid("Expected a stable f1- Finding ID"));
         }
         if s.finding_id.is_some()
-            && (self.operation != Operation::Evidence || a.snapshot_seq.is_none())
+            && (!matches!(self.operation, Operation::Evidence | Operation::Findings)
+                || a.snapshot_seq.is_none())
         {
             return Err(Error::invalid(
-                "Finding evidence requires investigate.evidence and explicit snapshot_seq",
+                "Finding selection requires investigate.evidence or investigate.findings and explicit snapshot_seq",
             ));
         }
         if a.snapshot_seq.is_some_and(|n| n > i64::MAX as u64) {
             return Err(Error::invalid("Invalid snapshot watermark"));
-        }
-        if self.operation == Operation::Evaluate {
-            if a.limit != 50
-                || a.snapshot_seq.is_none()
-                || a.cursor.is_some()
-                || a.include_payload
-                || a.payload_offset != 0
-                || *s != Scope::default()
-                || !a.fields.is_empty()
-            {
-                return Err(Error::invalid(
-                    "Check evaluation requires explicit snapshot_seq and evaluation scope without Timeline presentation options",
-                ));
-            }
-            a.evaluation
-                .as_mut()
-                .ok_or_else(|| Error::invalid("Missing Check evaluation selection"))?
-                .normalize()?;
-            return Ok(());
-        }
-        if a.evaluation.is_some() {
-            return Err(Error::invalid(
-                "Evaluation selection requires check.evaluate",
-            ));
         }
         let count = s.signature.len()
             + s.rpc_method.len()
@@ -507,6 +502,7 @@ impl Request {
                     "lab_id",
                     "scope",
                     "supporting_events",
+                    "observation_window",
                     "statement",
                     "guidance",
                     "limitations",
@@ -551,6 +547,11 @@ impl Request {
                 [
                     crate::findings::Rule::LookupAfterWithholding.definition(),
                     crate::findings::Rule::SubmissionAfterWithholding.definition(),
+                    crate::findings::Rule::SurfpoolResponseWithheld.definition(),
+                    crate::findings::Rule::LookupAfterWithholding
+                        .definition_for(crate::config::Mode::Surfpool),
+                    crate::findings::Rule::SubmissionAfterWithholding
+                        .definition_for(crate::config::Mode::Surfpool),
                 ],
                 crate::cases::confirmation::finding_definition(),
                 crate::cases::status::finding_definition(),

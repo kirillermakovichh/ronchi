@@ -111,6 +111,10 @@ pub struct Manifest {
     pub held_effects: Vec<crate::cases::HeldEffect>,
     #[serde(default)]
     pub case_registration_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_activity: Option<crate::journal::CaseActivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpc_traffic: Option<crate::journal::RpcTraffic>,
     pub failure: Option<String>,
     pub failure_exit: Option<i32>,
     pub versions: std::collections::BTreeMap<String, String>,
@@ -187,7 +191,6 @@ async fn operation_lock_cancellable(
     }
 }
 fn available(configuration: &EffectiveConfig) -> Result<(), LabError> {
-    configuration.checks.validate().map_err(LabError::invalid)?;
     if configuration.mode == Mode::Surfpool {
         if configuration.read_upstream.is_some() {
             return Err(LabError::invalid("Surfpool rejects direct Read-through"));
@@ -292,6 +295,13 @@ pub async fn status(project: PathBuf, name: &str, id: Option<&str>) -> Result<La
                 Err(_) if manifest.state == Lifecycle::Failed => (),
                 Err(_) => return Err(LabError::internal("Retained Journal cannot be read")),
             }
+            let traffic_path = ws.lab(&manifest.lab_id)?.join("journal.sqlite");
+            manifest.rpc_traffic = tokio::task::spawn_blocking(move || {
+                JournalReader::open(&traffic_path)?.rpc_traffic()
+            })
+            .await
+            .map_err(|_| LabError::internal("Traffic replay task failed"))?
+            .ok();
             manifest.held_effects.clear();
             manifest.rpc_address = None;
             manifest.control_address = None;
@@ -404,10 +414,9 @@ async fn up_selected(
                 );
             }
             let config = &live.configuration;
-            let compatible = explicit.checks.as_ref().is_none_or(|v| v == &config.checks)
-                && explicit
-                    .slot_duration_ms
-                    .is_none_or(|v| v == config.slot_duration_ms)
+            let compatible = explicit
+                .slot_duration_ms
+                .is_none_or(|v| v == config.slot_duration_ms)
                 && explicit.mode.is_none_or(|v| v == config.mode)
                 && explicit.read_upstream.as_ref().is_none_or(|v| {
                     Some(&crate::upstream::source_identity(v)) == config.read_upstream.as_ref()
@@ -525,13 +534,15 @@ async fn up_selected(
                 .into_iter()
                 .chain(crate::simulator::transactions::TRANSACTION_METHODS)
                 .chain(crate::upstream::READ_METHODS.into_iter().filter(|_|configuration.read_upstream.is_some()||configuration.mode==Mode::Surfpool))
-                .chain(["simulateTransaction","requestAirdrop"].into_iter().filter(|_|configuration.mode==Mode::Surfpool))
+                .chain(["simulateTransaction","requestAirdrop","getProgramAccounts"].into_iter().filter(|_|configuration.mode==Mode::Surfpool))
                 .map(|method| format!("rpc.{method}")),
         )
         .collect(),
         active_case: None,
         held_effects: vec![],
         case_registration_seq: 0,
+        case_activity: None,
+        rpc_traffic: None,
         failure: None,
         failure_exit: None,
         versions: std::collections::BTreeMap::from([

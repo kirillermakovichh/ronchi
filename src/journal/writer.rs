@@ -25,10 +25,14 @@ pub enum WriterHealth {
 pub struct WriterStatus {
     pub health: WriterHealth,
     pub snapshot_seq: u64,
+    pub case_activity: Option<super::CaseActivity>,
+    pub rpc_traffic: super::RpcTraffic,
 }
 
 struct Unit {
     events: Vec<String>,
+    activity: Vec<super::activity::Update>,
+    traffic: Vec<super::traffic::Update>,
     bytes: usize,
     permit: Permit,
     reply: oneshot::Sender<Result<u64, JournalError>>,
@@ -38,7 +42,7 @@ struct State {
     pending_events: usize,
     pending_bytes: usize,
     closing: bool,
-    terminal: Option<(Vec<String>, JournalState)>,
+    terminal: Option<(Vec<String>, JournalState, Vec<super::traffic::Update>)>,
 }
 #[derive(Clone, Copy)]
 pub struct QueueLimits {
@@ -120,14 +124,16 @@ impl WriterHandle {
                 | "rpc.response_prepared"
                 | "rpc.boundary"
                 | "fault.withholding_started"
-                | "check.observation"
-                | "check.invocation_error"
-                | "check.collection_completed"
         ) {
             return Err(JournalError::InvalidInput);
         }
         let encoded = encode(std::slice::from_ref(event))?;
-        self.enqueue(encoded, Some(reservation.0))
+        self.enqueue(
+            encoded,
+            Some(reservation.0),
+            super::activity::updates(std::slice::from_ref(event)),
+            super::traffic::updates(std::slice::from_ref(event)),
+        )
     }
     pub fn try_append_transition(
         &self,
@@ -138,7 +144,12 @@ impl WriterHandle {
         if encoded[0].len() > 4096 || event.kind != "transaction.transition" {
             return Err(JournalError::InvalidInput);
         }
-        self.enqueue(encoded, Some(reservation.0))
+        self.enqueue(
+            encoded,
+            Some(reservation.0),
+            super::activity::updates(std::slice::from_ref(event)),
+            super::traffic::updates(std::slice::from_ref(event)),
+        )
     }
 
     /// Open a bounded-query reader outside Tokio workers.
@@ -170,12 +181,19 @@ impl WriterHandle {
     /// Never waits for queue space. Saturation permanently fails admission.
     /// The returned receipt acknowledges SQLite commit, not queue insertion.
     pub fn try_append(&self, events: &[Event]) -> Result<CommitReceipt, JournalError> {
-        self.enqueue(encode(events)?, None)
+        self.enqueue(
+            encode(events)?,
+            None,
+            super::activity::updates(events),
+            super::traffic::updates(events),
+        )
     }
     fn enqueue(
         &self,
         encoded: Vec<String>,
         existing: Option<Permit>,
+        activity: Vec<super::activity::Update>,
+        traffic: Vec<super::traffic::Update>,
     ) -> Result<CommitReceipt, JournalError> {
         let bytes = encoded.iter().map(String::len).sum::<usize>();
         let (reply, receipt) = oneshot::channel();
@@ -209,6 +227,8 @@ impl WriterHandle {
         state.queue.push_back(Unit {
             permit,
             events: encoded,
+            activity,
+            traffic,
             bytes,
             reply,
         });
@@ -239,6 +259,8 @@ impl JournalWriter {
         let (status, _) = watch::channel(WriterStatus {
             health: WriterHealth::Healthy,
             snapshot_seq,
+            case_activity: None,
+            rpc_traffic: store.rpc_traffic()?,
         });
         let shared = Arc::new(Shared {
             budget: store.budget.clone(),
@@ -285,7 +307,11 @@ impl JournalWriter {
     ) -> Result<u64, JournalError> {
         let terminal = match terminal {
             Some((_, JournalState::Open)) => return Err(JournalError::InvalidInput),
-            Some((event, state)) => Some((encode(std::slice::from_ref(event))?, state)),
+            Some((event, state)) => Some((
+                encode(std::slice::from_ref(event))?,
+                state,
+                super::traffic::updates(std::slice::from_ref(event)),
+            )),
             None => None,
         };
         {
@@ -352,14 +378,15 @@ fn write_loop(mut store: JournalStore, shared: &Shared) -> Result<u64, JournalEr
             if failed {
                 return Err(JournalError::WriterFailed);
             }
-            let seq = if let Some((events, terminal)) = terminal {
-                store.commit(events, Some(terminal))?
+            let (seq, traffic) = if let Some((events, terminal, traffic)) = terminal {
+                (store.commit(events, Some(terminal))?, traffic)
             } else {
-                store.snapshot()?.snapshot_seq
+                (store.snapshot()?.snapshot_seq, Vec::new())
             };
             shared.status.send_modify(|s| {
                 s.snapshot_seq = seq;
                 s.health = WriterHealth::Closed;
+                s.rpc_traffic.apply(traffic);
             });
             return Ok(seq);
         }
@@ -396,10 +423,14 @@ fn write_loop(mut store: JournalStore, shared: &Shared) -> Result<u64, JournalEr
             }
         }
         drop(state);
+        let mut activity = Vec::new();
+        let mut traffic = Vec::new();
         let mut permits = Vec::with_capacity(units.len());
         let mut encoded = Vec::with_capacity(count);
         let mut replies = Vec::with_capacity(units.len());
         for unit in units {
+            activity.extend(unit.activity);
+            traffic.extend(unit.traffic);
             permits.push(unit.permit);
             let len = unit.events.len();
             encoded.extend(unit.events);
@@ -411,7 +442,11 @@ fn write_loop(mut store: JournalStore, shared: &Shared) -> Result<u64, JournalEr
         state.pending_bytes -= bytes;
         match result {
             Ok(seq) => {
-                shared.status.send_modify(|s| s.snapshot_seq = seq);
+                shared.status.send_modify(|s| {
+                    s.snapshot_seq = seq;
+                    super::activity::apply(&mut s.case_activity, activity);
+                    s.rpc_traffic.apply(traffic);
+                });
                 let mut watermark = seq - count as u64;
                 for (len, reply) in replies {
                     watermark += len as u64;

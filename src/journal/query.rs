@@ -19,6 +19,13 @@ impl Selection {
                 SqlValue::Integer(snapshot as i64),
             ],
         };
+        if request.arguments.order == Some(query::Order::Desc) {
+            value.sql = if position == 0 {
+                "q.event_seq>? AND q.event_seq<=?".into()
+            } else {
+                "q.event_seq<? AND q.event_seq<=?".into()
+            };
+        }
         if let Some(from) = s.from_seq {
             value.sql.push_str(" AND q.event_seq>=?");
             value.values.push(SqlValue::Integer(from as i64));
@@ -224,7 +231,7 @@ impl JournalReader {
                     .arguments
                     .snapshot_seq
                     .unwrap_or(latest.snapshot_seq),
-                position: 0,
+                position: u64::from(request.arguments.offset.unwrap_or(0)),
                 fingerprint,
                 state: latest.state,
             }
@@ -282,36 +289,6 @@ impl JournalReader {
                 reason: None,
             },
         };
-        if self.version >= 6 && self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM query_events WHERE kind='check.observation' AND event_seq<=?1)",
-            [cursor.snapshot as i64], |row| row.get::<_, bool>(0)
-        ).map_err(|_| Error::storage())? {
-            response.view.observation_boundary.push("application_check".into());
-        }
-        if request.operation == Operation::Evaluate {
-            let selection = request
-                .arguments
-                .evaluation
-                .as_ref()
-                .ok_or_else(|| Error::invalid("Missing Check selection"))?;
-            response.result = serde_json::to_value(self.evaluate_check(
-                selection,
-                &request.lab_id,
-                cursor.snapshot,
-                deadline,
-                cancel,
-            )?)
-            .map_err(|_| Error::storage())?;
-            query::encoded_len(&response, limits.response_bytes).map_err(|_| {
-                Error::new(
-                    "analysis_incomplete",
-                    "Evaluation result exceeds response budget",
-                )
-            })?;
-            query::check(cancel, deadline)?;
-            transaction.commit().map_err(|_| Error::storage())?;
-            return Ok(response);
-        }
         let mut effective_request = request.clone();
         let mut analysis = None;
         if matches!(request.operation, Operation::Summary | Operation::Findings)
@@ -322,7 +299,7 @@ impl JournalReader {
                 "{cte}, selected AS NOT MATERIALIZED (SELECT * FROM q WHERE {})",
                 selection.sql
             );
-            let report = self.findings(
+            let mut report = self.findings(
                 &selected_cte,
                 &selection.values,
                 &request.lab_id,
@@ -330,6 +307,23 @@ impl JournalReader {
                 deadline,
                 cancel,
             )?;
+            if request.arguments.order == Some(query::Order::Desc) {
+                let from = |finding: &crate::findings::Finding| match &finding.scope {
+                    crate::findings::FindingScope::AcceptedTransaction { from_seq, .. }
+                    | crate::findings::FindingScope::RpcRequest { from_seq, .. } => *from_seq,
+                };
+                report.findings.sort_by(|a, b| {
+                    from(b)
+                        .cmp(&from(a))
+                        .then_with(|| a.finding_id.cmp(&b.finding_id))
+                });
+            }
+            for finding in &mut report.findings {
+                if let Some(window) = &mut finding.observation_window {
+                    window.complete_for_selected_records &=
+                        report.complete && cursor.state != super::JournalState::Interrupted;
+                }
+            }
             response
                 .view
                 .evidence_gaps
@@ -363,6 +357,11 @@ impl JournalReader {
                     }
                 }
             }
+            if request.operation == Operation::Findings
+                && let Some(id) = &request.arguments.scope.finding_id
+            {
+                report.findings.retain(|finding| &finding.finding_id == id);
+            }
             analysis = Some(report);
         }
         let selected = Selection::new(
@@ -375,7 +374,7 @@ impl JournalReader {
             let report = analysis.as_ref().expect("Findings was evaluated");
             response.result = json!({"items":[],"analysis":{"findings":if report.complete{"performed"}else{"operational_limit"},"rules":report.rules}});
             let start = usize::try_from(cursor.position).map_err(|_| Error::cursor())?;
-            if start > report.findings.len() {
+            if start > report.findings.len() && request.arguments.cursor.is_some() {
                 return Err(Error::cursor());
             }
             let mut items = Vec::new();
@@ -399,6 +398,7 @@ impl JournalReader {
                         "supporting_events",
                         "evidence_arguments",
                         "limitations",
+                        "observation_window",
                     ]
                     .contains(&key.as_str())
                         || request.arguments.fields.contains(key)
@@ -500,8 +500,13 @@ impl JournalReader {
             response.result = result;
         } else {
             let sql = format!(
-                "{cte} SELECT q.event_seq FROM q WHERE {} ORDER BY q.event_seq LIMIT ?",
-                selected.sql
+                "{cte} SELECT q.event_seq FROM q WHERE {} ORDER BY q.event_seq {} LIMIT ?",
+                selected.sql,
+                if request.arguments.order == Some(query::Order::Desc) {
+                    "DESC"
+                } else {
+                    "ASC"
+                }
             );
             let mut values = selected.values;
             values.push(SqlValue::Integer(i64::from(request.arguments.limit) + 1));

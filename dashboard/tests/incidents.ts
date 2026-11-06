@@ -23,9 +23,15 @@ function encode(bytes: Buffer) {
   }
   return value;
 }
-async function rpc(address: string, method: string, params: unknown[] = []) {
+async function rpc(
+  address: string,
+  method: string,
+  params: unknown[] = [],
+  signal?: AbortSignal,
+) {
   const response = await fetch(`http://${address}`, {
     method: "POST",
+    signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
@@ -33,7 +39,25 @@ async function rpc(address: string, method: string, params: unknown[] = []) {
   if (value.error) throw new Error(`Fixture RPC ${method} failed`);
   return value.result;
 }
-export async function incident(address: string, seed: number) {
+export function signerAddress(seed: number) {
+  const key = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from("302e020100300506032b657004220420", "hex"),
+      Buffer.alloc(32, seed),
+    ]),
+    format: "der",
+    type: "pkcs8",
+  });
+  return encode(
+    createPublicKey(key).export({ format: "der", type: "spki" }).subarray(-32),
+  );
+}
+export async function incident(
+  address: string,
+  seed: number,
+  followup = true,
+  timeoutMs?: number,
+) {
   const blockhash = (await rpc(address, "getLatestBlockhash")).value
     .blockhash as string;
   const key = createPrivateKey({
@@ -59,15 +83,18 @@ export async function incident(address: string, seed: number) {
     );
   let responseLost = false;
   try {
-    await rpc(address, "sendTransaction", [
-      wire,
-      { encoding: "base64", skipPreflight: true },
-    ]);
+    await rpc(
+      address,
+      "sendTransaction",
+      [wire, { encoding: "base64", skipPreflight: true }],
+      timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+    );
   } catch {
     responseLost = true;
   }
   if (!responseLost) throw new Error("Expected real response withholding");
   const identity = encode(signature);
+  if (!followup) return identity;
   await rpc(address, "getSignatureStatuses", [[identity]]);
   if (
     (await rpc(address, "sendTransaction", [

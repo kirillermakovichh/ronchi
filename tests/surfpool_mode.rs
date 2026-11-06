@@ -151,6 +151,26 @@ fn real_native_backend_owns_all_rpc_and_cleanup_preserves_independent_listener()
     let account = bs58::encode([91u8; 32]).into_string();
     let balance = rpc(address, "getBalance", serde_json::json!([account]));
     assert!(balance.get("result").is_some(), "{balance}");
+    let discovery = rpc(
+        address,
+        "getProgramAccounts",
+        serde_json::json!(["11111111111111111111111111111111", {"encoding":"base64","withContext":true,"filters":[{"dataSize":0}]}]),
+    );
+    assert!(
+        discovery["result"]["context"]["slot"].is_number(),
+        "{discovery}"
+    );
+    assert!(discovery["result"]["value"].is_array(), "{discovery}");
+    let invalid = rpc(
+        address,
+        "getProgramAccounts",
+        serde_json::json!(["invalid-program-key"]),
+    );
+    assert!(invalid.get("error").is_some(), "{invalid}");
+    assert_eq!(
+        rpc(address, "getHealth", serde_json::json!([]))["result"],
+        "ok"
+    );
     let unsupported = p.run(&["case", "arm", "tx-confirmation-stalls"]);
     assert_eq!(unsupported.status.code(), Some(4), "{unsupported:?}");
     let stopped = p.ok(&["down"]);
@@ -256,6 +276,19 @@ fn real_execution_uses_explicit_snapshot_and_response_loss_never_restarts_identi
     );
     p.ok(&["case", "arm", "tx-response-lost", "--hold-ms", "200"]);
     lost_response(address, &wire);
+    let analysis = p.ok(&["investigate", "findings"]);
+    let base = analysis["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["rule_id"] == "tx-response-lost.surfpool-response-withheld")
+        .expect("native Surfpool withholding has a Finding before any lookup");
+    assert_eq!(base["scope"]["signature"], signature);
+    assert_eq!(base["observation_window"]["status_lookup_count"], 0);
+    assert_eq!(
+        p.ok(&["status"])["result"]["case_activity"]["applied_records"],
+        1
+    );
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let status = rpc(
@@ -273,6 +306,40 @@ fn real_execution_uses_explicit_snapshot_and_response_loss_never_restarts_identi
     assert_eq!(
         rpc(address, "getBalance", serde_json::json!([recipient]))["result"]["value"],
         1_000_000u64
+    );
+    let discovery = rpc(
+        address,
+        "getProgramAccounts",
+        serde_json::json!(["11111111111111111111111111111111", {"encoding":"base64","withContext":true,"dataSlice":{"offset":0,"length":0},"filters":[{"dataSize":0}]}]),
+    );
+    let accounts = discovery["result"]["value"]
+        .as_array()
+        .expect("context-wrapped program accounts");
+    assert!(
+        accounts
+            .iter()
+            .any(|a| a["pubkey"] == recipient && a["account"]["lamports"] == 1_000_000u64),
+        "{discovery}"
+    );
+    let filtered = rpc(
+        address,
+        "getProgramAccounts",
+        serde_json::json!(["11111111111111111111111111111111", {"encoding":"base64","filters":[{"dataSize":1}]}]),
+    );
+    assert!(
+        !filtered["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["pubkey"] == recipient)
+    );
+    let after_lookup = p.ok(&["investigate", "findings"]);
+    assert!(
+        after_lookup["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["rule_id"] == "tx-response-lost.lookup-after-withholding")
     );
     for _ in 0..2 {
         p.ok(&["case", "disarm"]);
@@ -645,9 +712,21 @@ fn real_status_cases_preserve_native_execution_and_first_observed_finality() {
         transaction["result"].is_object(),
         "no status snapshot exists yet: {transaction}"
     );
-    let first =
-        rpc(address, "getSignatureStatuses", json!([[stale]]))["result"]["value"][0].clone();
-    assert!(first.is_object());
+    // Native account execution and transaction lookup can precede Surfpool's status-cache entry.
+    // Capture the first actually observed status, rather than assuming those surfaces update together.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let first = loop {
+        let response = rpc(address, "getSignatureStatuses", json!([[stale]]));
+        let status = response["result"]["value"][0].clone();
+        if status.is_object() {
+            break status;
+        }
+        assert!(
+            response.get("error").is_none() && Instant::now() < deadline,
+            "native status unavailable: {response}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    };
     let again = rpc(
         address,
         "getSignatureStatuses",
@@ -802,3 +881,16 @@ fn blockhash_cli_setting_selects_the_shared_commitment_policy() {
 
 #[path = "cases/custom_native.rs"]
 mod custom_cases;
+
+#[tokio::test]
+async fn program_account_discovery_can_be_prepared_for_the_owned_backend() {
+    let params = serde_json::json!(["11111111111111111111111111111111", {
+        "encoding":"base64", "withContext":true,
+        "filters":[{"dataSize":752},{"memcmp":{"offset":400,"bytes":"11111111111111111111111111111111"}}]
+    }]);
+    let prepared = ronchi::backend::prepare("getProgramAccounts", &params)
+        .await
+        .unwrap();
+    assert_eq!(prepared.params, params);
+    assert!(prepared.signed.is_none());
+}

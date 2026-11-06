@@ -20,7 +20,9 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 pub struct Control {
+    pub started: std::time::Instant,
     pub browser: crate::dashboard::Sessions,
+    pub sockets: crate::dashboard::socket::Hub,
     pub writer: crate::journal::WriterHandle,
     pub queries: crate::query::Engine,
     pub journal_path: std::path::PathBuf,
@@ -28,7 +30,6 @@ pub struct Control {
     pub token: String,
     pub stop: mpsc::Sender<bool>,
     pub cases: Arc<RwLock<Option<crate::rpc::Rpc>>>,
-    pub checks: Arc<RwLock<Option<crate::checks::Client>>>,
 }
 impl Control {
     pub fn snapshot(&self) -> Manifest {
@@ -50,6 +51,21 @@ impl Control {
         }
         let status = self.writer.status();
         manifest.snapshot_seq = status.snapshot_seq;
+        manifest.case_activity = status.case_activity;
+        let mut traffic = status.rpc_traffic;
+        traffic.running = status.health == crate::journal::WriterHealth::Healthy
+            && matches!(
+                manifest.state,
+                crate::lab::Lifecycle::Starting
+                    | crate::lab::Lifecycle::Ready
+                    | crate::lab::Lifecycle::Stopping
+            );
+        if traffic.running {
+            traffic.observed_elapsed_ns = traffic
+                .observed_elapsed_ns
+                .max(self.started.elapsed().as_nanos().min(i64::MAX as u128) as u64);
+        }
+        manifest.rpc_traffic = Some(traffic);
         if status.health == crate::journal::WriterHealth::Failed {
             manifest.health = "failed".into();
         }
@@ -123,37 +139,7 @@ async fn down(
 }
 pub fn router(control: Control) -> Router {
     let browser = Router::new()
-        .route("/ui/{id}/api/status", get(status))
-        .route("/ui/{id}/api/cases", get(case_list))
-        .route(
-            "/ui/{id}/api/case/arm",
-            post(case_arm).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
-        )
-        .route(
-            "/ui/{id}/api/case/validate",
-            post(case_validate).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
-        )
-        .route(
-            "/ui/{id}/api/case/disarm",
-            post(case_disarm).layer(axum::extract::DefaultBodyLimit::max(4096)),
-        )
-        .route(
-            "/ui/{id}/api/checks/observe",
-            post(check_observe).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
-        )
-        .route(
-            "/ui/{id}/api/check-collections/{collection}",
-            get(check_status),
-        )
-        .route(
-            "/ui/{id}/api/check-collections/{collection}/cancel",
-            post(check_cancel),
-        )
-        .route("/ui/{id}/api/checks/evaluate", post(evaluate))
-        .route("/ui/{id}/api/investigate", post(investigate))
-        .layer(axum::extract::DefaultBodyLimit::max(
-            crate::query::MAX_REQUEST_BYTES,
-        ))
+        .route("/ui/{id}/socket", get(crate::dashboard::socket::live))
         .layer(axum::middleware::from_fn_with_state(
             control.clone(),
             crate::dashboard::authenticate,
@@ -168,18 +154,6 @@ pub fn router(control: Control) -> Router {
         .route("/v1/labs/{id}/status", get(status))
         .route("/v1/labs/{id}/down", post(down))
         .route(
-            "/v1/labs/{id}/checks/observe",
-            post(check_observe).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
-        )
-        .route(
-            "/v1/labs/{id}/check-collections/{collection}",
-            get(check_status),
-        )
-        .route(
-            "/v1/labs/{id}/check-collections/{collection}/cancel",
-            post(check_cancel),
-        )
-        .route(
             "/v1/labs/{id}/case/arm",
             post(case_arm).layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
         )
@@ -190,12 +164,6 @@ pub fn router(control: Control) -> Router {
         .route("/v1/labs/{id}/case/disarm", post(case_disarm))
         .route("/v1/labs/{id}/cases", get(case_list))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
-        .route(
-            "/v1/labs/{id}/checks/evaluate",
-            post(evaluate).layer(axum::extract::DefaultBodyLimit::max(
-                crate::query::MAX_REQUEST_BYTES,
-            )),
-        )
         .route(
             "/v1/labs/{id}/investigate",
             post(investigate).layer(axum::extract::DefaultBodyLimit::max(
@@ -306,7 +274,7 @@ fn case_failure(id: String, error: LabError) -> (StatusCode, Json<serde_json::Va
         Json(serde_json::json!({"contract_version":1,"lab_id":id,"error":details})),
     )
 }
-async fn case_apply(
+pub(crate) async fn case_apply(
     control: Control,
     id: String,
     headers: HeaderMap,
@@ -329,6 +297,7 @@ async fn case_apply(
         Some(args) => rpc.arm_case(args).await,
         None => rpc.disarm_case().await,
     };
+    control.sockets.notify();
     Ok(match result {
         Ok(binding) => (
             StatusCode::OK,
@@ -339,10 +308,10 @@ async fn case_apply(
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CustomValidation {
+pub(crate) struct CustomValidation {
     yaml: String,
 }
-async fn case_validate(
+pub(crate) async fn case_validate(
     State(control): State<Control>,
     Path(id): Path<String>,
     headers: HeaderMap,
@@ -576,13 +545,8 @@ pub async fn query_request(
     let request = hyper::Request::builder()
         .method("POST")
         .uri(format!(
-            "http://{address}/v1/labs/{}/{}",
-            manifest.lab_id,
-            if request.operation == crate::query::Operation::Evaluate {
-                "checks/evaluate"
-            } else {
-                "investigate"
-            }
+            "http://{address}/v1/labs/{}/investigate",
+            manifest.lab_id
         ))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
@@ -620,246 +584,4 @@ pub async fn query_request(
         result=tokio::time::timeout(std::time::Duration::from_secs(10),future)=>result.map_err(|_|Error::new("deadline_exceeded","Investigation control deadline exceeded"))?,
         _=cancel.cancelled()=>Err(Error::new("cancelled","Investigation cancelled; the Lab keeps running"))
     }
-}
-
-fn check_failure(
-    id: &str,
-    request_id: &str,
-    collection_id: Option<String>,
-    error: crate::checks::Error,
-) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(
-            serde_json::to_value(crate::checks::Failure {
-                contract_version: 1,
-                request_id: request_id.into(),
-                lab_id: Some(id.into()),
-                collection_id,
-                error,
-            })
-            .expect("typed Check error serializes"),
-        ),
-    )
-}
-fn check_client(control: &Control) -> Result<crate::checks::Client, crate::checks::Error> {
-    control
-        .checks
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-        .ok_or_else(crate::checks::Error::invalid)
-}
-async fn check_observe(
-    State(control): State<Control>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    args: Result<Json<crate::checks::Request>, axum::extract::rejection::JsonRejection>,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    authorize(&control, &id, &headers)?;
-    let Ok(Json(request)) = args else {
-        return Ok(check_failure(
-            &id,
-            "unparsed",
-            None,
-            crate::checks::Error::invalid(),
-        ));
-    };
-    let collection = Some(request.arguments.collection_id.clone());
-    if request.contract_version != 1
-        || request.operation != "check.observe"
-        || request.lab_id != id
-        || !crate::workspace::identifier(&request.request_id)
-    {
-        return Ok(check_failure(
-            &id,
-            &request.request_id,
-            collection,
-            crate::checks::Error::invalid(),
-        ));
-    }
-    if control.snapshot().state != crate::lab::Lifecycle::Ready {
-        return Ok(check_failure(
-            &id,
-            &request.request_id,
-            collection,
-            crate::checks::Error::new("state_conflict", "none"),
-        ));
-    }
-    let result = match check_client(&control) {
-        Ok(client) => client.start(request.arguments).await,
-        Err(error) => Err(error),
-    };
-    Ok(match result {
-        Ok(report) => (
-            StatusCode::OK,
-            Json(
-                serde_json::to_value(crate::checks::Reply {
-                    contract_version: 1,
-                    request_id: request.request_id,
-                    lab_id: id,
-                    result: report,
-                })
-                .expect("typed Check reply serializes"),
-            ),
-        ),
-        Err(error) => check_failure(&id, &request.request_id, collection, error),
-    })
-}
-async fn check_status(
-    State(control): State<Control>,
-    Path((id, collection)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    authorize(&control, &id, &headers)?;
-    check_action(control, id, collection, false).await
-}
-async fn check_cancel(
-    State(control): State<Control>,
-    Path((id, collection)): Path<(String, String)>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    authorize(&control, &id, &headers)?;
-    if !body.is_empty()
-        && serde_json::from_slice::<serde_json::Value>(&body).ok() != Some(serde_json::json!({}))
-    {
-        return Ok(check_failure(
-            &id,
-            &collection,
-            Some(collection.clone()),
-            crate::checks::Error::invalid(),
-        ));
-    }
-    check_action(control, id, collection, true).await
-}
-async fn check_action(
-    control: Control,
-    id: String,
-    collection: String,
-    cancel: bool,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    if !crate::workspace::identifier(&collection) {
-        return Ok(check_failure(
-            &id,
-            "unparsed",
-            None,
-            crate::checks::Error::invalid(),
-        ));
-    }
-    let result = match check_client(&control) {
-        Ok(client) => {
-            if cancel {
-                client.cancel(collection.clone()).await
-            } else {
-                client.status(collection.clone()).await
-            }
-        }
-        Err(error) => Err(error),
-    };
-    Ok(match result {
-        Ok(report) => (
-            StatusCode::OK,
-            Json(
-                serde_json::to_value(crate::checks::Reply {
-                    contract_version: 1,
-                    request_id: collection,
-                    lab_id: id,
-                    result: report,
-                })
-                .expect("typed Check reply serializes"),
-            ),
-        ),
-        Err(error) => check_failure(&id, &collection, Some(collection.clone()), error),
-    })
-}
-
-/// One bounded authenticated collection control exchange; no transport retry.
-pub async fn check_request(
-    ws: &Workspace,
-    manifest: &Manifest,
-    start: Option<&crate::checks::Request>,
-    collection: &str,
-    cancel: bool,
-) -> Result<crate::checks::Reply, crate::checks::Error> {
-    use crate::checks::Error;
-    let token = crate::workspace::read_token(
-        &ws.lab(&manifest.lab_id)
-            .map_err(|_| Error::journal())?
-            .join("token"),
-    )
-    .map_err(|_| Error::journal())?;
-    let address = manifest
-        .control_address
-        .filter(|a| a.ip().is_loopback())
-        .ok_or_else(|| Error::new("lab_unavailable", "unknown"))?;
-    let (method, suffix, body) = if let Some(request) = start {
-        (
-            "POST",
-            "checks/observe".to_string(),
-            serde_json::to_vec(request).map_err(|_| Error::invalid())?,
-        )
-    } else if cancel {
-        (
-            "POST",
-            format!("check-collections/{collection}/cancel"),
-            b"{}".to_vec(),
-        )
-    } else {
-        ("GET", format!("check-collections/{collection}"), Vec::new())
-    };
-    let request = hyper::Request::builder()
-        .method(method)
-        .uri(format!(
-            "http://{address}/v1/labs/{}/{suffix}",
-            manifest.lab_id
-        ))
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Full::new(Bytes::from(body)))
-        .map_err(|_| Error::invalid())?;
-    let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
-        .pool_max_idle_per_host(0)
-        .build_http();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        let response = client
-            .request(request)
-            .await
-            .map_err(|_| Error::new("lab_unavailable", "unknown"))?;
-        let status = response.status();
-        let bytes = Limited::new(response.into_body(), 32 * 1024)
-            .collect()
-            .await
-            .map_err(|_| Error::journal())?
-            .to_bytes();
-        if status.is_success() {
-            serde_json::from_slice(&bytes).map_err(|_| Error::journal())
-        } else {
-            Err(serde_json::from_slice::<crate::checks::Failure>(&bytes)
-                .map_err(|_| Error::new("lab_unavailable", "unknown"))?
-                .error)
-        }
-    })
-    .await
-    .map_err(|_| Error::new("lab_unavailable", "unknown"))?
-}
-
-async fn evaluate(
-    State(control): State<Control>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    args: Result<Json<crate::query::Request>, axum::extract::rejection::JsonRejection>,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    authorize(&control, &id, &headers)?;
-    if args
-        .as_ref()
-        .is_ok_and(|Json(request)| request.operation != crate::query::Operation::Evaluate)
-    {
-        return Ok(query_failure(
-            &id,
-            "unparsed",
-            crate::query::Error::invalid("This route requires check.evaluate"),
-        ));
-    }
-    investigate(State(control), Path(id), headers, args).await
 }

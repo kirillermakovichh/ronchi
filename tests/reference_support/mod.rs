@@ -139,7 +139,6 @@ impl Lab {
         Relayer {
             address: ready["result"]["listen"].as_str().unwrap().parse().unwrap(),
             child,
-            ready,
             output,
         }
     }
@@ -174,7 +173,6 @@ pub fn command(project: &Path, args: &[&str]) -> Value {
 pub struct Relayer {
     pub address: SocketAddr,
     pub child: Child,
-    pub ready: Value,
     pub output: BufReader<std::process::ChildStdout>,
 }
 impl Relayer {

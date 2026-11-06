@@ -1,450 +1,168 @@
-import { test, expect, type Page } from "@playwright/test";
-async function journal(page: Page) {
-  await page
-    .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("button", { name: "Traffic", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Journal records", exact: true })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Journal", exact: true }),
-  ).toBeVisible();
-}
-async function checks(page: Page) {
-  await page
-    .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("button", { name: "Checks", exact: true })
-    .click();
-}
-
-import { createServer } from "node:http";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-const binary = resolve("../target/debug/ronchi");
-function cli(project: string, ...args: string[]) {
-  try {
-    return JSON.parse(
-      execFileSync(binary, ["--project", project, "--json", ...args], {
-        encoding: "utf8",
-      }),
-    );
-  } catch (error) {
-    const e = error as { stdout?: Buffer; stderr?: Buffer };
-    throw new Error(
-      `CLI ${args.join(" ")} failed: ${String(e.stdout)} ${String(e.stderr)}`,
-    );
-  }
-}
-async function source() {
-  let calls = 0;
-  const listeners = new Set<() => void>();
-  const text = "я🧪".repeat(1500);
-  const server = createServer((req, res) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += String(chunk);
-      if (body.length > 16384) req.destroy();
-    });
-    req.on("end", () => {
-      const invocation = JSON.parse(body);
-      calls++;
-      for (const notify of listeners) notify();
-      const response = JSON.stringify({
-        contract_version: 1,
-        invocation_id: invocation.invocation_id,
-        source: "independent",
-        schema_version: 1,
-        observed_at: "2026-11-03T00:00:00Z",
-        revision: `r${calls}`,
-        facts: {
-          text: { availability: "available", value: text },
-          big: { availability: "available", value: "EXACT_INTEGER" },
-        },
-      }).replace('"EXACT_INTEGER"', "9007199254740993");
-      res.setHeader("content-type", "application/json");
-      res.end(response);
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address() as { port: number };
-  return {
-    url: `http://127.0.0.1:${address.port}/observe`,
-    text,
-    calls: () => calls,
-    wait(count: number, ms = 5000) {
-      return new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          listeners.delete(check);
-          reject(
-            new Error(`Expected ${count} source calls, observed ${calls}`),
-          );
-        }, ms);
-        function check() {
-          if (calls >= count) {
-            clearTimeout(timer);
-            listeners.delete(check);
-            resolve();
-          }
-        }
-        listeners.add(check);
-        check();
-      });
-    },
-    async close() {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
-  };
-}
-
-test("public collection cancels on confirmed status and Unicode payload follows byte offsets", async ({
-  page,
-}) => {
-  const project = mkdtempSync(join(tmpdir(), "ronchi-payload-")),
-    app = await source();
-  let id: string | undefined;
-  try {
-    mkdirSync(join(project, "ronchi"));
-    writeFileSync(
-      join(project, "ronchi/config.toml"),
-      `schema_version=1\n[[checks.sources]]\ncheck_id='state'\nversion=1\nsource='independent'\nschema_version=1\nurl='${app.url}'\n[checks.sources.facts.text]\ntype='string'\nmax_bytes=20000\n[checks.sources.facts.big]\ntype='integer'\n`,
-    );
-    id = cli(
-      project,
-      "up",
-      "--detach",
-      "--rpc-listen",
-      "127.0.0.1:0",
-      "--control-listen",
-      "127.0.0.1:0",
-    ).result.lab_id;
-    await page.goto(cli(project, "dashboard").result.launch_url);
-    await expect(
-      page.getByRole("heading", { name: "Lab overview", exact: true }),
-    ).toBeVisible();
-    expect(app.calls()).toBe(0);
-    await journal(page);
-    await page.getByRole("button", { name: /^#/ }).first().click(); // UI polling is pinned; server work remains independent.
-    await checks(page);
-    await page.getByLabel("Intent identity", { exact: true }).fill("W1");
-    await page.getByLabel("Explicit bounded polling (60 seconds)").check();
-    let submissions = 0;
-    await page.route("**/api/checks/observe", async (route) => {
-      submissions++;
-      const response = await route.fetch();
-      expect(response.ok()).toBe(true);
-      await route.abort("failed");
-    });
-    await page
-      .getByRole("button", { name: "Collect observations", exact: true })
-      .click();
-    await expect(page.locator(".collection-result")).toContainText(
-      "outcome_unknown",
-    );
-    await expect(page.locator(".controls [role=alert]")).toBeVisible();
-    await page.getByRole("button", { name: "Inspect Lab status" }).click();
-    await expect(
-      page.getByText("Current public Lab status", { exact: true }),
-    ).toBeVisible();
-    await app.wait(2);
-    expect(submissions).toBe(1);
-    await page
-      .getByRole("button", { name: "Refresh collection status" })
-      .click();
-    await expect(page.locator(".collection-result")).toContainText(
-      '"status": "running"',
-    );
-    await page
-      .getByRole("button", { name: "Cancel collection", exact: true })
-      .click();
-    await expect
-      .poll(async () => {
-        await page
-          .getByRole("button", { name: "Refresh collection status" })
-          .click();
-        return await page.locator(".controls pre").first().textContent();
-      })
-      .toContain('"status": "cancelled"');
-    const count = app.calls();
-    await expect(app.wait(count + 1, 2200)).rejects.toThrow("Expected");
-    await expect(
-      page.getByLabel("Explicit Check evaluation"),
-    ).not.toBeVisible();
-    const observations = cli(
-      project,
-      "investigate",
-      "timeline",
-      "--kind",
-      "check.observation",
-    );
-    const event = observations.result.items[0].event_ref.event_seq,
-      snapshot = observations.view.snapshot_seq;
-    await page.goto(
-      cli(
-        project,
-        "dashboard",
-        "--selection",
-        `snapshot=${snapshot}&event=${event}`,
-      ).result.launch_url,
-    );
-    await expect(
-      page.getByRole("button", { name: "Load raw payload preview" }),
-    ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Load raw payload preview" })
-      .click();
-    let all = "",
-      offset = 0;
-    for (let chunks = 0; chunks < 10; chunks++) {
-      await expect
-        .poll(async () => {
-          const value = JSON.parse(
-            (await page
-              .getByLabel("Payload response JSON", { exact: true })
-              .textContent()) ?? "{}",
-          );
-          return value.items?.[0]?.payload?.offset;
-        })
-        .toBe(offset);
-      const value = JSON.parse(
-          (await page
-            .getByLabel("Payload response JSON", { exact: true })
-            .textContent()) ?? "{}",
-        ),
-        payload = value.items[0].payload;
-      expect(value.items[0].event_ref).toEqual({
-        lab_id: id,
-        event_seq: event,
-      });
-      all += payload.preview;
-      if (payload.next_offset === null) {
-        await expect(
-          page.getByRole("button", { name: "Next payload chunk" }),
-        ).toHaveCount(0);
-        break;
-      }
-      expect(payload.next_offset).toBe(
-        offset + Buffer.byteLength(payload.preview),
-      );
-      offset = payload.next_offset;
-      const next = page.getByRole("button", { name: "Next payload chunk" });
-      await next.evaluate((button: HTMLButtonElement) => {
-        button.click();
-        button.click();
-      });
-    }
-    expect(all).toContain(app.text);
-    expect(all).toContain("9007199254740993");
-    expect(all).not.toContain("�");
-  } finally {
-    if (id) cli(project, "--lab-id", id, "down", "--force");
-    await app.close();
-    rmSync(project, { recursive: true, force: true });
-  }
-});
-
-test("obsolete native reads cannot replace a new scope and UI polling preserves focus", async ({
-  page,
-}) => {
-  const project = mkdtempSync(join(tmpdir(), "ronchi-reads-"));
-  let id: string | undefined;
-  let release: () => void = () => {};
-  try {
-    id = cli(
-      project,
-      "up",
-      "--detach",
-      "--rpc-listen",
-      "127.0.0.1:0",
-      "--control-listen",
-      "127.0.0.1:0",
-    ).result.lab_id;
-    await page.clock.install();
-    await page.goto(cli(project, "dashboard").result.launch_url);
-    await journal(page);
-    await expect(page.locator(".event")).toHaveCount(2);
-    await page.getByText("Filter this investigation", { exact: true }).click();
-    await page.getByText("More filters", { exact: true }).click();
-    let started: () => void = () => {};
-    const observed = new Promise<void>((r) => (started = r)),
-      barrier = new Promise<void>((r) => (release = r));
-    await page.route("**/api/investigate", async (route) => {
-      const request = route.request().postDataJSON();
-      if (
-        request.operation === "investigate.summary" &&
-        request.arguments.scope.kind?.[0] === "rpc.boundary"
-      ) {
-        const real = await route.fetch();
-        started();
-        await barrier;
-        try {
-          await route.fulfill({ response: real });
-        } catch {
-          /* browser cancelled the obsolete read */
-        }
-      } else await route.continue();
-    });
-    await page
-      .getByRole("textbox", { name: "kind", exact: true })
-      .fill("rpc.boundary");
-    await page.getByRole("button", { name: "Apply filters" }).click();
-    await observed;
-    await page
-      .getByText("Investigation context and recovery", { exact: true })
-      .click();
-    await page.getByText("Committed scope", { exact: true }).click();
-    await expect(
-      page
-        .locator(".summary details.raw")
-        .filter({ hasText: "Committed scope" })
-        .locator("pre"),
-    ).toHaveText("{}");
-    await page
-      .getByRole("textbox", { name: "kind", exact: true })
-      .fill("lab.ready");
-    await page.getByRole("button", { name: "Apply filters" }).click();
-    await expect(page.locator(".event")).toHaveCount(1);
-    await expect(page.locator(".event")).toContainText("lab.ready");
-    await expect(
-      page
-        .locator(".summary details.raw")
-        .filter({ hasText: "Committed scope" })
-        .locator("pre"),
-    ).toContainText("lab.ready");
-    release();
-    let polls = 0;
-    page.on("request", (request) => {
-      if (request.url().includes("/api/investigate")) polls++;
-    });
-    // Controlled visibility signal in a real Chromium page; HTTP responses remain native.
-    await page.evaluate(() =>
-      Object.defineProperty(document, "hidden", {
-        configurable: true,
-        value: true,
-      }),
-    );
-    await page.clock.runFor(8000);
-    expect(polls).toBe(0);
-    await page.evaluate(() =>
-      Object.defineProperty(document, "hidden", {
-        configurable: true,
-        value: false,
-      }),
-    );
-    const apply = page.getByRole("button", { name: "Apply filters" });
-    await apply.focus();
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Shift+Tab");
-    await page.clock.runFor(3000);
-    await expect.poll(() => polls).toBeGreaterThan(0);
-    await expect(page.locator(".event")).toHaveCount(1);
-    await expect(page.locator(".event")).toContainText("lab.ready");
-    await expect(apply).toBeFocused();
-    expect(polls).toBe(1);
-    expect(
-      await apply.evaluate((el) => getComputedStyle(el).outlineStyle),
-    ).not.toBe("none");
-    const home = new URL(page.url()).origin;
-    await page.goto(home);
-    await expect(
-      page.getByRole("heading", { name: "No Lab selected" }),
-    ).toBeVisible();
-    await page.goto(
-      cli(project, "dashboard", "--selection", "snapshot=2&event=99999").result
-        .launch_url,
-    );
-    await expect(page.locator("aside [role=alert]")).toContainText(
-      "unavailable",
-    );
-    expect(page.url()).toContain("event=99999"); // No implicit latest fallback.
-    await page
-      .getByRole("button", { name: "Refresh to latest snapshot" })
-      .click();
-    await expect(page.locator("aside [role=alert]")).toHaveCount(0);
-    // Native invalid watermark is an operational error; it cannot become a Verdict.
-    await page.goto(
-      cli(
-        project,
-        "dashboard",
-        "--selection",
-        "snapshot=9223372036854775807&event=1",
-      ).result.launch_url,
-    );
-    await expect(page.getByRole("alert").first()).toBeVisible();
-    await expect(page.getByLabel("Explicit Check evaluation")).toHaveCount(0);
-  } finally {
-    release();
-    if (id) cli(project, "--lab-id", id, "down", "--force");
-    rmSync(project, { recursive: true, force: true });
-  }
-});
-
-test("connection loss preserves the pinned view and offers exact retained recovery", async ({
+import { test, expect } from "@playwright/test";
+import { cli, project, up, clean } from "./helpers";
+test("widget controls preserve forms, layout and navigation", async ({
   page,
 }, info) => {
-  const project = mkdtempSync(join(tmpdir(), "ronchi-connection-"));
+  const path = project();
   let id: string | undefined;
   try {
-    id = cli(
-      project,
-      "up",
-      "--detach",
-      "--rpc-listen",
-      "127.0.0.1:0",
-      "--control-listen",
-      "127.0.0.1:0",
-    ).result.lab_id;
-    await page.goto(cli(project, "dashboard").result.launch_url);
-    await journal(page);
-    await page.getByRole("button", { name: /^#/ }).first().click();
+    const lab = up(path);
+    id = lab.lab_id;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(cli(path, "dashboard").result.launch_url);
     await expect(
-      page.getByRole("button", { name: "Load raw payload preview" }),
+      page.getByRole("button", { name: "Arm Case", exact: true }),
+    ).toBeEnabled();
+    await page.getByText("Custom Case", { exact: true }).click();
+    await page.getByLabel("Custom Case YAML").fill("remember this draft");
+    for (const widget of ["cases", "observations", "traffic", "inspector"])
+      await expect(page.locator(`[data-widget="${widget}"]`)).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: /Add widget|Hide |Collapse |Maximize /,
+      }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Lab", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Lab", exact: true }),
     ).toBeVisible();
-    const prefix = await page
-      .locator(".summary .section-title > span")
-      .textContent();
-    cli(project, "--lab-id", id, "down");
-    await expect(page.getByRole("alert").first()).toContainText("Connection", {
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "Workspace", exact: true })
+      .click();
+    await expect(page.getByLabel("Custom Case YAML")).toHaveValue(
+      "remember this draft",
+    );
+    await page.reload();
+    await expect(page.locator('[data-widget="observations"]')).toBeVisible();
+    await page
+      .getByRole("button", { name: "Reset layout", exact: true })
+      .click();
+    await expect(page.locator('[data-widget="observations"]')).toBeVisible();
+    await page.screenshot({ path: info.outputPath("workspace-laptop.png") });
+  } finally {
+    clean(path, id);
+  }
+});
+
+test("one WebSocket stays idle, resynchronizes and never replays a mutation after lost acknowledgement", async ({
+  page,
+}) => {
+  const path = project();
+  let id: string | undefined;
+  let calls = 0,
+    frames = 0;
+  const http: string[] = [];
+  let drop = false;
+  try {
+    const lab = up(path);
+    id = lab.lab_id;
+    await page.routeWebSocket("**/socket", (socket) => {
+      const server = socket.connectToServer();
+      let command: string | undefined;
+      socket.onMessage((message) => {
+        frames++;
+        const f = JSON.parse(String(message));
+        if (f.type === "call" && f.path === "api/case/arm") {
+          calls++;
+          command = f.id;
+        }
+        server.send(message);
+      });
+      server.onMessage((message) => {
+        const f = JSON.parse(String(message));
+        if (drop && f.type === "reply" && f.id === command) {
+          drop = false;
+          socket.close({ code: 1012, reason: "lost acknowledgement" });
+          server.close();
+        } else socket.send(message);
+      });
+    });
+    page.on("request", (r) => {
+      if (/\/(api|v1)\//.test(r.url())) http.push(r.url());
+    });
+    await page.goto(cli(path, "dashboard").result.launch_url);
+    await expect(
+      page.getByRole("button", { name: "Arm Case", exact: true }),
+    ).toBeEnabled();
+    const count = frames;
+    await page.waitForTimeout(700);
+    expect(frames).toBe(count);
+    drop = true;
+    await page.getByRole("button", { name: "Arm Case", exact: true }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "effects: unknown" }),
+    ).toBeVisible();
+    await expect(page.locator(".case-state")).toContainText("waiting", {
       timeout: 10000,
     });
-    expect(
-      await page.locator(".summary .section-title > span").textContent(),
-    ).toBe(prefix);
-    await expect(
-      page.getByRole("button", { name: "Load raw payload preview" }),
-    ).toBeVisible();
-    await page
-      .getByText("Investigation context and recovery", { exact: true })
-      .click();
-    await page
-      .getByText("Open this pinned selection after Lab stop", { exact: true })
-      .click();
-    await expect(
-      page.getByText(/dashboard --serve --lab-id/, { exact: false }).first(),
-    ).toContainText(id);
-    await expect(
-      page.getByText(/--selection/, { exact: false }).first(),
-    ).toContainText("event=");
-    await page.screenshot({
-      path: info.outputPath("connection-desktop.png"),
-      fullPage: true,
-    });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({
-      path: info.outputPath("connection-narrow.png"),
-      fullPage: true,
-    });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
+    expect(calls).toBe(1);
+    expect(http).toEqual([]);
   } finally {
-    if (id && cli(project, "--lab-id", id, "status").result.state === "ready")
-      cli(project, "--lab-id", id, "down", "--force");
-    rmSync(project, { recursive: true, force: true });
+    clean(path, id);
+  }
+});
+
+test("header drag, separator resizing and keyboard moves keep all widgets visible and persist", async ({
+  page,
+}, info) => {
+  const path = project();
+  let id: string | undefined;
+  try {
+    const lab = up(path);
+    id = lab.lab_id;
+    await page.setViewportSize({ width: 1500, height: 950 });
+    await page.goto(cli(path, "dashboard").result.launch_url);
+    await expect(
+      page.getByRole("button", { name: "Arm Case", exact: true }),
+    ).toBeEnabled();
+    const traffic = page.locator('[data-widget="traffic"]'),
+      inspector = page.locator('[data-widget="inspector"]');
+    const before = await traffic.boundingBox(),
+      from = await traffic.locator(".widget-head").boundingBox(),
+      to = await inspector.locator(".widget-head").boundingBox();
+    if (!from || !to || !before) throw new Error("Missing header");
+    await page.mouse.move(from.x + 80, from.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(to.x + to.width / 2, to.y + 20, { steps: 20 });
+    await expect(page.locator(".widget.drop-target")).toHaveCount(1);
+    await page.mouse.up();
+    await expect
+      .poll(async () => Math.round((await traffic.boundingBox())!.x))
+      .not.toBe(Math.round(before.x));
+    const separator = page.getByRole("separator", {
+        name: "Resize Right column",
+        exact: true,
+      }),
+      sep = await separator.boundingBox(),
+      width = (await traffic.boundingBox())!.width;
+    if (!sep) throw new Error("Missing resize separator");
+    await page.mouse.move(sep.x + sep.width / 2, sep.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(sep.x - 80, sep.y + 120, { steps: 10 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await traffic.boundingBox())!.width)
+      .toBeGreaterThan(width + 40);
+    const after = await traffic.boundingBox();
+    await page.reload();
+    await expect
+      .poll(async () => Math.round((await traffic.boundingBox())!.width))
+      .toBe(Math.round(after!.width));
+    for (const widget of ["cases", "observations", "traffic", "inspector"])
+      await expect(page.locator(`[data-widget="${widget}"]`)).toBeVisible();
+    await page
+      .getByRole("button", { name: "Move Traffic", exact: true })
+      .focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect
+      .poll(async () => Math.round((await traffic.boundingBox())!.x))
+      .toBeLessThan(Math.round(after!.x));
+    await page.screenshot({ path: info.outputPath("workspace-dragged.png") });
+  } finally {
+    clean(path, id);
   }
 });

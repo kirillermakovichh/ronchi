@@ -1,219 +1,150 @@
-# Development stack
+# Development
 
-Status: selected stack. The native CLI package is implemented; the task queue records runtime progress.
-[ADR-0019](adr/0019-resource-efficient-rust-core.md) owns the native runtime decision.
-This document owns the initial build tools and supporting technology choices.
-The [development queue](../tasks/todo.md) owns implementation order.
+This document owns build tools, source layout and verification commands.
+[ADR-0019](adr/0019-resource-efficient-rust-core.md) records the native architecture.
+Product behavior belongs to the [topic contracts](README.md), not this build guide.
 
-## Rust application
+## Toolchain and stack
 
-Use Rust 1.99.0 stable with edition 2024.
-The project [toolchain file](../rust-toolchain.toml) pins the compiler, rustfmt, and Clippy.
-Start with one Cargo package containing a library and the `ronchi` binary.
-Keep runtime modules in that package; introduce more crates only when a concrete dependency or reuse need warrants them.
-Commit `Cargo.lock` when task 1 creates the package.
-Resolve and lock compatible dependency versions when each slice first uses them.
-An unresolved application lockfile is implementation work, not a missing stack decision.
+Rust 1.99.0 stable, edition 2024, rustfmt and Clippy are pinned in [rust-toolchain.toml](../rust-toolchain.toml).
+Use a platform C compiler/linker for the native build and bundled SQLite.
+The project is one Cargo package with a library and the `ronchi` executable.
+Commit and preserve the existing Cargo and npm lockfiles when changing dependencies.
 
-| Area | Selected technology |
+| Area | Technology |
 | --- | --- |
-| Async runtime and cancellation | Tokio and `tokio-util` |
-| HTTP JSON-RPC data path | Hyper, `hyper-util`, `http-body-util` |
-| Outbound HTTPS | Rustls through `hyper-rustls` |
-| Loopback control and dashboard serving | Axum |
-| Journal and reference database | `rusqlite` with bundled SQLite; WAL and a dedicated writer |
-| CLI | `clap` |
-| Human foreground terminal | `console` styles/width and Tokio-driven `indicatif` redraws; no raw mode |
-| Local MCP | Official `rmcp` |
-| Typed JSON and configuration | `serde`, `serde_json`, `toml` |
-| Custom Case parsing | `yaml-rust2` with the bounded YAML subset enforced by Ronchi validation |
-| Typed errors and diagnostics | `thiserror`, `tracing`, `tracing-subscriber` |
-| Embedded dashboard files | `include_bytes!` over built assets; generate an asset map during packaging |
+| Async runtime and cancellation | Tokio, tokio-util |
+| RPC transport | Hyper, hyper-util, http-body-util |
+| Outbound HTTPS | hyper-rustls / Rustls |
+| Loopback control and dashboard server | Axum |
+| Journal and reference storage | rusqlite with bundled SQLite; WAL and dedicated owners |
+| CLI and foreground panel | clap, console, indicatif |
+| Local MCP | Official rmcp 3.8.0 |
+| JSON, configuration, errors | serde, serde_json, toml, schemars, thiserror |
+| Custom Cases | yaml-rust2 with Ronchi's bounded subset |
+| Solana formats and signatures | Pinned modular protocol crates behind src/protocol |
+| Dashboard | Solid, strict TypeScript, Vite, ordinary CSS |
+| Lists and layout | TanStack Virtual, CSS Grid, Solid DnD |
+| Frontend verification | Vitest, Testing Library, Playwright / Chromium |
 
-Use modular Solana/Agave protocol crates behind the protocol module.
-Verify and lock the required versions against the full accepted [format and lifetime contract](product/solana-rpc-contract.md#transaction-formats-and-encodings).
-A dependency's unsupported existing format remains an implementation gap; it does not narrow product scope.
-Keep Surfpool optional and pin its verified native artifact when its implementation slice starts.
-Neither Solana CLI tools nor Surfpool is required to start the core package.
+Node.js and npm are build/test tools. The executable embeds compiled assets with `include_bytes!`.
+A released Lab needs no Node process, frontend directory, Docker, Solana CLI or validator.
+Surfpool is an optional separately managed native executable.
+Keep Rust dependencies and protocol versions pinned against the [RPC compatibility contract](product/solana-rpc-contract.md#transaction-formats-and-encodings).
+Do not add workers, Wasm, a second renderer, a grid engine or more crates without a demonstrated need.
+No comparative frontend benchmark or public platform-support matrix has been established.
 
-## Dashboard
+## Build and run
 
-Use React, TypeScript in strict mode, and Vite under `dashboard/`.
-Use npm and commit `package-lock.json` when creating the dashboard package.
-Use ordinary CSS, CSS custom properties, and SVG for the first interface.
-Start with React state and the browser Fetch API; add a state or component library only for a demonstrated need.
-Follow the accepted [visual direction](product/positioning-and-brand.md#visual-identity) and [interface contract](product/investigation-interfaces.md#first-dashboard).
-Build static assets before embedding them into the Rust executable.
-Node.js and npm are development/build tools; the delivered executable serves the embedded files.
-Run the frontend build before Cargo in a fresh checkout. Rebuild it after frontend source changes.
-
-## Verification tools
-
-Use Rust's test harness and Tokio tests for core behavior.
-Use temporary file-backed SQLite databases and actual subprocesses where persistence or ownership matters.
-Use Vitest and Testing Library for dashboard logic and Playwright for focused browser flows.
-Use the Cargo checks in the [task queue](../tasks/todo.md#working-rules).
-Do not require Docker, a public RPC, a validator, or a faucet for initial core tests.
-
-## Local prerequisite check
-
-The development host has Rust 1.99.0, Cargo, rustfmt, Clippy, and an Apple C compiler/linker installed.
-It also has Node.js 25.5.0 and npm 11.8.0 available for dashboard work.
-These observations concern this host; they are not a public platform-support matrix or a dependency compatibility result.
-The pinned compiler successfully built and ran a temporary edition-2024 program through the local linker.
-Package initialization creates and verifies the application lockfiles.
-The native package and application lockfile now exist.
-Task 1 in the queue records the application build and process checks.
-
-## Dashboard build and launch
-
-Build the frontend before every native build that must include changed assets:
+From the repository root:
 
 ```bash
 npm --prefix dashboard ci
-npm --prefix dashboard run typecheck
-npm --prefix dashboard test -- --run
 npm --prefix dashboard run build
 cargo build --locked
-npm --prefix dashboard exec -- playwright install chromium
+./target/debug/ronchi up
+```
+
+Build the frontend before each native build that must include UI changes.
+Cargo reads only the completed `dashboard/dist` tree; it never runs npm or Vite.
+A missing `index.html` produces a build instruction. Unknown asset paths return 404.
+
+```bash
+cargo build --release --locked
+./target/release/ronchi up
+```
+
+The running process keeps its existing binary and assets. Restart the selected Lab to load a new build.
+See [workflows](product/workflows.md) for backend connection and [dashboard access](product/dashboard.md#access-and-retained-viewing) for live and retained links.
+
+## Verification
+
+Run checks that cover the changed behavior. Use temporary projects and exact Lab IDs for lifecycle tests.
+Never stop or overwrite user Labs to make a test pass.
+Persistence and recovery require real file-backed databases or processes; compilation is not durability evidence.
+
+```bash
+cargo fmt --check
+cargo check --locked
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+npm --prefix dashboard run typecheck
+npm --prefix dashboard test -- --run
+npm --prefix dashboard run format:check
+npm --prefix dashboard run build
+cargo build --locked
 npm --prefix dashboard run test:browser
 ```
 
-The browser suite starts the real native executable in an empty temporary project.
-`RONCHI_CHROMIUM=/absolute/path/to/chromium` selects an existing Chromium executable for that suite.
-The default uses Playwright's matching installed Chromium.
-Inspect screenshots under `dashboard/test-results/` after browser tests.
-Do not commit these screenshots or reports.
+Install Playwright's matching Chromium once with `npm --prefix dashboard exec -- playwright install chromium`.
+`RONCHI_CHROMIUM=/absolute/path/to/chromium` selects an existing executable.
+Browser tests launch the real binary in disposable projects. Review screenshots in `dashboard/test-results` after visual changes.
+Desktop/laptop layouts are primary; narrow layout receives basic handling.
+Screenshots, reports, research scratch files and local runtime artifacts are not committed.
 
-Cargo's build script embeds only files from the completed `dashboard/dist` build.
-It fails with a build instruction if `index.html` is absent.
-It never runs npm or Vite.
-The executable requires no frontend files or Node process at runtime.
-Unknown static files return 404; API errors do not fall back to HTML.
+Browser tests cover live episodes, actual retained replies, retained viewing, layout editing and reconnect without mutation replay.
+Unit/model tests cover exact integers, transport ownership and all maintained Observation families.
+Controlled DTO tests do not establish every native failure lifecycle. Recorded historical checks are not claims about unrun current tests.
+The Rust dashboard suite also checks viewer stdout closure, released listeners and unchanged Journal bytes.
+The [normal-down observation](../tasks/history/unconfirmed-down-observation.md) is unconfirmed; preserve its original result if it recurs.
+No hidden retry or speculative lifecycle fix is part of that record.
 
-For a ready Lab, run `ronchi dashboard --lab-id <immutable-id>`.
-This finite command prints a launch URL and never opens a browser.
-`--json` returns a version-1 envelope.
-The fragment contains a reusable access key valid until this Lab stops.
-Every launch command for the same live Lab returns the same key.
-The browser removes that fragment before exchanging it for an HttpOnly, SameSite=Strict cookie.
-The server accepts that cookie until the Lab stops; it has no 30-minute timeout.
-The cookie has no Max-Age or Expires; browsers may discard it when their own session ends.
-Reopen the same Lab link to restore browser access.
-The Lab retains exactly one launch key and one distinct browser key after first launch.
-Opening more tabs or browser contexts does not grow an authorization pool.
-A new Lab gets new keys even if its name or port is reused.
-Launch metadata reports `expires_in_seconds:null` and `expires_on:"lab_stop"`.
-Cookies have Lab- and port-specific names and Lab-specific paths.
-Browser API requests require the actual Host and same-origin browser context.
-Bearer control requests retain their existing authorization rules.
-Do not share launch URLs as evidence links.
-The dashboard's copy-link action omits tickets, credentials, and pagination cursors.
+### Optional native Surfpool verification
 
-The dashboard exposes live summary, bounded Timeline pages, pinned evidence, filters, and explicit payload previews.
-Case controls use the existing authenticated arm/disarm handlers.
-Check collection starts only on an explicit action.
-Collection status and cancellation use the Lab-owned collection lifecycle.
-Evaluation always sends the selected definition version and displayed snapshot.
-The browser displays the core Verdict; it has no evaluator.
-Unsafe JSON integer facts are displayed with their exact decimal representation as strings.
-The transport stops reading after 256 KiB.
-
-For retained evidence, run `ronchi dashboard --serve --lab-id <immutable-id>`.
-This foreground process binds an OS-selected loopback port and prints one readiness record.
-With `--json`, readiness is a version-1 envelope with `read_only:true`, a reusable launch URL, `expires_in_seconds:null`, and `expires_on:"viewer_stop"`.
-The retained viewer uses the same fixed-size access model; its keys last until that viewer exits.
-The process then waits until Ctrl-C or stdout pipe closure.
-It cancels readers and drains its owned connections within three seconds before forcing closure.
-It never starts a simulator, writer, source application, or relayer.
-It does not modify the Lab manifest.
-Its routes expose queries and evaluation only.
-It rejects live Labs; use the ordinary finite dashboard launch command for those.
-The viewer remains bound to the resolved immutable Lab even if another Lab reuses its name.
-A stopped header labels the old RPC address as recorded, not live.
-
-`up` includes an optional top-level `dashboard` launch object.
-The Demo includes `dashboard_launch` for a ready Lab and `dashboard_argv` for recovery or retained viewing.
-Ticket-capacity or launch transport failure does not undo a successful Lab startup or Demo.
-Run the exact-ID dashboard command for the Lab link if launch metadata is absent.
-No command opens a browser automatically.
-Closing the browser leaves the persistent Lab running.
-
-### Pinned dashboard links and Findings pages
-
-Summary exposes at most five Findings.
-`Next Findings` uses `investigate.findings` with five-item pages and an opaque cursor.
-The first continuation resolves the same first page to acquire its cursor.
-It then requests one next page.
-Later clicks request one page each; they never fetch all Findings.
-Changing scope or snapshot discards the incompatible continuation.
-A failed continuation keeps the previous valid page visible.
-
-Copied links retain the immutable Lab ID, snapshot, semantic scope, and selected event or Finding.
-They omit the bootstrap ticket, credentials, and cursor.
-Bootstrap removes only the ticket fragment.
-Integer coordinates retain the full signed SQLite integer range without conversion through an imprecise JavaScript number.
-Invalid or unavailable references display an error rather than selecting the latest snapshot.
-To move a bookmark to a new live session or retained endpoint, pass its query to the launch command:
-
-```bash
-ronchi dashboard --lab-id <id> --selection 'snapshot=42&event=7'
-ronchi dashboard --serve --lab-id <id> --selection 'snapshot=42&event=7'
-```
-
-The CLI rejects credential, cursor, unknown, and oversized selection fields before requesting a ticket or binding a viewer.
-A live endpoint does not survive Lab stop.
-The interface shows exact-ID retained viewer instructions for its current selection.
-
-### Dashboard cancellation and acceptance coverage
-
-UI polling and server Check collection have separate owners.
-Hiding the page pauses unnecessary UI reads; it does not cancel a collection.
-Changing filters or refreshing a snapshot aborts obsolete reads.
-The interface retains the last committed scope while another selection is loading or fails.
-A late old response cannot replace a newer selection.
-Opening a detail pins its snapshot and updates the credential-free URL for reload.
-The evidence panel is a non-modal `aside` without a focus trap.
-Selecting a record focuses its heading. Narrow layouts scroll that heading into view.
-Overview provides first-connection guidance. Observations, Traffic, Case and Checks have separate navigation entries.
-Traffic has a bounded RPC inspector and an advanced Journal view.
-
-A collection start stores its client-generated identity before sending HTTP.
-If the response is lost, the UI labels its outcome unknown.
-Use `Refresh collection status` or `Inspect Lab status` before repeating a mutation.
-`Cancel collection` uses the public cancellation operation.
-Only a server-reported terminal state is displayed as cancelled.
-The browser does not interpret a cancelled Fetch as a cancelled collection.
-Payload continuation follows `payload.next_offset` in UTF-8 bytes.
-Only an explicit action loads each chunk; repeated clicks while busy do not queue work.
-
-The native Playwright suite covers real RPC-generated Findings, live/retained bookmarks,
-real relayer evaluation, an independent HTTP source, lost collection responses,
-public cancellation, Unicode payload chunks, stale native reads, keyboard focus,
-no selected Lab, invalid snapshot errors, connection loss, and browser closure.
-Visibility is a controlled `document.hidden` signal in real Chromium; HTTP responses remain native.
-Starting, unsupported-capability, analysis-limit, and core-failure renderer branches use controlled DTO tests.
-These renderer tests do not claim to simulate the corresponding native failure lifecycle.
-The Rust `dashboard_flow` suite closes a real viewer stdout pipe after readiness.
-It waits for process exit, checks listener release, compares unchanged Journal bytes,
-and verifies that another Lab remains available.
-
-Desktop and narrow native screenshots are reviewed manually after visual changes.
-Screenshots, reports, and temporary runtime artifacts are not committed.
-The isolated earlier normal-down failure remains an unconfirmed observation in
-[`tasks/unconfirmed-down-observation.md`](../tasks/unconfirmed-down-observation.md).
-No retry or speculative Lab lifecycle fix was introduced.
-
-## Optional native Surfpool verification
-
-The managed backend pins Surfpool v1.7.0.
-The [lifecycle contract](product/lab-lifecycle.md#managed-native-surfpool-implementation) owns artifact hashes, offline installation, native flags, and fixture limits.
-Native tests require an explicitly prepared platform archive:
+The [lifecycle contract](product/lab-lifecycle.md#managed-native-surfpool-implementation) owns the pinned artifact, hashes, flags and fixture limits.
+Native fixture-dependent tests require an explicit platform archive:
 
 ```bash
 RONCHI_TEST_SURFPOOL_ARCHIVE=/absolute/path/surfpool-darwin-arm64.tar.gz cargo test --locked --test surfpool_mode -- --test-threads=1
+RONCHI_TEST_SURFPOOL_ARCHIVE=/absolute/path/surfpool-darwin-arm64.tar.gz npm --prefix dashboard run test:browser
 ```
 
-Those tests use disposable projects and explicit local account snapshots.
-They never require a public RPC, faucet, or Solana CLI.
-The archive is test input and is not committed or bundled into Ronchi.
+Without that input, conditional native tests may skip their execution path. Report that limitation.
+Use disposable projects and explicit local snapshots. No public RPC, faucet or Solana CLI is required.
+The archive is test input and is not committed or bundled.
+The [measurement record](research/resource-measurement-harness.md#measurement-record) owns measured resource observations and their limits.
+
+## Source ownership
+
+| Location | Responsibility |
+| --- | --- |
+| src/lib.rs, src/config.rs | CLI dispatch, offline schemas, project configuration |
+| src/lab, src/control.rs, src/network.rs | Lab ownership, authenticated controls, native listeners |
+| src/rpc, src/simulator, src/protocol | Request registration, simulator state and protocol handling |
+| src/backend, src/upstream.rs | Managed Surfpool and allowlisted Read-through |
+| src/cases | Continuing policies and Custom Case validation |
+| src/journal, src/query.rs | Durable evidence, bounded reads and deterministic Findings |
+| src/dashboard | Browser sessions, WebSocket operations and retained viewer |
+| src/reference, src/demo | Bundled relayer and bounded Demo orchestration |
+| src/mcp.rs | Local stdio adapter |
+| dashboard/src/app | Composition, routing, Lab context and global filters |
+| dashboard/src/shared | Protocol, transport, UI primitives and common styles |
+| dashboard/src/features | Feature-owned views, models and subscriptions |
+| dashboard/tests | Native browser fixtures and scenarios |
+
+Solid views own their active subscriptions and cleanup. Pure Observation models group retained evidence and keep unknowns explicit.
+`features/observations/replies.ts` resolves bounded retained replies; Inspector owns manual payload continuation.
+`src/journal/traffic.rs` owns commit-derived rate counters; `RpcRates.tsx` owns their browser-local clock.
+See the [dashboard contract](product/dashboard.md) for UI behavior and bounds.
+Tests live beside frontend models or in Rust integration targets. Keep modules navigable without a parallel legacy renderer.
+
+## Working rules
+
+Read `AGENTS.md`, the relevant product contract and actual Git status before editing.
+Use project skills and the [Definition of Done](../.agents/references/definition-of-done.md).
+Implement one reviewable behavior slice at a time. Record applicable checks in [tasks/todo.md](../tasks/todo.md).
+A test fixture or unsupported dependency does not silently narrow the agreed protocol scope.
+Preserve pre-existing unrelated changes. Do not weaken tests or hide failed checks to obtain a green result.
+Keep the current session state in [implementation-progress.md](../tasks/implementation-progress.md); do not duplicate product contracts there.
+A missing external backend is an explicit validation gap, not permission to substitute the bundled relayer.
+
+### Commits
+
+Commit only when the current request or active assignment authorizes it. Historical runbooks grant no standing authorization.
+For an authorized implementation run, use one verified behavior slice per commit with its tests and documentation.
+Inspect `git diff`, stage only intended paths, inspect `git diff --cached`, and run `git diff --cached --check`.
+Use concise English subjects such as `feat(rpc): preserve transaction identity` or `fix(dashboard): retain selected evidence`.
+Keep lockfiles, required source fixtures and third-party notices. Exclude secrets, `.env`, Lab state, build output and dependency directories.
+After committing, inspect `git status --short` and `git log -1 --oneline`.
+Do not amend, rewrite history, discard changes, add remotes or publish without authorization.
+If Git metadata is sandboxed, use the permission mechanism; do not edit Git metadata manually.

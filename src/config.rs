@@ -18,7 +18,6 @@ pub enum Mode {
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub schema_version: Option<u32>,
-    pub checks: Option<crate::checks::Config>,
     pub mode: Option<Mode>,
     pub read_upstream: Option<String>,
     pub surfpool_datasource: Option<String>,
@@ -34,8 +33,6 @@ pub struct Settings {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct EffectiveConfig {
     pub project: PathBuf,
-    #[serde(default)]
-    pub checks: crate::checks::Config,
     pub mode: Mode,
     pub read_upstream: Option<String>,
     pub surfpool_datasource: Option<String>,
@@ -100,7 +97,6 @@ pub fn resolve_requested(
             .or(file.simulator_state.clone()),
         slot_duration_ms: overrides.slot_duration_ms.or(file.slot_duration_ms),
         schema_version: None,
-        checks: overrides.checks.clone().or(file.checks.clone()),
         mode: overrides.mode.or(file.mode),
         read_upstream: overrides
             .read_upstream
@@ -122,8 +118,6 @@ pub(crate) fn from_settings(
     project: PathBuf,
     requested: Settings,
 ) -> Result<EffectiveConfig, String> {
-    let checks = requested.checks.clone().unwrap_or_default();
-    checks.validate()?;
     let simulator_state = requested.simulator_state.clone().unwrap_or_default();
     simulator_state.validate()?;
     let slot_duration_ms = requested.slot_duration_ms.unwrap_or(400);
@@ -175,7 +169,6 @@ pub(crate) fn from_settings(
     }
     Ok(EffectiveConfig {
         project,
-        checks,
         mode,
         read_upstream,
         surfpool_datasource,

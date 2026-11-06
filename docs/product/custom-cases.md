@@ -168,7 +168,7 @@ It emits at most one Finding per rule, key, and sequence cycle.
 If multiple matches exist, it selects the earliest complete ordered fact set by `event_seq`.
 Identical evidence and template versions produce the same result.
 Missing or redacted required facts prevent the stronger Finding and expose the relevant Evidence Gap.
-No rule produces a Verdict.
+Rules do not evaluate application correctness.
 Client Outcomes require client evidence, and economic claims require the appropriate application and execution evidence.
 The initial templates make neither claim.
 

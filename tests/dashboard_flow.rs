@@ -142,7 +142,7 @@ fn native_assets_and_reusable_lab_lifetime_access_preserve_bearer_isolation() {
     }
     let headers = format!("{origin}Cookie: {cookie}\r\n");
     let status = lab.request("GET", &format!("/ui/{}/api/status", lab.id), &headers, "");
-    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert!(status.starts_with("HTTP/1.1 404"), "{status}");
     assert!(!status.contains(lab.token.trim()));
     // Cookie auth cannot enter the bearer namespace, even with a valid Origin.
     assert!(
@@ -164,7 +164,7 @@ fn native_assets_and_reusable_lab_lifetime_access_preserve_bearer_isolation() {
         other
             .request(
                 "GET",
-                &format!("/ui/{}/api/status", other.id),
+                &format!("/ui/{}/socket", other.id),
                 &format!("Origin: http://{}\r\nCookie: {cookie}\r\n", other.address),
                 ""
             )
@@ -173,7 +173,7 @@ fn native_assets_and_reusable_lab_lifetime_access_preserve_bearer_isolation() {
     assert!(
         lab.request(
             "GET",
-            &format!("/ui/{}/api/status", lab.id),
+            &format!("/ui/{}/socket", lab.id),
             "Host: wrong.invalid\r\n",
             ""
         )
@@ -245,13 +245,8 @@ fn stopping_lab_revokes_link_and_cookie_before_same_port_name_reuse() {
         lab.address.port()
     );
     assert!(
-        lab.request(
-            "GET",
-            &format!("/ui/{}/api/status", lab.id),
-            &forged_cookie,
-            ""
-        )
-        .starts_with("HTTP/1.1 401")
+        lab.request("GET", &format!("/ui/{}/socket", lab.id), &forged_cookie, "")
+            .starts_with("HTTP/1.1 401")
     );
     assert!(
         lab.request("GET", &format!("/ui/{old_id}/"), "", "")
@@ -358,4 +353,244 @@ fn retained_viewer_exits_after_stdout_closure_without_mutating_journal_or_other_
             )
             .starts_with("HTTP/1.1 200")
     );
+}
+
+fn try_browser_socket(
+    lab: &Lab,
+) -> Result<tokio_tungstenite::tungstenite::WebSocket<TcpStream>, u16> {
+    use tokio_tungstenite::tungstenite::{client, client::IntoClientRequest};
+    let origin = format!("http://{}", lab.address);
+    let exchanged = lab.request(
+        "POST",
+        &format!("/ui/{}/session", lab.id),
+        &format!("Origin: {origin}\r\n"),
+        &serde_json::json!({"ticket":lab.ticket()}).to_string(),
+    );
+    let cookie = exchanged
+        .lines()
+        .find_map(|l| l.strip_prefix("set-cookie: "))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let mut request = format!("ws://{}/ui/{}/socket", lab.address, lab.id)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("Origin", origin.parse().unwrap());
+    request
+        .headers_mut()
+        .insert("Cookie", cookie.parse().unwrap());
+    let stream = TcpStream::connect(lab.address).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(4)))
+        .unwrap();
+    client(request, stream)
+        .map(|(socket, _)| socket)
+        .map_err(|error| match error {
+            tokio_tungstenite::tungstenite::HandshakeError::Failure(
+                tokio_tungstenite::tungstenite::Error::Http(response),
+            ) => response.status().as_u16(),
+            other => panic!("Unexpected handshake failure: {other}"),
+        })
+}
+fn browser_socket(lab: &Lab) -> tokio_tungstenite::tungstenite::WebSocket<TcpStream> {
+    try_browser_socket(lab).unwrap()
+}
+
+fn ws_read(socket: &mut tokio_tungstenite::tungstenite::WebSocket<TcpStream>) -> Value {
+    serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap()
+}
+fn ws_send(socket: &mut tokio_tungstenite::tungstenite::WebSocket<TcpStream>, value: Value) {
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            value.to_string().into(),
+        ))
+        .unwrap();
+}
+#[test]
+fn browser_socket_pushes_committed_state_preserves_snapshots_and_stops_with_lab() {
+    use serde_json::json;
+    let lab = Lab::new();
+    let mut socket = browser_socket(&lab);
+    assert_eq!(ws_read(&mut socket)["type"], "ready");
+    ws_send(
+        &mut socket,
+        json!({"type":"subscribe","id":"status","path":"api/status"}),
+    );
+    let initial = ws_read(&mut socket);
+    assert_eq!(initial["status"], 200);
+    let snapshot = initial["value"]["snapshot_seq"].as_u64().unwrap();
+    ws_send(
+        &mut socket,
+        json!({"type":"subscribe","id":"fixed","path":"api/investigate","body":{"contract_version":1,"request_id":"fixed","lab_id":lab.id,"operation":"investigate.summary","arguments":{"snapshot_seq":snapshot}}}),
+    );
+    assert_eq!(
+        ws_read(&mut socket)["value"]["view"]["snapshot_seq"],
+        snapshot
+    );
+    ws_send(
+        &mut socket,
+        json!({"type":"call","id":"arm","path":"api/case/arm","body":{"case_id":"tx-response-lost"}}),
+    );
+    let mut replied = false;
+    let mut pushed = false;
+    for _ in 0..6 {
+        let frame = ws_read(&mut socket);
+        assert_ne!(frame["id"], "fixed", "fixed snapshots must not refresh");
+        if frame["id"] == "arm" {
+            assert_eq!(frame["status"], 200);
+            replied = true;
+        }
+        if frame["id"] == "status" && frame["value"]["active_case"]["case_id"] == "tx-response-lost"
+        {
+            pushed = true;
+        }
+        if replied && pushed {
+            break;
+        }
+    }
+    assert!(
+        replied && pushed,
+        "command acknowledgement and pushed policy required"
+    );
+    ws_send(
+        &mut socket,
+        json!({"type":"subscribe","id":"mutation","path":"api/case/disarm","body":{}}),
+    );
+    loop {
+        let frame = ws_read(&mut socket);
+        if frame["id"] == "mutation" {
+            assert_eq!(frame["status"], 400);
+            break;
+        }
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ronchi"))
+        .arg("--project")
+        .arg(lab.project.path())
+        .args(["--lab-id", &lab.id, "down", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    while let Ok(message) = socket.read() {
+        if message.is_close() {
+            return;
+        }
+    }
+}
+#[test]
+fn browser_socket_requires_same_origin_cookie_and_bounds_connections() {
+    use tokio_tungstenite::tungstenite::{client, client::IntoClientRequest};
+    let lab = Lab::new();
+    for origin in [None, Some("http://foreign.invalid")] {
+        let mut request = format!("ws://{}/ui/{}/socket", lab.address, lab.id)
+            .into_client_request()
+            .unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("Origin", origin.parse().unwrap());
+        }
+        assert!(client(request, TcpStream::connect(lab.address).unwrap()).is_err());
+    }
+    let mut sockets = Vec::new();
+    for _ in 0..8 {
+        let mut socket = browser_socket(&lab);
+        assert_eq!(ws_read(&mut socket)["type"], "ready");
+        sockets.push(socket);
+    }
+    for (index, socket) in sockets.iter_mut().enumerate() {
+        ws_send(
+            socket,
+            serde_json::json!({"type":"subscribe","id":format!("q{index}"),"path":"api/investigate","body":{"contract_version":1,"request_id":format!("q{index}"),"lab_id":lab.id,"operation":"investigate.summary","arguments":{}}}),
+        );
+    }
+    for socket in &mut sockets {
+        assert_eq!(ws_read(socket)["status"], 200);
+    }
+    // A valid cookie cannot exceed the per-Lab socket admission limit.
+    assert_eq!(try_browser_socket(&lab).unwrap_err(), 503);
+    drop(sockets);
+}
+
+#[test]
+fn browser_socket_bounds_subscriptions_and_drops_replaced_reads() {
+    use serde_json::json;
+    let lab = Lab::new();
+    let mut socket = browser_socket(&lab);
+    ws_read(&mut socket);
+    for index in 0..16 {
+        let id = format!("s{index}");
+        ws_send(
+            &mut socket,
+            json!({"type":"subscribe","id":id,"path":"api/status"}),
+        );
+        let update = ws_read(&mut socket);
+        assert_eq!(update["id"], id);
+        assert_eq!(update["status"], 200);
+    }
+    ws_send(
+        &mut socket,
+        json!({"type":"subscribe","id":"overflow","path":"api/status"}),
+    );
+    assert_eq!(
+        ws_read(&mut socket)["value"]["error"]["code"],
+        "capacity_exceeded"
+    );
+    for index in 0..16 {
+        ws_send(
+            &mut socket,
+            json!({"type":"unsubscribe","id":format!("s{index}")}),
+        );
+    }
+    ws_send(
+        &mut socket,
+        json!({"type":"subscribe","id":"fresh","path":"api/status"}),
+    );
+    assert_eq!(ws_read(&mut socket)["id"], "fresh");
+    ws_send(
+        &mut socket,
+        json!({"type":"call","id":"bad-lab","path":"api/investigate","body":{"contract_version":1,"request_id":"bad-lab","lab_id":"other","operation":"investigate.timeline","arguments":{}}}),
+    );
+    assert_eq!(ws_read(&mut socket)["status"], 400);
+    ws_send(
+        &mut socket,
+        json!({"type":"call","id":"arm","path":"api/case/arm","body":{"case_id":"tx-response-lost"}}),
+    );
+    let mut acknowledged = false;
+    let mut pushed = false;
+    for _ in 0..5 {
+        let frame = ws_read(&mut socket);
+        assert!(matches!(frame["id"].as_str(), Some("arm" | "fresh")));
+        if frame["id"] == "arm" {
+            assert_eq!(frame["status"], 200);
+            acknowledged = true;
+        } else if frame["value"]["active_case"]["case_id"] == "tx-response-lost" {
+            pushed = true;
+        }
+        if acknowledged && pushed {
+            break;
+        }
+    }
+    assert!(acknowledged && pushed);
+}
+
+#[test]
+fn retired_application_routes_are_absent() {
+    let lab = Lab::new();
+    for path in [
+        "checks/observe",
+        "checks/evaluate",
+        "check-collections/old",
+        "check-collections/old/cancel",
+    ] {
+        let response = lab.request(
+            "POST",
+            &format!("/v1/labs/{}/{path}", lab.id),
+            &format!("Authorization: Bearer {}\r\n", lab.token.trim()),
+            "{}",
+        );
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+    }
 }

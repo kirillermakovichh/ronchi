@@ -117,6 +117,10 @@ impl JournalStore {
         self.budget.usage()
     }
 
+    pub(super) fn rpc_traffic(&self) -> Result<super::RpcTraffic, JournalError> {
+        super::traffic::replay(&self.connection)
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot, JournalError> {
         snapshot(&self.connection, false)
     }

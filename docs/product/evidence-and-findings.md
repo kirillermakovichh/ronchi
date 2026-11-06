@@ -26,14 +26,6 @@ The Lab-start record identifies the Ronchi build, protocol profile, redaction po
 Case records retain the effective definition, versioned primitives and Finding rules, configuration digest, and any seed.
 RPC IDs remain protocol values; an internal `request_id` distinguishes repeated IDs, notifications, and batch elements.
 Each source record identifies its authority without persisting endpoint credentials.
-Public Check capture records `check.collection_started`, `check.invocation_started`, `check.observation` or `check.invocation_error`, and `check.collection_completed`.
-Validated observations retain `source:application`, configured source/schema identity, explicit scope, source time/revision, and their complete selected payload.
-Source failures retain a gap and no partial source JSON.
-They do not establish application failure or a Verdict.
-Only Ronchi creates the committed start reference used by Check `cause_refs`.
-Evidence previews remain bounded; explicit payload offsets permit complete readback without changing event or response limits.
-The [Check contract](checks-and-verdicts.md) owns the capture and redaction limits.
-
 ## Order, time, and correlation
 
 `event_seq` orders Journal admission; it does not prove application causality or RPC completion order.
@@ -49,7 +41,7 @@ For supported valid signed transactions, the first signature identifies the tran
 Each submission has its own request identity and content digest, even when signed bytes repeat.
 The lifetime history preserves every submission attempt and the once-per-signature response-loss decision across Case changes.
 Different signatures do not establish different business intents or duplicate withdrawals.
-Business correlation requires explicit source evidence, such as a Checkpoint or a configured Check.
+Business correlation requires explicit source evidence, such as a future SDK Checkpoint.
 A shared connection, blockhash, nearby timestamp, or account address does not create that correlation.
 
 ## Required event families
@@ -63,7 +55,6 @@ A shared connection, blockhash, nearby timestamp, or account address does not cr
 | Source exchange | Read Upstream or Execution Backend request/result classification, source context, and unavailable-source errors |
 | Fault decision and application | Matching policy, affected identity/request, selected primitive, and observed application of that Fault |
 | RPC Boundary Result | Response classification, withheld response, observed cancellation/disconnect, transport termination, or unresolved completion |
-| Optional external evidence | Client Outcome, Application Checkpoint, Check result, or attachment with explicit source and correlation |
 
 Keep a planned action distinct from its observed result.
 An intent to write a response does not prove the write completed or that the client received it.
@@ -95,10 +86,8 @@ A new snapshot may add evidence and Findings; it does not rewrite the cited fact
 | Simulator accepts `A`; Ronchi withholds its response; a later request queries `A` | The original signature was queried after response withholding; client timeout and business completion remain unknown |
 | The same signed bytes for `A` are submitted again after withholding | Another submission attempt used the same transaction identity; no second transaction or duplicate transfer is established |
 | `B` is submitted after withholding for `A`, without business correlation | Another signature was submitted; its relationship to the same Withdrawal Intent is unavailable |
-| Configured Check reports an application transition for an explicit intent | Report that observed transition with its source; simulated success still does not establish an executed transfer |
 
-A Finding is not a Verdict.
-Configured Checks and sufficient bounded evidence are required for `pass`, `fail`, or `inconclusive`.
+Findings explain observed RPC behavior. They do not evaluate business requirements.
 An injected failure, a capability error, and an internal Ronchi failure have different classifications.
 A Ronchi storage failure cannot establish a System Under Test defect.
 
@@ -114,9 +103,12 @@ Summary, Findings, and Finding Evidence Slice use the same evaluator.
 | `tx-response-lost.lookup-after-withholding` | 1 | Received `getSignatureStatuses` or `getTransaction` for the accepted signature |
 | `tx-response-lost.submission-after-withholding` | 1 | Another recorded submission attempt for the accepted signature |
 
-Both rules support simulator mode and event schema 1.
-Both require original submission, simulator acceptance, selected response-loss Fault, and observed withholding for the same Lab, signature, internal request ID, and registration sequence.
-Acceptance must come from `rpc_simulator`; the other facts must come from `ronchi`.
+Both later-action rules support simulator and Surfpool mode with event schema 1.
+Both require original submission, authoritative acceptance, selected response-loss Fault, and observed withholding for the same Lab, signature, internal request ID, and registration sequence.
+Simulator acceptance must come from `rpc_simulator`.
+Surfpool acceptance must come from `surfpool`.
+All supporting facts must share the same execution mode.
+The other facts must come from `ronchi`.
 The original facts have strict sequence order: submission, acceptance, selection, withholding.
 The later request has a different internal request ID, a greater registration sequence, and a sequence after observed withholding.
 This establishes observation order; it does not establish application causality.
@@ -129,7 +121,21 @@ The incident key is Lab, signature, accepted request ID, and acceptance event.
 The Finding ID hashes rule ID/version, Lab, semantic incident scope, and role-labelled supporting references.
 It excludes the evaluation time, watermark, page size, and projection.
 An unchanged supporting fact set therefore keeps its ID and statement at a newer watermark.
-The five supporting roles are `submission`, `acceptance`, `fault_selection`, `observed_withholding`, and `later_action`.
+The later-action rules have five supporting roles: `submission`, `acceptance`, `fault_selection`, `observed_withholding`, and `later_action`.
+
+`tx-response-lost.surfpool-response-withheld@1` uses the first four roles.
+It confirms signature return and observed response withholding without requiring later activity or an HTTP termination record.
+The linked HTTP boundary supplies termination or cancellation evidence when available.
+Returned signatures alone do not establish execution, finality, balance changes, client timeout, or application failure.
+
+Its optional `observation_window` reports the start/end sequence, recorded timestamps, later same-signature RPC count and status/transaction lookup count.
+The query uses metadata indexes inside the same pinned selection; it does not load payloads.
+Counts include only authoritative schema-1 Surfpool registrations after withholding with a later registration sequence.
+Coverage is limited to retained records within the explicit filters and pinned snapshot.
+Unknown registration metadata, legacy correlation, an interrupted Journal or incomplete analysis makes `complete_for_selected_records` false.
+The window ends at the last selected committed record; idle wall time is not silently added.
+The window may change at a newer snapshot while the base Finding's stable incident ID and statement remain unchanged.
+A zero count never establishes absence of client activity on another path or a business outcome.
 The independent `sim.confirmation-delay.observed@1` rule reads selected metadata for simulator acceptance, assigned schedule, held-commitment transition, and recovery transition.
 Its four supporting roles remain inside the selected scope and watermark.
 It states the recorded simulator-time interval and makes no client or economic conclusion.

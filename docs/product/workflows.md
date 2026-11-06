@@ -1,6 +1,6 @@
 # Developer workflows
 
-Status: the simulator Lab, Investigation, public Checks, and bundled Demo paths below are implemented. Deferred execution modes, SDK, CI wrappers, and MCP paths remain separately identified.
+Status: Lab, Investigation, Surfpool, CLI/MCP and bundled Demo workflows are implemented. SDK and CI wrappers remain deferred.
 Initial command behavior comes from [Investigation interfaces](investigation-interfaces.md), [Lab lifecycle](lab-lifecycle.md), and the [Reference Application](reference-application.md).
 Deferred CI wrappers and SDK APIs remain illustrative.
 The [product overview](overview.md) defines scope; this document owns the user journeys.
@@ -13,17 +13,16 @@ ronchi demo tx-response-lost
 
 The Demo starts the default simulator and bundled [Withdrawal Relayer](reference-application.md), drives a bounded example, and produces Journal Evidence through the real core.
 It needs no existing project or cloud call.
-The command returns a bounded summary, Check results, Findings, and evidence references.
+The command returns a bounded summary, Findings, and evidence references.
 It reports actual RPC/control endpoints and project-aware CLI drill-down commands.
 A ready Demo returns `dashboard_launch` and exact-ID `dashboard_argv`.
 A stopped Demo returns argv for the read-only retained viewer.
 Open the returned link manually; JSON output never launches a browser.
-MCP remains a later task.
-Known correlation and Checks may support stronger conclusions than a backend connected only by changing its RPC URL.
+The Demo supplies a known workload; its RPC Findings retain the same observation limits as other Labs.
 A Control comparison is optional.
 The default profile is `resilient`; `--profile unsafe` selects the deliberate identity-replacement example.
 Each Demo uses a fresh `demo` or `demo-N` Lab, fresh application storage, and free loopback ports.
-After collecting Checks, the reference Workload and relayer finish, while the Lab remains available for investigation.
+After the workload finishes, the reference Workload and relayer finish, while the Lab remains available for investigation.
 The result returns its name, immutable `lab_id`, endpoints, summary, and evidence references.
 `--stop-after-demo` explicitly stops that Demo-owned Lab; `--json` changes rendering only.
 
@@ -34,17 +33,15 @@ Its source URL uses a reserved loopback port selected before Lab startup.
 The reservation closes before normal relayer bind; a bind race is an explicit startup failure before intent submission.
 Reference storage is an atomically created new private directory under `ronchi/reference/`.
 
-The command collects the maintained `reference-intent` definition version 2 through the public control API.
-It reads the retained public definition digest and evaluates only the pinned committed prefix.
-It continues until a final observation follows a public terminal intent state.
-An early identity failure does not stop collection of the other terminal proofs.
-The application keeps its original 60-second acceptance horizon.
-The command has a separate 70-second Workload wait, bounded startup, HTTP, collection-terminal, and cleanup waits.
-A command timeout does not become an application failure.
-The HTTP-only collector, effective 32 KiB response cap, single-intent evaluation, and 512-record/4 MiB evaluation budgets remain unchanged.
+The Demo waits for the bundled relayer's ordinary intent API to report a terminal state.
+It then pins the Lab Journal and reads summary and Findings.
+Application state is not collected into the Journal or evaluated as business requirements.
+The application keeps its 60-second acceptance horizon; Demo waits at most 70 seconds for its workload.
+HTTP calls and cleanup have separate bounded waits.
+A timeout is an operational error, not an application correctness result.
 
 `--json` emits one final envelope; it does not include child output or open a browser.
-Exit 0 reports completed orchestration even when unsafe has a confirmed Check fail.
+Exit 0 reports completed orchestration for either profile; it does not report business correctness.
 Cancellation exits 130; operational errors report phase, effects, known IDs, resource state, and recovery argv.
 Default errors after Lab readiness retain that exact Lab.
 `--stop-after-demo` also attempts exact-ID cleanup on error and cancellation.
@@ -57,7 +54,6 @@ A stopped or failed reference child is reaped independently from Lab cleanup.
 Each run keeps bounded orchestration metadata under `ronchi/demos/`; this metadata is not Lab evidence.
 Debug-build tests use closed stage barriers and an occupied RPC-port override to exercise real startup, binding, and process failures.
 These controls execute no supplied code and are ignored in release builds.
-
 
 The Demo must not use canned traces or a private fault/evidence path unavailable to real applications.
 Unsafe and resilient profiles share one reference codebase; they do not implement the catalog one application at a time.
@@ -141,7 +137,7 @@ For example, withholding a response is observable at Ronchi's boundary; an appli
 
 A deterministic Finding compresses a supported relationship and links to its evidence.
 Selecting it opens an Evidence Slice rather than another capture.
-The primary Investigation does not require a Business Invariant, formal Verdict, SDK, or baseline.
+The primary Investigation needs no SDK or baseline.
 
 ### First no-SDK Investigation
 
@@ -165,7 +161,7 @@ The result separates:
 The [product overview](overview.md#product-value) defines the guidance boundary.
 The [default simulated outcome and independent delayed transition](cases.md#tx-response-lost-default-simulated-outcome) are accepted.
 The [Solana RPC contract](solana-rpc-contract.md) governs the remaining standard response fields and parameters; their implementation still needs verification.
-The bundled [Demo](#first-proof-bundled-demo) can support stronger conclusions through its known correlation and Checks.
+The bundled [Demo](#first-proof-bundled-demo) supplies a known workload for the same RPC investigation.
 
 The initial usefulness criterion is that a developer can explain the difference between local acceptance and the withheld response, identify the later observed action, and name a concrete next check in their backend.
 They must also be able to identify which application conclusions remain unsupported.
@@ -194,16 +190,6 @@ Closing the dashboard or completing a CLI command also leaves the Lab running.
 Queries by name resolve the current Lab or its latest stopped Journal and disclose that choice.
 Use the returned immutable `lab_id` to pin subsequent evidence queries.
 
-Configured application Checks use explicit public operations:
-
-```bash
-ronchi check observe intent-state --lab-id L1 --intent-id W1 --json
-ronchi check evaluate intent-state --lab-id L1 --intent-id W1 --snapshot-seq 42 --json
-```
-
-Collection adds sourced facts to a live Journal; evaluation reads a retained snapshot without contacting the application.
-See [Checks and Verdicts](checks-and-verdicts.md) for configuration, authority, and evidence requirements.
-
 ## Stop and maintain artifacts
 
 ```bash
@@ -227,7 +213,7 @@ ronchi run --case tx-response-lost -- npm run integration
 ```
 
 The command is a proposal, not an implemented interface.
-The intended wrapper starts the controlled environment, exposes endpoints, runs the user command, observes a terminal condition, evaluates configured Checks, writes evidence/artifacts, and cleans up.
+The intended wrapper starts the controlled environment, exposes endpoints, runs the user command, observes a terminal condition, writes evidence/artifacts, and cleans up.
 Its exact lifecycle, parallel execution, and Chaincase format remain open.
 The wrapped command owns application startup and Workload.
 
@@ -235,7 +221,7 @@ A user-managed Control Run can provide a baseline without Faults.
 The developer or Coding Agent prepares equivalent application state and Workload for Control and Chaos Runs.
 Ronchi does not reset private application databases, queues, caches, workers, or external services.
 Without evidence of Comparability, show the Runs independently and do not attribute their difference to the Fault.
-Formal Verdicts require the configured Checks and sufficient evidence; a useful Investigation can have no Verdict.
+The developer evaluates application correctness using the recorded RPC evidence and their own application data.
 
 ## Deferred instrumentation and delivery
 

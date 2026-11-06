@@ -11,6 +11,12 @@ use tokio_util::sync::CancellationToken;
 pub struct Selection {
     #[arg(value_parser=["summary","timeline","requests","evidence","findings"])]
     operation: String,
+    /// Record/incident order; default is ascending
+    #[arg(long, value_enum)]
+    order: Option<super::Order>,
+    /// Bounded offset within the Findings result (0..4096)
+    #[arg(long)]
+    offset: Option<u16>,
     #[arg(long = "signature")]
     signatures: Vec<String>,
     #[arg(long = "rpc-method")]
@@ -57,19 +63,6 @@ pub struct Selection {
     /// Pin an existing committed watermark
     #[arg(long)]
     snapshot_seq: Option<u64>,
-    #[arg(skip)]
-    evaluation: Option<Box<crate::checks::evaluate::Selection>>,
-}
-impl Selection {
-    pub(crate) fn check(selection: crate::checks::evaluate::Selection, snapshot: u64) -> Self {
-        Self {
-            operation: "check.evaluate".into(),
-            limit: 50,
-            snapshot_seq: Some(snapshot),
-            evaluation: Some(Box::new(selection)),
-            ..Default::default()
-        }
-    }
 }
 fn parse_ref(value: &str) -> Result<EventRef, String> {
     let (lab, seq) = value.rsplit_once(':').ok_or("Expected LAB_ID:EVENT_SEQ")?;
@@ -108,6 +101,8 @@ async fn execute(
         lab_id: lab_id.clone(),
         operation: Operation::parse(&selection.operation)?,
         arguments: Arguments {
+            order: selection.order,
+            offset: selection.offset,
             scope: Scope {
                 signature: selection.signatures,
                 rpc_method: selection.methods,
@@ -126,7 +121,6 @@ async fn execute(
             fields: selection.fields,
             include_payload: selection.include_payload,
             payload_offset: selection.payload_offset,
-            evaluation: selection.evaluation.map(|value| *value),
             snapshot_seq: selection.snapshot_seq,
         },
     };
@@ -168,32 +162,6 @@ fn render(response: &Response) -> String {
         response.view.journal_state,
         response.selection_basis
     )];
-    if response.result.get("evaluation_version").is_some() {
-        lines.push(format!(
-            "Check {} | definition {} | evaluation {} | Verdict {}",
-            response.result["check_id"],
-            response.result["definition_version"],
-            response.result["evaluation_version"],
-            response.result["verdict"]
-        ));
-        if let Some(rules) = response.result["requirements"].as_array() {
-            for rule in rules {
-                lines.push(format!(
-                    "{}: {} — {}",
-                    rule["rule_id"], rule["verdict"], rule["reason"]
-                ));
-                lines.push(format!(
-                    "Supporting: {} | gaps: {}",
-                    rule["supporting"], rule["gaps"]
-                ));
-            }
-        }
-        return lines
-            .into_iter()
-            .map(|line| safe_text(&line))
-            .collect::<Vec<_>>()
-            .join("\n");
-    }
     if response.view.scope != Scope::default() {
         lines.push(format!(
             "Scope: {}",

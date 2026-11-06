@@ -697,7 +697,7 @@ fn linked_sqlite_plans_use_request_and_signature_indexes_for_finding_joins() {
 }
 
 #[tokio::test]
-async fn transaction_lookup_alone_matches_and_unsupported_mode_is_explicit() {
+async fn transaction_lookup_alone_matches_in_both_modes_with_authoritative_source() {
     for mode in [Mode::Simulator, Mode::Surfpool] {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("journal.sqlite");
@@ -707,21 +707,17 @@ async fn transaction_lookup_alone_matches_and_unsupported_mode_is_explicit() {
         events[4].data["method"] = json!("getTransaction");
         for event in &mut events {
             event.execution_mode = mode;
+            if event.kind == "transaction.accepted" && mode == Mode::Surfpool {
+                event.source = "surfpool".into();
+            }
         }
         store.append(&events).unwrap();
         let response = query(&path, req(Operation::Findings)).await;
         assert_eq!(
             response.result["items"].as_array().unwrap().len(),
-            if mode == Mode::Simulator { 1 } else { 0 }
+            if mode == Mode::Simulator { 1 } else { 2 }
         );
-        assert_eq!(
-            response.result["analysis"]["rules"][0]["state"],
-            if mode == Mode::Simulator {
-                "matched"
-            } else {
-                "unsupported"
-            }
-        );
+        assert_eq!(response.result["analysis"]["rules"][0]["state"], "matched");
     }
 }
 
@@ -769,4 +765,174 @@ async fn cursors_from_the_previous_rule_catalog_are_rejected_after_confirmation_
         .await
         .unwrap_err();
     assert_eq!(error.code.as_ref(), "invalid_cursor");
+}
+
+#[tokio::test]
+async fn surfpool_response_loss_is_explained_without_a_later_lookup() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "L1").unwrap();
+    let events = history()
+        .into_iter()
+        .take(4)
+        .map(|mut e| {
+            e.execution_mode = Mode::Surfpool;
+            if e.kind == "transaction.accepted" {
+                e.source = "surfpool".into();
+            }
+            e
+        })
+        .collect::<Vec<_>>();
+    store.append(&events).unwrap();
+    let first = query(&path, req(Operation::Findings)).await;
+    let items = first.result["items"].as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        1,
+        "Surfpool withholding must have a base explanation: {}",
+        first.result
+    );
+    assert_eq!(
+        items[0]["rule_id"],
+        "tx-response-lost.surfpool-response-withheld"
+    );
+    assert_eq!(items[0]["observation_window"]["status_lookup_count"], 0);
+    assert_eq!(items[0]["observation_window"]["to_seq"], 4);
+    let mut later = event("rpc.registered", "lookup", 2, "A");
+    later.execution_mode = Mode::Surfpool;
+    store.append(&[later]).unwrap();
+    let next = query(&path, req(Operation::Findings)).await;
+    let base = next.result["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["rule_id"] == "tx-response-lost.surfpool-response-withheld")
+        .unwrap();
+    assert_eq!(base["finding_id"], items[0]["finding_id"]);
+    assert_eq!(base["observation_window"]["status_lookup_count"], 1);
+    assert!(
+        next.result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["rule_id"] == "tx-response-lost.lookup-after-withholding")
+    );
+    let mut pinned = req(Operation::Findings);
+    pinned.arguments.snapshot_seq = Some(4);
+    assert_eq!(query(&path, pinned).await.result, first.result);
+}
+
+#[tokio::test]
+async fn surfpool_windows_respect_selection_identity_gaps_and_exact_finding_lookup() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "L1").unwrap();
+    let mut events = history().into_iter().take(4).collect::<Vec<_>>();
+    for event in &mut events {
+        event.execution_mode = Mode::Surfpool;
+        if event.kind == "transaction.accepted" {
+            event.source = "surfpool".into();
+        }
+    }
+    let mut unrelated = event("rpc.registered", "unrelated", 2, "B");
+    unrelated.execution_mode = Mode::Surfpool;
+    events.push(unrelated);
+    let mut lookup = event("rpc.registered", "lookup", 3, "A");
+    lookup.execution_mode = Mode::Surfpool;
+    events.push(lookup);
+    store.append(&events).unwrap();
+    let result = query(&path, req(Operation::Findings)).await;
+    let base = result.result["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["rule_id"] == "tx-response-lost.surfpool-response-withheld")
+        .unwrap();
+    assert_eq!(base["observation_window"]["later_rpc_count"], 1);
+    assert_eq!(base["observation_window"]["status_lookup_count"], 1);
+    let mut exact = req(Operation::Findings);
+    exact.arguments.snapshot_seq = Some(6);
+    exact.arguments.scope.finding_id = Some(base["finding_id"].as_str().unwrap().into());
+    let exact_result = query(&path, exact).await;
+    assert_eq!(exact_result.result["items"], json!([base]));
+    let mut narrow = req(Operation::Findings);
+    narrow.arguments.scope.to_seq = Some(5);
+    let selected = query(&path, narrow).await;
+    assert_eq!(
+        selected.result["items"][0]["observation_window"]["status_lookup_count"],
+        0
+    );
+    assert_eq!(
+        selected.result["items"][0]["observation_window"]["to_seq"],
+        5
+    );
+    let mut evidence = req(Operation::Evidence);
+    evidence.arguments.snapshot_seq = Some(6);
+    evidence.arguments.scope.finding_id = Some(base["finding_id"].as_str().unwrap().into());
+    assert_eq!(
+        query(&path, evidence).await.result["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    store
+        .finish(
+            &event("lab.finalized", "", 0, ""),
+            ronchi::journal::JournalState::Interrupted,
+        )
+        .unwrap();
+    let interrupted = query(&path, req(Operation::Findings)).await;
+    assert_eq!(
+        interrupted.result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["rule_id"] == "tx-response-lost.surfpool-response-withheld")
+            .unwrap()["observation_window"]["complete_for_selected_records"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn live_findings_order_and_offsets_are_bounded_without_changing_default_order() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "L1").unwrap();
+    store.append(&history()[..5]).unwrap();
+    let mut newer = history().into_iter().take(5).collect::<Vec<_>>();
+    for event in &mut newer {
+        event.data["signature"] = json!("B");
+        if event.kind == "rpc.registered" {
+            event.data["signatures"] = json!(["B"]);
+            event.data["request_id"] = json!("new-lookup");
+            event.data["registration_seq"] = json!(4);
+        } else {
+            for key in ["request", "admission_request"] {
+                event.data[key]["request_id"] = json!("new-submission");
+                event.data[key]["registration_seq"] = json!(3);
+            }
+        }
+    }
+    store.append(&newer).unwrap();
+    let first = query(&path, req(Operation::Findings)).await;
+    assert_eq!(first.result["items"][0]["scope"]["signature"], "A");
+    let mut descending = req(Operation::Findings);
+    descending.arguments = serde_json::from_value(json!({"order":"desc","limit":1})).unwrap();
+    assert_eq!(
+        query(&path, descending.clone()).await.result["items"][0]["scope"]["signature"],
+        "B"
+    );
+    descending.arguments.offset = Some(1);
+    assert_eq!(
+        query(&path, descending.clone()).await.result["items"][0]["scope"]["signature"],
+        "A"
+    );
+    descending.arguments.offset = Some(20);
+    assert_eq!(
+        query(&path, descending.clone()).await.result["items"],
+        json!([])
+    );
+    descending.arguments.offset = Some(4097);
+    assert!(descending.normalize().is_err());
 }

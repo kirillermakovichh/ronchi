@@ -1,6 +1,6 @@
 # Chaos Run first, optional Control Run
 
-Status: primary-workflow wording superseded by [ADR-0015](./0015-persistent-lab-first.md); optional Control comparisons remain accepted.
+Status: primary-workflow wording superseded by [ADR-0015](0015-persistent-lab-first.md); optional Control comparisons remain accepted.
 
 The original decision made a single Chaos Run the primary workflow. ADR-0015 and ADR-0016 replace that framing with a persistent interactive Lab and Continuous Lab Journal; Chaos and Control Runs remain optional automated workflows.
 

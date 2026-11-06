@@ -252,3 +252,186 @@ fn writer_storage_failure_resolves_receipts_and_fails_health() {
         0
     );
 }
+
+#[test]
+fn case_activity_counts_only_committed_effects_for_the_current_activation() {
+    use ronchi::journal::JournalWriter;
+    use serde_json::json;
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let writer = JournalWriter::start(JournalStore::create(&path, "L1").unwrap()).unwrap();
+    let handle = writer.handle();
+    let change = |revision| {
+        let mut e = event("case.changed");
+        e.data = json!({"binding":{"policy":{"revision":revision}}});
+        e
+    };
+    let applied = |revision| {
+        let mut e = event("fault.withholding_started");
+        e.data = json!({"request":{"binding":{"policy":{"revision":revision}}}});
+        e
+    };
+    handle
+        .try_append(&[change(1), applied(1), applied(1)])
+        .unwrap()
+        .blocking_committed()
+        .unwrap();
+    assert_eq!(handle.status().case_activity.unwrap().applied_records, 2);
+    handle
+        .try_append(&[change(2), applied(1)])
+        .unwrap()
+        .blocking_committed()
+        .unwrap();
+    assert_eq!(
+        handle.status().case_activity.unwrap().applied_records,
+        0,
+        "old held work must not increment the new activation"
+    );
+    let gate = rusqlite::Connection::open(&path).unwrap();
+    gate.execute_batch("CREATE TRIGGER reject_effect BEFORE INSERT ON events WHEN json_extract(NEW.event_json,'$.kind')='fault.withholding_started' BEGIN SELECT RAISE(ABORT,'effect write rejected'); END;").unwrap();
+    assert!(
+        handle
+            .try_append(&[applied(2)])
+            .unwrap()
+            .blocking_committed()
+            .is_err()
+    );
+    assert_eq!(
+        handle.status().case_activity.unwrap().applied_records,
+        0,
+        "uncommitted effects must not count"
+    );
+    assert!(writer.shutdown(None).is_err());
+}
+
+#[test]
+fn rpc_traffic_is_committed_lab_wide_and_replays_after_shutdown() {
+    use ronchi::journal::JournalWriter;
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let writer = JournalWriter::start(JournalStore::create(&path, "Lrates").unwrap()).unwrap();
+    let handle = writer.handle();
+    let at = |kind: &str, seconds: u64| {
+        let mut fact = event(kind);
+        fact.elapsed_ns = seconds * 1_000_000_000;
+        fact
+    };
+    // First two are in one interval. Exactly ten seconds starts a new interval.
+    // Batch members are separate registered calls, even with the same timestamp.
+    handle
+        .try_append(&[
+            at("rpc.registered", 5),
+            at("rpc.boundary", 6),
+            at("rpc.registered", 14),
+            at("rpc.registered", 24),
+            at("rpc.registered", 24),
+            at("unrelated.observation", 30),
+        ])
+        .unwrap()
+        .blocking_committed()
+        .unwrap();
+    let traffic = handle.status().rpc_traffic;
+    assert_eq!(traffic.requests, 4);
+    assert_eq!(traffic.first_elapsed_ns, Some(5_000_000_000));
+    assert_eq!(traffic.active_completed_ns, 9_000_000_000);
+    assert_eq!(traffic.active_start_elapsed_ns, 24_000_000_000);
+    assert_eq!(traffic.observed_elapsed_ns, 30_000_000_000);
+    assert!(!traffic.end_known);
+    assert_eq!(
+        traffic,
+        JournalReader::open(&path).unwrap().rpc_traffic().unwrap()
+    );
+    writer
+        .shutdown(Some((&at("lab.finalized", 70), JournalState::Finalized)))
+        .unwrap();
+    let final_traffic = handle.status().rpc_traffic;
+    assert_eq!(final_traffic.requests, 4);
+    assert_eq!(final_traffic.observed_elapsed_ns, 70_000_000_000);
+    assert!(final_traffic.end_known);
+    assert!(!final_traffic.running);
+    assert_eq!(
+        final_traffic,
+        JournalReader::open(&path).unwrap().rpc_traffic().unwrap()
+    );
+}
+
+#[test]
+fn rejected_rpc_registration_never_changes_traffic_counters() {
+    use ronchi::journal::JournalWriter;
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let writer = JournalWriter::start(JournalStore::create(&path, "Lrates").unwrap()).unwrap();
+    let handle = writer.handle();
+    handle
+        .try_append(&[event("rpc.registered")])
+        .unwrap()
+        .blocking_committed()
+        .unwrap();
+    let before = handle.status().rpc_traffic;
+    let gate = rusqlite::Connection::open(&path).unwrap();
+    gate.execute_batch("CREATE TRIGGER reject_rpc BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'registration rejected'); END;").unwrap();
+    assert!(
+        handle
+            .try_append(&[event("rpc.registered")])
+            .unwrap()
+            .blocking_committed()
+            .is_err()
+    );
+    assert_eq!(handle.status().rpc_traffic, before);
+    assert_eq!(
+        JournalReader::open(&path).unwrap().rpc_traffic().unwrap(),
+        before
+    );
+    assert!(writer.shutdown(None).is_err());
+}
+
+#[test]
+fn traffic_replay_handles_legacy_history_empty_history_and_concurrent_timestamps() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "Lrates").unwrap();
+    assert_eq!(
+        JournalReader::open(&path)
+            .unwrap()
+            .rpc_traffic()
+            .unwrap()
+            .requests,
+        0
+    );
+    let mut first = event("rpc.registered");
+    first.elapsed_ns = 12_000_000_000;
+    let mut concurrent = event("rpc.registered");
+    concurrent.elapsed_ns = 11_999_000_000;
+    store.append(&[first, concurrent]).unwrap();
+    // No materialized query index is required by the retained replay.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("DROP TRIGGER query_projection; DROP TABLE query_events;")
+        .unwrap();
+    let replay = JournalReader::open(&path).unwrap().rpc_traffic().unwrap();
+    assert_eq!(replay.requests, 2);
+    assert_eq!(replay.last_rpc_elapsed_ns, Some(12_000_000_000));
+    assert_eq!(replay.active_completed_ns, 0);
+    assert!(!replay.end_known);
+}
+
+#[test]
+fn retired_application_records_remain_readable_as_original_evidence() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("journal.sqlite");
+    let mut store = JournalStore::create(&path, "Lhistory").unwrap();
+    let mut original = event("check.observation");
+    original.data = serde_json::json!({"source":"retired-app","facts":{"state":"pending"}});
+    store.append(&[original]).unwrap();
+    store
+        .finish(&event("lab.finalized"), JournalState::Finalized)
+        .unwrap();
+    drop(store);
+    let retained = JournalReader::open(&path)
+        .unwrap()
+        .event(1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.kind, "check.observation");
+    assert_eq!(retained.data["facts"]["state"], "pending");
+}

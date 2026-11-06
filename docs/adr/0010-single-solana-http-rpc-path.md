@@ -1,5 +1,7 @@
 # Initial single Solana HTTP JSON-RPC path
 
+Application Checks and business Verdict evaluation were removed by user decision. References to them below are historical and do not authorize reimplementation. See [current scope](../product/overview.md) and [task 36](../../tasks/todo.md#36-remove-application-checks).
+
 The initial Ronchi traffic boundary is one configured Solana HTTP JSON-RPC path between the System Under Test and the Ronchi RPC Simulator. Base observability claims are limited to received requests, simulator lifecycle decisions, applied faults, RPC Boundary Results, and later requests on that path. Client Outcomes and internal application behavior require correlated optional SDK or Check evidence.
 
 WebSocket, fallback and multi-provider routing, Jito and other provider-specific APIs, OS-level traffic interception, and unrelated external services are deferred.
