@@ -80,7 +80,8 @@ Install Playwright's matching Chromium once with `npm --prefix dashboard exec --
 `RONCHI_CHROMIUM=/absolute/path/to/chromium` selects an existing executable.
 Browser tests launch the real binary in disposable projects. Review screenshots in `dashboard/test-results` after visual changes.
 Desktop/laptop layouts are primary; narrow layout receives basic handling.
-Screenshots, reports, research scratch files and local runtime artifacts are not committed.
+Test screenshots, reports, research scratch files and local runtime artifacts are not committed.
+Final product media referenced by the root README live in `docs/assets/readme/`; these curated assets are versioned.
 
 Browser tests cover live episodes, actual retained replies, retained viewing, layout editing and reconnect without mutation replay.
 Unit/model tests cover exact integers, transport ownership and all maintained Observation families.

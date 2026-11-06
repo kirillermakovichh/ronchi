@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="title desc">
+<title id="title">Ronchi — Make hidden failures visible.</title>
+<desc id="desc">Parallel bands bend around a controlled deviation. Two coral bands reveal the change.</desc>
+<rect width="1280" height="340" rx="12" fill="#101216"/>
+<g fill="#f0f3f6" font-family="Arial, Helvetica, sans-serif">
+<text x="48" y="72" font-size="28" font-weight="700" letter-spacing="8">RONCHI</text>
+<text x="46" y="161" font-size="58" font-weight="700" letter-spacing="-1.5">Make hidden</text>
+<text x="46" y="229" font-size="58" font-weight="700" letter-spacing="-1.5">failures visible.</text>
+<text x="48" y="291" font-size="21" fill="#bec8d5">Built for developers and coding agents.</text>
+</g>
+<g fill="none" stroke-width="8"><path d="M876 -15 V88 C876 123 834 132 834 169 S876 215 876 250 V355" stroke="#f0f3f6"/><path d="M907 -15 V88 C907 123 865 132 865 169 S907 215 907 250 V355" stroke="#f0f3f6"/><path d="M938 -15 V88 C938 123 896 132 896 169 S938 215 938 250 V355" stroke="#f0f3f6"/><path d="M969 -15 V88 C969 123 927 132 927 169 S969 215 969 250 V355" stroke="#f0f3f6"/><path d="M1000 -15 V88 C1000 123 958 132 958 169 S1000 215 1000 250 V355" stroke="#ff927c"/><path d="M1031 -15 V88 C1031 123 989 132 989 169 S1031 215 1031 250 V355" stroke="#ff927c"/><path d="M1062 -15 V88 C1062 123 1020 132 1020 169 S1062 215 1062 250 V355" stroke="#f0f3f6"/><path d="M1093 -15 V88 C1093 123 1051 132 1051 169 S1093 215 1093 250 V355" stroke="#f0f3f6"/><path d="M1124 -15 V88 C1124 123 1082 132 1082 169 S1124 215 1124 250 V355" stroke="#f0f3f6"/><path d="M1155 -15 V88 C1155 123 1113 132 1113 169 S1155 215 1155 250 V355" stroke="#f0f3f6"/><path d="M1186 -15 V88 C1186 123 1144 132 1144 169 S1186 215 1186 250 V355" stroke="#f0f3f6"/></g>
+</svg>

@@ -18,7 +18,8 @@ These are recorded results, not a claim that the documentation task reran them.
 All 326 local links/heading targets passed; all 19 ADRs, the glossary and core contracts were preserved.
 This task changed Markdown and agent reading routes only.
 Runtime source and existing release assets are unchanged by this task. No runtime tests or native rebuild were needed.
-No next implementation task has been selected.
+[Task 39](todo.md#39-readme-redesign) is complete. The README now presents Human + agent workflows with an original Ronchi band header, real Workspace/Observation captures, a foreground terminal example and verified startup/CLI/MCP instructions.
+The isolated release incident, Demo and foreground Ctrl-C checks passed. Render and local-link checks passed; research and scratch materials remain outside tracked files. Runtime code and dependencies were not changed. The user requested a local commit after verification. Nothing is published.
 
 ## Remaining validation
 

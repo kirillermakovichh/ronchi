@@ -2,7 +2,7 @@
 
 The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
 The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
-Current maintenance: [task 38](#38-documentation-organization).
+Current work: [task 39](#39-readme-redesign).
 
 ## Remaining validation
 
@@ -727,3 +727,16 @@ The original regression failed on the previous build: dragging Traffic by its ti
 - **Removed / retained:** Removed four obsolete initial-run/editor launch guides after extracting durable rules. Shortened plan and progress to current roles; completed evidence remains in this checklist. Moved the completed run ledger and unconfirmed diagnostic record into `tasks/history`. Preserved commit IDs from the old progress snapshots. All 19 numbered ADR addresses and non-link decision text remain; a dedicated ADR index makes current relationships explicit. Research sources and external links remain in their research owners.
 - **Corrections:** Documented twelve current MCP tools, implemented MCP/Solid modules, coral Fault styling and current dependencies. Removed nonexistent module names, removed-Check actions and unsupported example response fields. Clarified that deferred blockchain WebSocket is distinct from the implemented dashboard socket. The full independent-backend retest remains open; bounded earlier manual evidence is retained.
 - **Verification:** All 326 local Markdown links/heading targets passed. ADR paths/decision text and CONTEXT were checked against a temporary pre-edit snapshot. Cases, Custom Cases, RPC and evidence contracts remain unchanged, including candidate/Pack names and numeric limits. All UI/query/transport bounds remain in their consolidated owners; obsolete single-host Node/npm observations were not turned into support requirements. Commit references and research external sources were compared. `git diff --check` passed. Runtime/tests/assets were unchanged by this task, so no runtime test or native rebuild was performed. No commits or publication.
+
+### 39. README redesign
+
+- [x] **39a:** Study official developer-tool READMEs and GitHub formatting; record the brief and implementation boundaries in plan.md. Keep research notes outside tracked docs.
+- [x] **39b:** Direction selected: Human + agent with the branded Ronchi parallel-band header. Approved narrative leads with a real static Workspace scene. No mockups.
+- [x] **39c:** Produce the selected README, real terminal example and dashboard captures from an isolated known workload.
+- [x] **39d:** Verify current commands, truthful agent/mode claims, media readability and local links.
+
+- **Implemented:** Replaced the root README with the approved Human + agent presentation, an original parallel-band SVG header, a real populated Workspace, a focused Observation path and an actual PTY terminal transcript rendered as PNG. Added copyable build, Demo, own-backend, Case, filtered CLI and MCP commands. Linked detailed contracts instead of embedding their full specification. Final README media live in `docs/assets/readme/`; the development guide distinguishes these assets from disposable test captures.
+- **Evidence:** The isolated release scenario recorded one accepted submission, response withholding, client disconnect, two status checks (`null`, then simulated `finalized` with `err: null`) and no repeat submission. CLI summary, requests, Findings, field-projected evidence and exact-event payload queries succeeded against the same history. A separate real Demo confirmed the stopped relayer, retained ready Lab and dashboard launch command. A foreground PTY capture exited successfully after Ctrl-C. All capture Labs were stopped by their exact IDs; user Labs were not touched.
+- **Verification:** Local Markdown/HTML rendering loaded all four images with alt text, produced no browser errors or horizontal overflow at GitHub-like content width, and was inspected in light/dark presentation. All 329 local Markdown links/anchors passed; HTML media/navigation references were checked separately. PNG metadata and sources contain no dashboard credentials or personal paths. `git diff --check` passed. Runtime source, dependencies and existing release assets were unchanged; no broad runtime suite or rebuild was needed. Research, raw output, render previews and capture scripts remain outside the repository. No commit or publication.
+
+Research compared uv, Bun, Gum, VHS, LazyGit, OpenCode, mitmproxy and HTTP Toolkit. These references informed presentation; they do not establish usability or performance measurements.
