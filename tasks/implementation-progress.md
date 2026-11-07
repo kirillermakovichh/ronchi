@@ -21,11 +21,16 @@ The requested CI caches are implemented and exercised. Observed cold/warm job ti
 
 All eight published files were downloaded with GitHub authentication. All three archive SHA-256 values and metadata were verified. The actual downloaded ARM archive passed installation, embedded dashboard, private Surfpool, retained Journal, tamper, reinstall and live-update checks. Temporary installations and Labs were cleaned; original user Labs/backends were not touched.
 
-Anonymous public curl verification remains open because the repository is private. The user has been asked asynchronously to authorize making the whole repository/history public; no answer has arrived. Do not change visibility without that authorization. README accurately marks public downloads as pending. After permission, verify the actual public installer in an isolated prefix, apply the prepared release notes, remove the warning, close task 41d and push final docs.
+Anonymous public curl verification remains open because the repository is private. The user explicitly deferred making the repository public. Do not change visibility without that authorization. README accurately marks public downloads as pending. If the user later authorizes public access, verify the actual public installer in an isolated prefix, apply the prepared release notes, remove the warning, close task 41d and push final docs.
 
 MIT and bundled pinned Surfpool are implemented by [task 40](todo.md#40-curl-installation-and-bundled-surfpool) and ADR-0020. Runtime data remains project-local. Homebrew remains deferred.
 
 Earlier documentation/README work is recorded in [tasks 38–39](todo.md#38-documentation-organization).
+
+## Yellow palette and README refresh
+
+The user selected a yellow signal palette. Dashboard accent is `#f3d65b`; related backgrounds are centralized in its CSS tokens. The terminal mark uses a 10×8 Braille dot grid to retain four raised bands in 5×2 text cells. Runtime details use plain labels/hints with the Lab name and endpoint URLs in the mark's yellow; other secondary hints retain yellow. The local release executable is rebuilt. Palette and terminal changes are committed and pushed as `722b8a7`. Frontend build/64 tests and the updated terminal PTY suite (5), fmt and Clippy passed at their respective change scopes.
+README now uses the three original screenshots supplied by the user from the Desktop: foreground Simulator terminal, retained Surfpool Workspace and its Observation detail. The PNGs were copied byte-for-byte without redrawing, cropping or recoloring. The SVG header uses the yellow accent. Captions describe one submission, twenty-second withholding, two finalized status replies and one transaction lookup; no application business outcome is inferred. The existing `v0.1.0` release and private repository visibility remain unchanged.
 
 ## Remaining validation
 

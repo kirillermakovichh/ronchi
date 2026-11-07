@@ -19,9 +19,9 @@ Ronchi makes that behavior visible. Start a local Lab, point your backend at its
 
 **Open source · Local-first · No account or cloud required · No application SDK required**
 
-![Ronchi Workspace with an active response-loss Case, related RPC traffic, one Observation and its expanded transaction path](docs/assets/readme/workspace.png)
+![Ronchi Workspace showing retained Surfpool traffic and a selected response-loss Observation with its expanded RPC path](docs/assets/readme/workspace.png)
 
-*Real Simulator session: one submission, a withheld response and two status checks. The last status reply reports simulated `finalized` with `err: null`.*
+*Retained Surfpool session: one selected submission, a withheld response, two status checks and one transaction lookup. Both status replies report `finalized` with `err: null`. Screenshots show the current source build.*
 
 ## One Lab. Two ways to investigate.
 
@@ -38,19 +38,20 @@ Both interfaces read the **same Lab Journal**. The dashboard updates over a live
 With `tx-response-lost`, Ronchi withholds the response after acceptance. Your backend sees an ambiguous submission. Its subsequent RPC calls reveal how it reacts.
 
 <p align="center">
-  <img src="docs/assets/readme/observation.png" width="640" alt="Observation path: Simulator accepted the transaction; Ronchi withheld the response; the request ended without a response; two later status checks returned null and then simulated finalized with err null.">
+  <img src="docs/assets/readme/observation.png" width="640" alt="Observation path: Surfpool returned a signature; Ronchi withheld the response; two status checks returned finalized with err null; a transaction lookup returned the transaction; the original request ended without a response.">
 </p>
 
 In this captured history:
 
-- The Simulator accepted **one transaction**.
-- Ronchi withheld its submission response, with a **20-second limit**. The client disconnected earlier.
-- The client made **two status checks** for the same signature. The replies were `null`, then simulated `finalized` with `err: null`.
+- Surfpool returned a signature for **one submission**.
+- Ronchi withheld the submission response for **20 seconds**. The original request ended without a response.
+- The application made **two status checks** for the same signature. Both replies reported `finalized` with `err: null`.
+- The application requested the transaction once. That RPC reply returned the transaction with `err: null`.
 - **No repeat submission** of that signature appeared in the selected history.
 
 Expand **Technical details** for identifiers, supporting events and retained RPC payloads. Each path step keeps its evidence links.
 
-A returned status establishes an RPC observation. Simulated finality does not prove a transfer, and neither mode proves that the backend completed its business operation.
+These replies establish observed RPC behavior. They do not prove that the backend completed its business operation. The default Simulator does not execute transfers.
 
 ## Built for coding agents
 
@@ -153,7 +154,7 @@ ronchi up
 
 ![Actual Ronchi foreground terminal output showing the Lab, local RPC address, dashboard address and Ctrl-C instructions](docs/assets/readme/terminal.png)
 
-*Actual foreground output captured through a PTY with `--no-animation` and automatically assigned ports. Interactive startup animates by default.*
+*Foreground Simulator Lab with local RPC and dashboard addresses. Ctrl-C stops the Lab. Interactive startup animates by default.*
 
 1. Open the dashboard link printed in the terminal.
 2. Set your backend's Solana RPC URL to Ronchi's printed RPC URL.
