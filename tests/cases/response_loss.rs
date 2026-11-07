@@ -243,7 +243,7 @@ async fn disarm_and_replacement_keep_original_hold_deadline_and_policy_revision(
     let initial = server
         .rpc
         .arm_case(ronchi::cases::Arm {
-            hold_ms: 400,
+            hold_ms: 2000,
             ..Default::default()
         })
         .await
@@ -271,6 +271,13 @@ async fn disarm_and_replacement_keep_original_hold_deadline_and_policy_revision(
         })
         .await
         .unwrap();
+    // A shorter replacement must not end the original hold. Use a larger
+    // original deadline so setup/journal I/O cannot consume this assertion window.
+    let after_replacement = held(&server).await;
+    assert_eq!(
+        after_replacement[0].policy_revision,
+        effects[0].policy_revision
+    );
     assert!(
         tokio::time::timeout(Duration::from_millis(100), stream.read_u8())
             .await
@@ -279,12 +286,12 @@ async fn disarm_and_replacement_keep_original_hold_deadline_and_policy_revision(
     server
         .rpc
         .arm_case(ronchi::cases::Arm {
-            hold_ms: 2000,
+            hold_ms: 6000,
             ..Default::default()
         })
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_millis(800), eof(&mut stream))
+    tokio::time::timeout(Duration::from_millis(3000), eof(&mut stream))
         .await
         .unwrap();
     server.time.advance(Duration::from_secs(6)).unwrap();
@@ -297,10 +304,11 @@ async fn batch_has_one_binding_one_hold_slot_and_per_element_boundary_without_no
  {
     let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
     server.rpc.wait_initialized().await.unwrap();
+    // Keep the hold long enough to prepare every batch item on slower disks.
     let binding = server
         .rpc
         .arm_case(ronchi::cases::Arm {
-            hold_ms: 180,
+            hold_ms: 2000,
             max_held: 1,
             ..Default::default()
         })

@@ -344,9 +344,11 @@ mod custom_lifecycle_cases {
     async fn custom_timeout_notifications_do_not_consume_shared_batch_selection() {
         let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
         server.rpc.wait_initialized().await.unwrap();
+        // This test checks batch selection and preparation, not a 40 ms deadline.
+        // Allow the journal commits to complete on a busy native CI runner.
         arm(&server, &artifact(&["rpc.timeout-before-dispatch@1", "observe.rpc@1"],
             &["getSlot", "getBlockHeight"], "case", json!([
-                {"id":"outage","using":"rpc.timeout-before-dispatch@1","with":{"hold_real_ms":40},"until":{"matches":1},"next":"observe"},
+                {"id":"outage","using":"rpc.timeout-before-dispatch@1","with":{"hold_real_ms":2000},"until":{"matches":1},"next":"observe"},
                 {"id":"observe","using":"observe.rpc@1","until":{"matches":1},"next":"done"}
             ]))).await;
         let (status, body) = server
