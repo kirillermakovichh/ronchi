@@ -547,6 +547,33 @@ mod custom_lifecycle_cases {
         assert_eq!(mixed[1].data["signatures"], json!([b, a]));
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn custom_lookup_effect_page_rolls_back_before_a_masked_response_can_escape() {
+        let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
+        server.rpc.wait_initialized().await.unwrap();
+        let hash = server.hash().await;
+        let (a, wire_a) = signed(&hash, 201, false);
+        let (b, wire_b) = signed(&hash, 202, false);
+        for (signature, wire) in [(&a, &wire_a), (&b, &wire_b)] {
+            assert_eq!(server.call("sendTransaction", send(wire)).await["result"], *signature);
+        }
+        server.time.advance(Duration::from_secs(6)).unwrap();
+        server.phase(&b, Phase::Finalized).await;
+        arm(&server, &artifact(&["rpc.lookup-null@1"], &["getSignatureStatuses"], "transaction_signature",
+            json!([{"id":"hide","using":"rpc.lookup-null@1","until":{"matches":1},"next":"done"}]))).await;
+        let database = rusqlite::Connection::open(server.directory.path().join("journal.sqlite")).unwrap();
+        database.execute_batch("CREATE TRIGGER fail_effect_page BEFORE INSERT ON events WHEN json_extract(NEW.event_json,'$.kind')='fault.custom_lookup_changed' AND json_extract(NEW.event_json,'$.data.entry_index')=1 BEGIN SELECT RAISE(ABORT,'effect page fixture'); END;").unwrap();
+        if let Ok((_, body)) = server.http(rpc(1, "getSignatureStatuses", json!([[a,b]]))).await {
+            let reply: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(reply["error"]["data"]["code"], "journal_failed", "{reply}");
+        }
+        assert_ne!(server.writer.as_ref().unwrap().handle().status().health, WriterHealth::Healthy);
+        assert!(!server.stop(false).await);
+        let evidence = events(&server).await;
+        assert_eq!(evidence.iter().filter(|event| event.kind == "rpc.custom_lookup_source").count(), 2);
+        assert_eq!(evidence.iter().filter(|event| event.kind == "fault.custom_lookup_changed").count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn custom_maximum_status_array_keeps_selection_evidence_bounded_and_lab_healthy() {
         let mut server = Server::new(ClockProfile::default(), DiskLimits::default()).await;
         server.rpc.wait_initialized().await.unwrap();
@@ -642,6 +669,14 @@ mod custom_lifecycle_cases {
         assert_eq!(changed.len(), 256);
         for event in selected.iter().chain(changed.iter()) {
             assert!(serde_json::to_vec(event).unwrap().len() <= ronchi::journal::MAX_EVENT_BYTES);
+        }
+        let reader = JournalReader::open(&server.directory.path().join("journal.sqlite")).unwrap();
+        for event in changed {
+            let source = reader.event(event.data["source_event_seq"].as_u64().unwrap()).unwrap().unwrap();
+            assert_eq!(source.kind, "rpc.custom_lookup_source");
+            for field in ["signature", "entry_index", "request"] {
+                assert_eq!(source.data[field], event.data[field], "{field}");
+            }
         }
     }
 }

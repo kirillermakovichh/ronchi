@@ -47,19 +47,36 @@ impl Owner {
         data: Value,
         backend: Option<&crate::backend::Client>,
     ) -> Result<u64, RpcError> {
-        let (mut data, redacted) = backend
-            .map(|backend| backend.redact(&data))
-            .unwrap_or((data, false));
-        if redacted {
-            data["payload_status"] = json!("redacted");
+        self.status_append_page(source, vec![(kind, data)], backend)
+            .await
+    }
+    /// One bounded page is one writer unit; its receipt identifies its final event.
+    pub(super) async fn status_append_page(
+        &mut self,
+        source: &str,
+        items: Vec<(&str, Value)>,
+        backend: Option<&crate::backend::Client>,
+    ) -> Result<u64, RpcError> {
+        if items.is_empty() || items.len() > 8 {
+            return Err(RpcError::internal());
         }
-        let mut event = crate::lab::event(kind, self.started, data);
-        event.source = source.into();
-        if self.backend {
-            event.execution_mode = crate::config::Mode::Surfpool;
+        let mut events = Vec::with_capacity(items.len());
+        for (kind, data) in items {
+            let (mut data, redacted) = backend
+                .map(|backend| backend.redact(&data))
+                .unwrap_or((data, false));
+            if redacted {
+                data["payload_status"] = json!("redacted");
+            }
+            let mut event = crate::lab::event(kind, self.started, data);
+            event.source = source.into();
+            if self.backend {
+                event.execution_mode = crate::config::Mode::Surfpool;
+            }
+            events.push(event);
         }
         let writer = self.writer.clone();
-        let receipt = tokio::task::spawn_blocking(move || writer.try_append(&[event]))
+        let receipt = tokio::task::spawn_blocking(move || writer.try_append(&events))
             .await
             .map_err(|_| RpcError::internal())?
             .map_err(|_| RpcError::internal())?;

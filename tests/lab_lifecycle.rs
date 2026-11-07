@@ -1296,8 +1296,9 @@ fn investigation_ctrl_c_and_broken_pipe_release_readers_while_rpc_keeps_working(
         .unwrap()
         .join("journal.sqlite");
     let connection = rusqlite::Connection::open(path).unwrap();
-    connection.busy_timeout(Duration::ZERO).unwrap();
     connection.execute_batch("ALTER TABLE query_events RENAME TO retained_navigation; CREATE VIEW query_events AS WITH RECURSIVE work(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM work WHERE x<100000000) SELECT retained_navigation.* FROM retained_navigation CROSS JOIN work;").unwrap();
+    // Checkpoints below must report retained readers without waiting for them.
+    connection.busy_timeout(Duration::ZERO).unwrap();
     let address = manifest.rpc_address.unwrap();
     let health = || {
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"getHealth"}"#;
@@ -1394,6 +1395,8 @@ fn investigation_ctrl_c_and_broken_pipe_release_readers_while_rpc_keeps_working(
         health();
         assert_eq!(p.ok(&["status"])["lab_id"], manifest.lab_id);
     }
+    // Schema restoration is a write, unlike the nonblocking checkpoint probes.
+    connection.busy_timeout(Duration::from_secs(5)).unwrap();
     connection
         .execute_batch(
             "DROP VIEW query_events; ALTER TABLE retained_navigation RENAME TO query_events;",
