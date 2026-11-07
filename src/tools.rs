@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
     io::Read,
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -62,7 +63,11 @@ fn platform() -> Result<(&'static str, &'static str), LabError> {
         .map(|artifact| (artifact.platform, artifact.sha256))
         .ok_or_else(|| LabError::unsupported("Pinned Surfpool artifact is absent from the catalog"))
 }
-fn digest(mut reader: impl Read, limit: u64, deadline: Instant) -> Result<String, LabError> {
+fn digest(
+    mut reader: impl Read + AsRawFd,
+    limit: u64,
+    deadline: Instant,
+) -> Result<String, LabError> {
     let mut hash = Sha256::new();
     let mut bytes = [0u8; 64 * 1024];
     let mut total = 0;
@@ -75,7 +80,22 @@ fn digest(mut reader: impl Read, limit: u64, deadline: Instant) -> Result<String
         let n = match reader.read(&mut bytes) {
             Ok(n) => n,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
+                // Wake as soon as tar produces bytes; a fixed sleep on every empty
+                // pipe throttles large native binaries on small-pipe platforms.
+                let mut descriptor = libc::pollfd {
+                    fd: reader.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let timeout_ms = remaining.as_millis().clamp(1, 1000) as i32;
+                // SAFETY: descriptor owns no fd; reader keeps its fd alive for this call.
+                if unsafe { libc::poll(&mut descriptor, 1, timeout_ms) } < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() != std::io::ErrorKind::Interrupted {
+                        return Err(error.into());
+                    }
+                }
                 continue;
             }
             Err(error) => return Err(error.into()),
@@ -130,7 +150,6 @@ fn expected_binary(archive: &Path, deadline: Instant) -> Result<String, LabError
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
-    use std::os::fd::AsRawFd;
     if let Some(stdout) = child.stdout.as_ref() {
         // SAFETY: stdout is this owned pipe; nonblocking reads permit cooperative deadline checks.
         unsafe {
@@ -343,6 +362,41 @@ pub async fn install(project: PathBuf, archive: PathBuf) -> Result<Installed, La
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonblocking_digest_waits_for_streamed_bytes_and_eof() {
+        use std::{io::Write, os::unix::net::UnixStream};
+        let (reader, mut sender) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let bytes = vec![0xA5; 4 * 1024 * 1024];
+        let expected: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let producer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            sender.write_all(&bytes).unwrap();
+        });
+        let actual = digest(
+            reader,
+            BINARY_LIMIT,
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+        producer.join().unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn nonblocking_digest_stops_when_an_idle_stream_exceeds_its_deadline() {
+        use std::os::unix::net::UnixStream;
+        let (reader, _sender) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let started = Instant::now();
+        let error = digest(reader, BINARY_LIMIT, started + Duration::from_millis(30)).unwrap_err();
+        assert!(error.message.contains("Native tool operation exceeded"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[test]
     fn incomplete_distribution_never_uses_a_project_tool() {
