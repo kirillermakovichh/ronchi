@@ -7,6 +7,8 @@ import io
 import os
 from pathlib import Path
 import platform
+import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -36,6 +38,11 @@ class Installer(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('RONCHI_')}
         self.env['RONCHI_RELEASE_BASE_URL'] = f'http://127.0.0.1:{self.server.server_port}'
         self.env['RONCHI_INSTALL_PREFIX'] = str(self.prefix)
+        self.shell_home = self.root / 'shell home'
+        self.shell_home.mkdir()
+        self.env['HOME'] = str(self.shell_home)
+        self.env['SHELL'] = '/bin/bash'
+        self.env.pop('ZDOTDIR', None)
 
     def tearDown(self):
         self.server.shutdown()
@@ -220,9 +227,154 @@ class Installer(unittest.TestCase):
         self.run_install(success=False)
         self.assertEqual(list(external.iterdir()), [])
 
+    def test_zsh_setup_preserves_existing_config_and_is_idempotent(self):
+        self.release()
+        self.env['SHELL'] = '/bin/zsh'
+        profile = self.shell_home / '.zshrc'
+        original = '# Existing shell configuration without a trailing newline'
+        profile.write_text(original)
+        self.run_install()
+        configured = profile.read_text()
+        self.assertTrue(configured.startswith(original + '\n'))
+        self.assertIn('export PATH=', configured)
+        self.run_install()
+        self.assertEqual(profile.read_text(), configured)
+        # The same portable block is valid in both bash and zsh.
+        shells = ['bash']
+        if shutil.which('zsh'):
+            shells.append('zsh')
+        for shell in shells:
+            result = subprocess.check_output([shell, '-c', '. "$1"; . "$1"; command -v ronchi; printf "%s\n" "$PATH"', shell, str(profile)], env=self.env, text=True)
+            lines = result.splitlines()
+            self.assertEqual(lines[0], str(self.prefix.resolve() / 'bin/ronchi'))
+            self.assertEqual(lines[1].split(os.pathsep).count(lines[0].rsplit('/', 1)[0]), 1)
+
+    def test_zsh_uses_zdotdir(self):
+        self.release()
+        self.env['SHELL'] = '/bin/zsh'
+        directory = self.root / 'custom zsh configuration'
+        self.env['ZDOTDIR'] = str(directory)
+        self.run_install()
+        self.assertTrue((directory / '.zshrc').is_file())
+        self.assertFalse((self.shell_home / '.zshrc').exists())
+        if shutil.which('zsh'):
+            result = subprocess.run(['zsh', '-ic', 'ronchi --version'], env=self.env, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'ronchi 1.2.3')
+
+    def test_bash_configures_interactive_and_selected_login_profile(self):
+        self.release()
+        profile = self.shell_home / '.bash_profile'
+        profile.write_text('# Existing login configuration\n')
+        self.run_install()
+        self.assertIn('export PATH=', (self.shell_home / '.bashrc').read_text())
+        self.assertIn('export PATH=', profile.read_text())
+        self.assertFalse((self.shell_home / '.profile').exists())
+        for target in ['.bashrc', '.bash_profile']:
+            result = subprocess.check_output(['bash', '-c', '. "$1"; command -v ronchi', 'bash', str(self.shell_home / target)], env=self.env, text=True)
+            self.assertEqual(result.strip(), str(self.prefix.resolve() / 'bin/ronchi'))
+        for flags in [['--noprofile', '-ic'], ['--login', '-c']]:
+            result = subprocess.run(['bash', *flags, 'ronchi --version'], env=self.env, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'ronchi 1.2.3')
+
+    def test_bash_default_login_profile_and_no_duplicate_path(self):
+        self.release()
+        self.env['PATH'] = str(self.prefix / 'bin') + os.pathsep + self.env['PATH']
+        self.run_install()
+        profile = self.shell_home / '.profile'
+        self.assertIn('export PATH=', profile.read_text())
+        initial = profile.read_bytes()
+        self.run_install()
+        self.assertEqual(profile.read_bytes(), initial)
+
+    def test_profile_symlink_is_preserved(self):
+        self.release()
+        target = self.root / 'dotfiles-bashrc'
+        target.write_text('# Shared dotfile\n')
+        profile = self.shell_home / '.bashrc'
+        profile.symlink_to(target)
+        self.run_install()
+        self.assertTrue(profile.is_symlink())
+        self.assertTrue(target.read_text().startswith('# Shared dotfile\n'))
+        self.assertIn('export PATH=', target.read_text())
+
+    def test_unusable_profile_does_not_fail_binary_install(self):
+        self.release()
+        self.env['SHELL'] = '/bin/zsh'
+        (self.shell_home / '.zshrc').mkdir()
+        result = self.run_install()
+        self.assertIn('Cannot configure PATH', result.stderr)
+        self.assertTrue((self.prefix / 'bin/ronchi').is_file())
+        self.assertIn('export PATH=', result.stdout)
+
+    def test_no_modify_path_leaves_shell_files_unchanged(self):
+        self.release()
+        profile = self.shell_home / '.bashrc'
+        profile.write_text('# Keep unchanged\n')
+        self.run_install('--no-modify-path')
+        self.assertEqual(profile.read_text(), '# Keep unchanged\n')
+        self.assertFalse((self.shell_home / '.profile').exists())
+
+    def test_documented_one_line_install_activates_current_shell(self):
+        self.release()
+        self.env.pop('RONCHI_INSTALL_PREFIX')
+        self.prefix = self.shell_home / '.local'
+        # Use the actual README pipeline, changing only its download URL to our mirror.
+        readme = (ROOT / 'README.md').read_text()
+        command = re.search(r"```bash\n(curl --proto [^`]+)```", readme)
+        self.assertIsNotNone(command, 'README needs one install command that activates PATH')
+        command = command.group(1).strip()
+        self.mirror.joinpath('latest/download/install.sh').write_bytes((ROOT / 'install.sh').read_bytes())
+        command = command.replace("--proto '=https' --tlsv1.2", "--proto '=http,https'").replace('https://raw.githubusercontent.com/kirillermakovichh/ronchi/main/install.sh', self.env['RONCHI_RELEASE_BASE_URL'] + '/latest/download/install.sh')
+        command += '\nronchi --version\n'
+        result = subprocess.run(['bash', '-c', command], env=self.env, text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(result.stdout.rstrip().endswith('ronchi 1.2.3'), result.stdout)
+        self.assertTrue((self.shell_home / '.bashrc').is_file())
+
+    def test_bash_login_precedence_preserves_other_profile(self):
+        self.release()
+        login = self.shell_home / '.bash_login'
+        login.write_text('# Selected login profile\n')
+        other = self.shell_home / '.profile'
+        other.write_text('# Unselected profile\n')
+        self.run_install()
+        self.assertIn('export PATH=', login.read_text())
+        self.assertEqual(other.read_text(), '# Unselected profile\n')
+
+    def test_unknown_or_empty_shell_uses_manual_fallback(self):
+        self.release()
+        for shell in ['/bin/fish', '']:
+            self.env['SHELL'] = shell
+            result = self.run_install()
+            self.assertIn('export PATH=', result.stdout)
+            self.assertEqual(list(self.shell_home.iterdir()), [])
+
+    def test_shell_metacharacters_in_prefix_remain_literal(self):
+        self.release()
+        self.prefix = self.root / 'literal $(touch injected) `touch injected` [*]'
+        self.env['RONCHI_INSTALL_PREFIX'] = str(self.prefix)
+        self.run_install()
+        result = subprocess.check_output(['bash', '-c', '. "$1"; command -v ronchi', 'bash', str(self.shell_home / '.bashrc')], cwd=self.root, env=self.env, text=True)
+        self.assertEqual(result.strip(), str(self.prefix.resolve() / 'bin/ronchi'))
+        self.assertFalse((self.root / 'injected').exists())
+
+    def test_invalid_archive_does_not_modify_shell_profiles(self):
+        self.release().write_bytes(b'broken archive')
+        self.run_install(success=False)
+        self.assertEqual(list(self.shell_home.iterdir()), [])
+
+    def test_prefix_cannot_contain_path_separator(self):
+        self.release()
+        self.prefix = self.root / 'invalid:prefix'
+        self.env['RONCHI_INSTALL_PREFIX'] = str(self.prefix)
+        self.assertIn('colons or newlines', self.run_install(success=False).stderr)
+        self.assertEqual(list(self.shell_home.iterdir()), [])
+
     def test_path_instruction_handles_single_quotes(self):
         self.release()
-        output = self.run_install().stdout
+        output = self.run_install('--no-modify-path').stdout
         instruction = next(line.strip() for line in output.splitlines() if line.strip().startswith('export PATH='))
         resolved = subprocess.check_output(['sh', '-c', instruction + '\ncommand -v ronchi'], text=True).strip()
         self.assertEqual(resolved, str(self.prefix.resolve() / 'bin/ronchi'))

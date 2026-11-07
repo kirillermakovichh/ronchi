@@ -6,17 +6,21 @@ export LC_ALL
 umask 022
 fail() { printf 'ronchi install: %s\n' "$*" >&2; exit 1; }
 usage() {
-    printf '%s\n' 'Usage: sh install.sh [--version VERSION] [--prefix DIRECTORY]' \
-        'Default prefix: $HOME/.local. Update by running this installer again.'
+    printf '%s\n' 'Usage: sh install.sh [--version VERSION] [--prefix DIRECTORY] [--no-modify-path]' \
+        'Default prefix: $HOME/.local. Update by running this installer again.' \
+        'Configures PATH in zsh, bash or POSIX login profiles by default.' \
+        '--no-modify-path leaves shell configuration unchanged.'
 }
 surfpool_version=1.7.0
 version=${RONCHI_VERSION:-}
 prefix=${RONCHI_INSTALL_PREFIX:-${HOME:?HOME must be set}/.local}
 base=${RONCHI_RELEASE_BASE_URL:-https://github.com/kirillermakovichh/ronchi/releases}
+modify_path=true
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || fail '--version needs a value'; version=$2; shift 2 ;;
         --prefix) [ "$#" -ge 2 ] || fail '--prefix needs a value'; prefix=$2; shift 2 ;;
+        --no-modify-path) modify_path=false; shift ;;
         -h|--help) usage; exit 0 ;;
         *) fail "Unknown argument: $1" ;;
     esac
@@ -51,6 +55,10 @@ download() {
 }
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -P "$prefix" && pwd)
+case "$prefix" in
+    *:*|*'
+'*) fail 'Install prefix must not contain colons or newlines' ;;
+esac
 lock=$prefix/.ronchi-install-lock
 mkdir "$lock" 2>/dev/null || fail "Another installation is running (lock: $lock)"
 stage=
@@ -140,13 +148,58 @@ if [ -L "$prefix/bin/ronchi" ] && [ -d "$prefix/bin/ronchi" ]; then fail 'Existi
 mv -f "$link" "$prefix/bin/ronchi"
 link=
 printf 'Installed: %s/bin/ronchi\n' "$prefix"
+# Keep the path literal even when a custom prefix contains shell metacharacters.
+escaped=$(printf '%s' "$prefix/bin" | sed "s/'/'\\\\''/g")
+path_line="    *) export PATH='$escaped':\"\$PATH\" ;;"
+configure_profile() {
+    profile=$1
+    if { [ -e "$profile" ] && [ ! -f "$profile" ]; } || { [ -L "$profile" ] && [ ! -f "$profile" ]; }; then
+        printf 'ronchi install: Cannot configure PATH in %s; expected a regular shell profile\n' "$profile" >&2
+        return 1
+    fi
+    if [ -f "$profile" ] && grep -Fqx "$path_line" "$profile"; then
+        return 0
+    fi
+    if ! mkdir -p "${profile%/*}" || ! cat "$stage/shell-path" >> "$profile"; then
+        printf 'ronchi install: Cannot configure PATH in %s\n' "$profile" >&2
+        return 1
+    fi
+    printf 'PATH configured: %s\n' "$profile"
+}
+path_configured=false
+if [ "$modify_path" = true ]; then
+    # This block also prevents repeated sourcing from duplicating the PATH entry.
+    printf '\n# Ronchi\ncase ":${PATH:-}:" in\n    *:\047%s\047:*) ;;\n%s\nesac\n' "$escaped" "$path_line" > "$stage/shell-path"
+    shell_name=${SHELL:-}
+    case "${shell_name##*/}" in
+        zsh)
+            if configure_profile "${ZDOTDIR:-$HOME}/.zshrc"; then path_configured=true; fi
+            ;;
+        bash)
+            login_profile=$HOME/.profile
+            for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+                if [ -e "$candidate" ] || [ -L "$candidate" ]; then login_profile=$candidate; break; fi
+            done
+            if configure_profile "$HOME/.bashrc"; then
+                if configure_profile "$login_profile"; then path_configured=true; fi
+            fi
+            ;;
+        sh|dash|ksh)
+            if configure_profile "$HOME/.profile"; then path_configured=true; fi
+            ;;
+        *) printf 'ronchi install: Automatic PATH setup supports zsh, bash and POSIX shells; shell profile unchanged\n' >&2 ;;
+    esac
+fi
 case ":${PATH:-}:" in
     *":$prefix/bin:"*) printf 'Run: ronchi up\n' ;;
     *)
-        printf '\nAdd this directory to PATH in your shell profile:\n'
-        escaped=$(printf '%s' "$prefix/bin" | sed "s/'/'\\\\''/g")
-        printf "  export PATH='%s':\"\$PATH\"\n" "$escaped"
-        printf '\nThen run: ronchi up\n'
+        if [ "$path_configured" = true ]; then
+            printf 'Run: ronchi up\n'
+        else
+            printf '\nAdd this directory to PATH in your shell profile:\n'
+            printf "  export PATH='%s':\"\$PATH\"\n" "$escaped"
+            printf '\nThen run: ronchi up\n'
+        fi
         ;;
 esac
 printf 'Surfpool is installed privately. Lab data stays in each project\047s ronchi/ directory.\n'

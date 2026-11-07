@@ -44,6 +44,12 @@ Anonymous public downloads matched all three SHA-256 files and the eight-asset i
 
 Release notes and README now point users to v0.1.1. Homebrew remains deferred. Temporary verification scripts, logs and downloads stay outside the repository.
 
+## Automatic PATH installation
+
+The user accepted automatic shell-profile configuration and one command that activates PATH immediately. The maintained installer now configures zsh/Bash/POSIX profiles with a guarded, idempotent block. It preserves existing contents and valid dotfile symlinks. `--no-modify-path` opts out. README uses the installer from `main` and appends the parent-shell export; binaries still come from the verified native Releases.
+
+[Task 44](todo.md#44-automatic-shell-path-setup) records 29 fixture tests and the actual published macOS ARM v0.1.1 archive smoke. New terminals, reinstall, retained Journals, tamper rejection and live Surfpool update passed with temporary shell homes and projects. User profiles and Labs were untouched. Public source publication/command verification is the remaining step. No new native version or tag is needed for the installer change.
+
 ## Remaining validation
 
 Repeat the complete independent stateful-backend/pool-discovery workflow after the earlier fixes and latest UI changes.

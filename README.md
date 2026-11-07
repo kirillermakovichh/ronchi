@@ -100,10 +100,10 @@ Install with:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/kirillermakovichh/ronchi/releases/latest/download/install.sh | sh
+  https://raw.githubusercontent.com/kirillermakovichh/ronchi/main/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Run the same command to update. The installer keeps old releases for running Labs and prints a PATH instruction if needed. It does not edit your shell profile automatically.
+Run the same command to update. Ronchi is available immediately and in new zsh or bash terminals. The installer preserves existing shell settings and avoids duplicate PATH entries. Old releases stay available for running Labs.
 Journals and Lab state remain in each project's `ronchi/` directory. See [installation layout and removal](docs/development.md#curl-installation-layout).
 
 ### Build from source

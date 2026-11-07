@@ -54,14 +54,23 @@ def main():
         (sentinel / 'surfpool').write_text('#!/bin/sh\nexit 99\n')
         (sentinel / 'surfpool').chmod(0o755)
         env['PATH'] = str(sentinel) + os.pathsep + env['PATH']
+        shell_home = temporary / 'shell-home'
+        shell_home.mkdir()
+        env['HOME'] = str(shell_home)
+        env['SHELL'] = '/bin/bash'
+        env.pop('ZDOTDIR', None)
         try:
             command = ['sh', '-s', '--', '--prefix', str(prefix)]
             subprocess.run(command, input=(ROOT / 'install.sh').read_text(), env=env, text=True, check=True, timeout=120)
             binary = prefix / 'bin/ronchi'
             first = binary.resolve()
+            profile = (shell_home / '.bashrc').read_bytes()
+            found = subprocess.run(['bash', '--noprofile', '-ic', 'ronchi --version'], env=env, text=True, capture_output=True, timeout=15)
+            assert found.returncode == 0 and found.stdout.strip() == f'ronchi {version}', found
             subprocess.run(['python3', str(ROOT / 'scripts/smoke-installed.py'), str(binary)], env=env, check=True, timeout=180)
             subprocess.run(command, input=(ROOT / 'install.sh').read_text(), env=env, text=True, check=True, timeout=120)
             assert binary.resolve() == first
+            assert (shell_home / '.bashrc').read_bytes() == profile
             # Model a rebuilt release with the same version while a real Surfpool
             # Lab owns the old executable. Only test-mirror package content changes.
             active = temporary / 'active-update-project'

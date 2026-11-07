@@ -188,8 +188,8 @@ Publishing a tag/release is a separate authorized action. The current implementa
 
 ### Curl installation layout
 
-The default prefix is `~/.local`; `--prefix /absolute/path` or `RONCHI_INSTALL_PREFIX` selects another prefix. The installer uses curl, tar and sha256sum or shasum; it never invokes sudo, Cargo, npm or Python.
-It downloads from GitHub Releases by default. `--version VERSION` selects a fixed release; otherwise `release-version.txt` from the latest release selects it. `RONCHI_RELEASE_BASE_URL` supports an explicit HTTPS mirror or a loopback HTTP fixture.
+The default prefix is `~/.local`; `--prefix /absolute/path` or `RONCHI_INSTALL_PREFIX` selects another prefix. Prefixes cannot contain colons or newlines. The installer uses curl, tar and sha256sum or shasum; it never invokes sudo, Cargo, npm or Python.
+The README downloads the maintained installer from `main` through `raw.githubusercontent.com`. Installer fixes can ship independently of native binaries. Existing release-attached installers remain the snapshots published with those releases. The maintained installer downloads native archives from GitHub Releases. `--version VERSION` selects a fixed binary release; otherwise `release-version.txt` from the latest release selects it. `RONCHI_RELEASE_BASE_URL` supports an explicit HTTPS mirror or a loopback HTTP fixture.
 Archives and their SHA-256 files come from the release host. Checksums detect corruption; they do not authenticate a compromised release host.
 
 ```text
@@ -206,6 +206,10 @@ Archives and their SHA-256 files come from the release host. Checksums detect co
 The actual symlink target is absolute. The content suffix permits a rebuilt version without changing an executable already used by a live Lab.
 The installer validates checksums and archive paths/types, stages both executables, verifies their versions and switches the symlink only after success. Same-version reinstall verifies existing files instead of rewriting them.
 A per-prefix lock rejects concurrent installers; failures clean staging files and leave the active symlink unchanged. After an uncatchable kill, remove a stale `.ronchi-install-lock` only after confirming no installer is running.
-Existing unrelated executables and symlinks are not replaced. PATH instructions are printed; the current parent shell and user profiles are not silently changed.
+Existing unrelated executables and symlinks are not replaced.
+
+By default, the installer appends a guarded `# Ronchi` PATH block to the selected shell configuration. Existing contents and valid dotfile symlinks are preserved. Reinstalling does not append the same block again; sourcing it twice does not duplicate the PATH entry. zsh uses `${ZDOTDIR:-$HOME}/.zshrc`. Bash uses `~/.bashrc` and the first existing login profile among `~/.bash_profile`, `~/.bash_login` and `~/.profile`; it creates `~/.profile` if none exists. POSIX login shells use `~/.profile`. Unknown shells and unwritable profiles receive a warning and manual PATH instructions; binary installation still succeeds. `--no-modify-path` disables profile changes.
+
+The README command ends with `&& export PATH="$HOME/.local/bin:$PATH"` to enable the default installation in the current zsh/bash terminal. The installer subprocess cannot change its parent shell's environment. When invoking `install.sh` directly or selecting a custom prefix, use a new terminal or export that prefix's `bin` directory explicitly.
 Updating does not stop Labs or migrate Journals. Old release directories remain for active processes; remove old versions only after their Labs stop.
-To uninstall, stop Labs started by that installation, remove its `bin/ronchi` symlink and remove only its `lib/ronchi` release tree. Keep each project's `ronchi/` to retain investigation history.
+To uninstall, stop Labs started by that installation. Remove its `bin/ronchi` symlink. Remove only its `lib/ronchi` release tree. Remove its `# Ronchi` PATH block from the configured shell files. Keep each project's `ronchi/` to retain investigation history.

@@ -1,7 +1,7 @@
-# v0.1.1 release completed
+# Automatic shell PATH setup
 
-The user-requested yellow dashboard and terminal are published as [v0.1.1](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.1). [Task 43](todo.md#43-publish-the-yellow-ui-as-v011) is the completed checklist and owns detailed evidence.
+[Task 44](todo.md#44-automatic-shell-path-setup) owns the checklist and verification evidence. The user accepted automatic shell-profile setup plus one installation command that enables Ronchi in the current terminal.
 
-The tagged matrix passed on macOS ARM, macOS Intel and Linux x86_64. Anonymous archive checksums and public latest installation passed. Installed colors, Simulator/Surfpool, live upgrade from v0.1.0, retained Journals, tamper rejection, Ctrl-C and reinstall were checked in temporary projects. User installations and Labs were unchanged. Release notes and README are updated. v0.1.0 remains intact.
+The installer and README changes pass local fixture and actual macOS archive checks. Publish the maintained installer from `main`, then verify the exact public README command in an isolated shell home. Native archives remain the verified v0.1.1 release. Existing tags/assets remain unchanged. Update release-page installation commands after the public check.
 
-No new implementation task is selected. Homebrew and the independent-backend retest remain separate work.
+Homebrew and the independent-backend retest remain separate work.
