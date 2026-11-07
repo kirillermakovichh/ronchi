@@ -12,22 +12,20 @@ Its release smoke confirmed the embedded assets match the frontend build.
 [Task 36](todo.md#36-remove-application-checks) separately records all ten browser scenarios, including actual Surfpool.
 These are recorded results, not a claim that the documentation task reran them.
 
-## First native release in progress
+## Native release and CI
 
-[Task 40](todo.md#40-curl-installation-and-bundled-surfpool) implements MIT-licensed native curl distribution with private pinned Surfpool. ADR-0020 keeps runtime data project-local while permitting shared installed executables. Homebrew remains deferred.
-The user authorized the entire [task 41 release sequence](todo.md#41-first-native-release), including corrective commits/pushes, native CI, the verified `v0.1.0` tag and release, public curl verification and final documentation.
+[v0.1.0](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.0) is published in the currently private GitHub repository. The annotated tag points to `0ca02a0`.
+Manual matrix `42404486999` and tagged release `42406451668` passed on macOS ARM, macOS Intel and Linux x86_64. The Rust suite passed 290 tests; all release/installer gates remained enabled. [Task 41](todo.md#41-first-native-release) owns corrective commits, exact checks and remaining acceptance.
 
-Source changes are pushed through `f2bcf51`. CI exposed and fixed timing-sensitive fixtures, portable PTY FFI, a hold-deadline evidence race, and Custom lookup's per-entry durable-write bottleneck. Custom source/effect pages retain all per-entry records and exact links; an injected storage failure verifies page rollback before a masked response can escape.
-At `dfe3a48`, the complete local Rust suite passed 288 tests; all 15 explicit real Surfpool tests, Clippy, fmt, release and the source-link/cancellation checks passed. The subsequent pipe-readiness fix adds tested streaming/EOF/deadline coverage and passed Clippy, release packaging and the full installed-artifact/reinstall/tamper/live-update flow. It preserves the twenty-second tamper-test limit and all checksum/deadline checks.
+The requested CI caches are implemented and exercised. Observed cold/warm job times: ARM 8m57s → 7m51s, Linux 15m10s → 11m39s, Intel 22m39s → 15m49s. The ARM log confirms exact Cargo-download, native-build and license-generator cache hits. Tests, notices, packaging and installed checks still execute on hits.
 
-Manual matrix `42401521251` at `dfe3a48` finished with complete Linux and Intel success. ARM passed Rust/build/notices/package and failed the tamper check due to the subsequently fixed archive-pipe polling overhead. The next full matrix must include `f2bcf51` and the requested CI acceleration. Do not tag before that complete latest-main matrix passes.
+All eight published files were downloaded with GitHub authentication. All three archive SHA-256 values and metadata were verified. The actual downloaded ARM archive passed installation, embedded dashboard, private Surfpool, retained Journal, tamper, reinstall and live-update checks. Temporary installations and Labs were cleaned; original user Labs/backends were not touched.
 
-The user requested faster Actions. The updated workflow caches Cargo downloads, debug/release outputs and the pinned license-generator executable separately. Compatible builds restore by platform/toolchain/manifests/workflow prefix; exact revision hits retain the native build. Completed caches can save after later failures. Every product/release gate still runs. CI uses line-table debug information and no incremental state to limit cache volume, without changing the shipped release profile. SHA-pinned official cache v6.1.0, actionlint, YAML parsing, shell syntax and a Rust profile smoke passed. Cold/warm GitHub execution has not yet been measured.
+Anonymous public curl verification remains open because the repository is private. The user has been asked asynchronously to authorize making the whole repository/history public; no answer has arrived. Do not change visibility without that authorization. README accurately marks public downloads as pending. After permission, verify the actual public installer in an isolated prefix, apply the prepared release notes, remove the warning, close task 41d and push final docs.
 
-No version tag or release exists yet. GitHub reports the repository as private. Changing the entire repository's visibility requires separate user authorization before anonymous public curl verification can work. Do not silently expose it.
-README's preparation notice must remain until public installation actually works. Current validation details and earlier runs are recorded in task 41. Temporary logs/scripts and isolated installations remain outside tracked files.
+MIT and bundled pinned Surfpool are implemented by [task 40](todo.md#40-curl-installation-and-bundled-surfpool) and ADR-0020. Runtime data remains project-local. Homebrew remains deferred.
 
-Earlier completed documentation/README work is recorded in [tasks 38–39](todo.md#38-documentation-organization).
+Earlier documentation/README work is recorded in [tasks 38–39](todo.md#38-documentation-organization).
 
 ## Remaining validation
 
@@ -43,4 +41,4 @@ Read `AGENTS.md`, the [documentation map](../docs/README.md) and actual `git sta
 This checkpoint groups the accumulated implementation/UI work, application-Checks removal, cleanup and documentation organization.
 Inspect Git log/status for its commit and any subsequent changes.
 Do not restart the completed parallel run or infer commit/publish authorization from its historical ledger.
-No original user Lab or backend files were changed. Source fixes are pushed; release publication is still pending. Follow the authorized task 41 sequence above.
+No original user Lab or backend files were changed. Runtime fixes and CI acceleration are pushed; the tagged release is published. Follow the remaining task 41d sequence above.
