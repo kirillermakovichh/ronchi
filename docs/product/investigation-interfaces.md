@@ -101,6 +101,9 @@ An Investigation has query state, not a separate start, capture, or stop lifecyc
 ### Foreground terminal presentation
 
 Interactive `up` uses an inline Ronchi panel with the parallel-band identity.
+A compact Unicode Braille mark keeps four bands and their centered rise within two terminal rows.
+The mark and secondary hints share the same yellow accent.
+The runtime-details block uses normal-foreground labels and hints; the Lab name and RPC/dashboard addresses are yellow.
 It retains scrollback and normal terminal input; it does not use raw mode or an alternate screen.
 The panel shows the RPC URL and a short OSC 8 dashboard hyperlink.
 The hyperlink remains reusable until the Lab stops.
@@ -116,7 +119,7 @@ One authenticated status request at a time updates the Case, held RPC count, and
 Requests start no more than once per second and never evaluate Findings or scan Journal history.
 The panel validates the returned Lab ID, process identity, and contract version.
 Missing status appears as unavailable, with any old watermark marked as last observed.
-Held RPC requests use the coral signal accent; they do not imply an application failure or business correctness.
+Held RPC requests use the yellow signal accent; they do not imply an application failure or business correctness.
 
 `up --no-animation` keeps a static styled panel and disables live polling.
 It conflicts with `--detach`.

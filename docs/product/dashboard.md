@@ -230,7 +230,7 @@ Client timeouts, retry causes, business completion and economic execution requir
 The timeline shows rounded real elapsed seconds from the original received request.
 Missing time coordinates remain unknown.
 Negative relative times identify retained RPC evidence before the original submission.
-Intentional Ronchi Faults use a coral pause icon and a Ronchi fault label.
+Intentional Ronchi Faults use a yellow pause icon and a Ronchi fault label.
 Execution errors use a red failure icon and an execution-error label.
 Confirmed/finalized replies with an explicit null `err` use a green check.
 Processed replies use an amber clock and say that confirmation is pending.

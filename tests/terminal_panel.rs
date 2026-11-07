@@ -254,6 +254,64 @@ impl Drop for Session {
 fn animated_panel_reads_real_case_and_status_gaps_and_survives_resize() {
     let mut session = Session::start(88, &[], &[]);
     session.until("Ready");
+    // The brand is visible in its signal color before any Fault has been applied.
+    let terminal = session.parser.screen();
+    let mut brand_rows = 0;
+    for row in 0..28 {
+        let mark: String = (2..7)
+            .map(|col| terminal.cell(row, col).unwrap().contents())
+            .collect();
+        if mark == "⣒⣒⠭⣒⣒" {
+            brand_rows += 1;
+            for col in 2..7 {
+                assert_eq!(
+                    terminal.cell(row, col).unwrap().fgcolor(),
+                    vt100::Color::Idx(221)
+                );
+            }
+        }
+    }
+    assert_eq!(
+        brand_rows, 2,
+        "startup header needs four bands packed into two yellow rows"
+    );
+    for label in [
+        "Lab",
+        "RPC",
+        "Dashboard",
+        "Available until this Lab stops.",
+        "Show link:",
+    ] {
+        let label_row = (0..28)
+            .find(|row| {
+                (2..2 + label.len() as u16)
+                    .map(|col| terminal.cell(*row, col).unwrap().contents())
+                    .collect::<String>()
+                    == label
+            })
+            .expect("runtime label must be visible");
+        for col in 2..2 + label.len() as u16 {
+            assert_eq!(
+                terminal.cell(label_row, col).unwrap().fgcolor(),
+                vt100::Color::Default,
+                "runtime labels and hints must use the normal foreground"
+            );
+        }
+        if matches!(label, "Lab" | "RPC" | "Dashboard") {
+            assert_eq!(
+                terminal.cell(label_row, 12).unwrap().fgcolor(),
+                vt100::Color::Idx(221),
+                "Lab name and endpoint values must be yellow"
+            );
+        }
+        if label == "Lab" {
+            assert_eq!(
+                terminal.cell(label_row, 21).unwrap().fgcolor(),
+                vt100::Color::Default,
+                "the engine label must use the normal foreground"
+            );
+        }
+    }
     let screen = session.parser.screen().contents();
     assert!(screen.contains("RONCHI") && screen.contains("Make hidden failures visible."));
     assert!(screen.contains("RPC") && screen.contains("http://127.0.0.1:"));
@@ -335,7 +393,7 @@ fn narrow_start_preserves_endpoints_and_real_holds_use_the_fault_accent() {
     let screen = session.parser.screen();
     assert!(
         (0..28).any(|row| (0..88)
-            .any(|col| screen.cell(row, col).unwrap().fgcolor() == vt100::Color::Idx(209))),
+            .any(|col| screen.cell(row, col).unwrap().fgcolor() == vt100::Color::Idx(221))),
         "held Fault has no signal accent"
     );
     session.capture("fault");

@@ -5,6 +5,10 @@ use console::{Style, Term, truncate_str};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::{io, time::Instant};
 
+// A 10×8 dot grid retains four bands in two terminal rows.
+// Braille cells provide 2×4 positions each, including the centered rise.
+const MARK: &str = "⣒⣒⠭⣒⣒";
+
 const BANDS: &[&str] = &[
     "│││││",
     "││╱││",
@@ -71,11 +75,8 @@ impl Panel {
     fn style(&self) -> Style {
         Style::new().for_stdout().force_styling(self.color)
     }
-    fn muted(&self, text: &str) -> String {
-        self.style().color256(245).apply_to(text).to_string()
-    }
     fn signal(&self, text: &str) -> String {
-        self.style().color256(209).apply_to(text).to_string()
+        self.style().color256(221).apply_to(text).to_string()
     }
     fn width(&self) -> usize {
         usize::from(self.term.size().1).saturating_sub(1).max(1)
@@ -86,19 +87,24 @@ impl Panel {
 
     fn header(&self) -> io::Result<()> {
         self.term.write_line("")?;
-        self.line(&format!(
-            "  ▌│▌│▌  {}  {}",
-            self.style().bold().apply_to("RONCHI"),
-            self.muted(concat!("v", env!("CARGO_PKG_VERSION")))
-        ))?;
-        self.line(if self.width() < 44 {
-            "  Make hidden failures visible."
-        } else {
-            "         Make hidden failures visible."
-        })?;
+        for row in 0..2 {
+            let caption = match row {
+                0 => format!(
+                    "  {}  {}",
+                    self.style().bold().apply_to("RONCHI"),
+                    self.signal(concat!("v", env!("CARGO_PKG_VERSION")))
+                ),
+                1 if self.width() >= 44 => "  Make hidden failures visible.".into(),
+                _ => String::new(),
+            };
+            self.line(&format!("  {}{caption}", self.signal(MARK)))?;
+        }
+        if self.width() < 44 {
+            self.line("  Make hidden failures visible.")?;
+        }
         self.line(&format!(
             "  {}",
-            self.muted(&"─".repeat(self.width().saturating_sub(2).min(56)))
+            self.signal(&"─".repeat(self.width().saturating_sub(2).min(56)))
         ))?;
         self.term.write_line("")
     }
@@ -131,17 +137,16 @@ impl Panel {
             (Mode::Surfpool, false) => "Solana / Surfpool",
         };
         let _ = self.line(&format!(
-            "  {}{}  {}",
-            self.muted("Lab       "),
-            manifest.name,
-            self.muted(engine)
+            "  Lab       {}  {engine}",
+            self.signal(&manifest.name)
         ));
         if let Some(rpc) = manifest.rpc_address {
             // Keep the complete RPC URL copyable even in narrow terminals.
             let _ = self.term.write_line(&format!(
-                "  {}{}",
-                self.muted("RPC       "),
-                self.style().bold().apply_to(format!("http://{rpc}"))
+                "  RPC       {}",
+                self.style()
+                    .bold()
+                    .apply_to(self.signal(&format!("http://{rpc}")))
             ));
         }
         if let Some(launch) = launch {
@@ -153,20 +158,14 @@ impl Panel {
             let link = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", launch.launch_url, label);
             let _ = self
                 .term
-                .write_line(&format!("  {}{link}", self.muted("Dashboard ")));
+                .write_line(&format!("  Dashboard {}", self.signal(&link)));
             let command = if manifest.name == "default" {
                 "ronchi dashboard".into()
             } else {
                 format!("ronchi --lab {} dashboard", manifest.name)
             };
-            let _ = self.line(&format!(
-                "  {}",
-                self.muted("Available until this Lab stops.")
-            ));
-            let _ = self.term.write_line(&format!(
-                "  {}",
-                self.muted(&format!("Show link: {command}"))
-            ));
+            let _ = self.line("  Available until this Lab stops.");
+            let _ = self.term.write_line(&format!("  Show link: {command}"));
         } else {
             let _ = self.line("  Dashboard unavailable; run ronchi dashboard");
         }
@@ -178,7 +177,7 @@ impl Panel {
         });
         let _ = self.line(&format!(
             "  {}",
-            self.muted(if self.width() < 48 {
+            self.signal(if self.width() < 48 {
                 "Ctrl-C to stop this Lab."
             } else {
                 "Ctrl-C stops this Lab. Your backend keeps running."

@@ -142,7 +142,7 @@
   color: var(--accent);
 }
 .traffic-row.related {
-  background: #2c211f;
+  background: var(--accent-subtle);
   box-shadow: inset 2px 0 var(--accent);
 }
 .journal-page .traffic-row {
@@ -321,7 +321,7 @@
 .fault-tag {
   font-size: 9px;
   color: var(--accent);
-  background: #35241f;
+  background: var(--accent-surface);
   padding: 1px 5px;
   border-radius: 3px;
   margin-left: 6px;

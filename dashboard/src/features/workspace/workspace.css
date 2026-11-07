@@ -86,7 +86,7 @@
 }
 .widget.drop-target .widget-head {
   color: var(--accent);
-  background: #35241f;
+  background: var(--accent-surface);
 }
 .widget-drag-overlay {
   pointer-events: none;
