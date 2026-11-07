@@ -1,9 +1,9 @@
-//! Explicit workspace-only installation of pinned native tools. No implicit downloads.
+//! Verified distribution companion or explicit project-local installation. No runtime downloads.
 use crate::{
     lab::LabError,
     workspace::{self, Workspace},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -12,7 +12,27 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
-pub const SURFPOOL_VERSION: &str = "1.7.0";
+#[derive(Deserialize)]
+struct Catalog<'a> {
+    version: &'a str,
+    #[serde(borrow)]
+    artifacts: Vec<Artifact<'a>>,
+}
+#[derive(Deserialize)]
+struct Artifact<'a> {
+    platform: &'a str,
+    sha256: &'a str,
+}
+fn catalog() -> &'static Catalog<'static> {
+    static CATALOG: std::sync::OnceLock<Catalog<'static>> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| {
+        serde_json::from_str(include_str!("../release/surfpool.json"))
+            .expect("checked-in Surfpool catalog must be valid")
+    })
+}
+pub fn version() -> &'static str {
+    catalog().version
+}
 const ARCHIVE_LIMIT: u64 = 64 * 1024 * 1024;
 const BINARY_LIMIT: u64 = 128 * 1024 * 1024;
 #[derive(Debug, Serialize)]
@@ -25,23 +45,22 @@ pub struct Installed {
     pub path: PathBuf,
 }
 fn platform() -> Result<(&'static str, &'static str), LabError> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => Ok((
-            "darwin-arm64",
-            "32c309e3b79bfa3913e384b3c9b109000720cfe7f346d145feb6693fccfb202f",
-        )),
-        ("macos", "x86_64") => Ok((
-            "darwin-x64",
-            "b9724b6a67ac33b9cc94fb41adaf47bd638269142c7ddc6a0dae7ca77fd9e760",
-        )),
-        ("linux", "x86_64") => Ok((
-            "linux-x64",
-            "5bef2b0b186a74622508f104b6d2e4e2db040932b6d8f3a811172e241f802a63",
-        )),
-        _ => Err(LabError::unsupported(
-            "This platform has no pinned native Surfpool artifact",
-        )),
-    }
+    let name = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "darwin-arm64",
+        ("macos", "x86_64") => "darwin-x64",
+        ("linux", "x86_64") => "linux-x64",
+        _ => {
+            return Err(LabError::unsupported(
+                "This platform has no pinned native Surfpool artifact",
+            ));
+        }
+    };
+    catalog()
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.platform == name)
+        .map(|artifact| (artifact.platform, artifact.sha256))
+        .ok_or_else(|| LabError::unsupported("Pinned Surfpool artifact is absent from the catalog"))
 }
 fn digest(mut reader: impl Read, limit: u64, deadline: Instant) -> Result<String, LabError> {
     let mut hash = Sha256::new();
@@ -91,7 +110,7 @@ fn file_digest(path: &Path, limit: u64, deadline: Instant) -> Result<String, Lab
     )
 }
 fn root(project: &Path) -> PathBuf {
-    project.join("ronchi/tools/surfpool").join(SURFPOOL_VERSION)
+    project.join("ronchi/tools/surfpool").join(version())
 }
 fn verify_archive(path: &Path, deadline: Instant) -> Result<(), LabError> {
     if file_digest(path, ARCHIVE_LIMIT, deadline)? != platform()?.1 {
@@ -156,22 +175,32 @@ fn wait(child: &mut Child, deadline: Instant) -> Result<std::process::ExitStatus
     }
 }
 fn verify_sync(project: &Path, deadline: Instant) -> Result<Installed, LabError> {
-    let directory = root(project);
-    let ws = Workspace::new(project);
-    for path in [
-        &ws.root,
-        &ws.root.join("tools"),
-        &ws.root.join("tools/surfpool"),
-        &directory,
-    ] {
-        if !path.exists() {
-            return Err(LabError::unsupported(
-                "Pinned Surfpool is absent; run ronchi tool surfpool install --archive <official-v1.7.0-platform.tar.gz>",
-            ));
-        }
-        if fs::symlink_metadata(path)?.file_type().is_symlink() {
+    let workspace = project.join("ronchi");
+    if let Ok(metadata) = fs::symlink_metadata(&workspace)
+        && (!metadata.is_dir() || metadata.file_type().is_symlink())
+    {
+        return Err(LabError::conflict(
+            "Managed workspace must be a directory without symlinks",
+        ));
+    }
+    verify_directory(&root(project), deadline)
+}
+fn verify_directory(directory: &Path, deadline: Instant) -> Result<Installed, LabError> {
+    // The executable's distribution root is canonical; the private tool subtree
+    // must contain regular directories, never a PATH-selected or symlinked tool.
+    for path in directory.ancestors().take(3) {
+        let metadata = fs::symlink_metadata(path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                LabError::unsupported(
+                    "Pinned Surfpool is absent; reinstall the Ronchi distribution, or use ronchi tool surfpool install --archive <official-v1.7.0-platform.tar.gz> for a source build",
+                )
+            } else {
+                LabError::from(error)
+            }
+        })?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(LabError::conflict(
-                "Managed tool paths must not contain symlinks",
+                "Managed tool paths must be directories without symlinks",
             ));
         }
     }
@@ -188,16 +217,40 @@ fn verify_sync(project: &Path, deadline: Instant) -> Result<Installed, LabError>
     let (platform, archive_sha256) = platform()?;
     Ok(Installed {
         tool: "surfpool",
-        version: SURFPOOL_VERSION,
+        version: version(),
         platform,
         archive_sha256,
         binary_sha256: actual,
         path,
     })
 }
+fn verify_for_executable(
+    project: &Path,
+    executable: &Path,
+    deadline: Instant,
+) -> Result<Installed, LabError> {
+    let executable = executable.canonicalize()?;
+    let distribution = executable
+        .parent()
+        .filter(|bin| bin.file_name().is_some_and(|name| name == "bin"))
+        .and_then(Path::parent)
+        .map(|root| root.join("libexec/surfpool"));
+    if let Some(tools) = distribution {
+        match fs::symlink_metadata(&tools) {
+            Ok(_) => return verify_directory(&tools.join(version()), deadline),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    verify_sync(project, deadline)
+}
 pub async fn verify(project: PathBuf) -> Result<Installed, LabError> {
     tokio::task::spawn_blocking(move || {
-        verify_sync(&project, Instant::now() + Duration::from_secs(300))
+        verify_for_executable(
+            &project,
+            &std::env::current_exe()?,
+            Instant::now() + Duration::from_secs(300),
+        )
     })
     .await
     .map_err(|_| LabError::internal("Native tool verification worker failed"))?
@@ -285,4 +338,48 @@ pub async fn install(project: PathBuf, archive: PathBuf) -> Result<Installed, La
     })
     .await
     .map_err(|_| LabError::internal("Native tool installation worker failed"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_distribution_never_uses_a_project_tool() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::write(root.join("bin/ronchi"), b"fixture").unwrap();
+        fs::create_dir_all(root.join("libexec/surfpool")).unwrap();
+        let local = root.join("ronchi/tools/surfpool").join(version());
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("artifact.tar.gz"), b"invalid fallback").unwrap();
+        let error = verify_for_executable(
+            root,
+            &root.join("bin/ronchi"),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("Pinned Surfpool is absent"));
+        assert_eq!(error.code, "unsupported_capability");
+    }
+
+    #[test]
+    fn symlinked_companion_is_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::write(root.join("bin/ronchi"), b"fixture").unwrap();
+        fs::create_dir_all(root.join("libexec")).unwrap();
+        fs::create_dir(root.join("other")).unwrap();
+        fs::create_dir(root.join("other").join(version())).unwrap();
+        std::os::unix::fs::symlink(root.join("other"), root.join("libexec/surfpool")).unwrap();
+        let error = verify_for_executable(
+            root,
+            &root.join("bin/ronchi"),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("without symlinks"));
+    }
 }

@@ -159,8 +159,8 @@ Topic contracts set provisional operational safety limits; measured performance 
 
 Containers and future Testcontainers wrappers are delivery/integration options over the same core.
 Docker or Kubernetes is not required for the default local workflow.
-All persistent product files, managed tools, logs, and artifacts belong under the project's `ronchi/` workspace.
-See [ADR-0014](../adr/0014-project-local-workspace.md).
+All runtime data, logs and investigation artifacts belong under the project's `ronchi/` workspace. Installed Ronchi and its private pinned Surfpool may be shared across projects.
+See [ADR-0014](../adr/0014-project-local-workspace.md) and its executable-installation refinement in [ADR-0020](../adr/0020-installed-native-tool-distribution.md).
 
 ## Boundaries and open validation
 

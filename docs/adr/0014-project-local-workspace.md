@@ -1,5 +1,7 @@
 # One project-local Ronchi workspace
 
+Refined by [ADR-0020](0020-installed-native-tool-distribution.md) for shared installed executables. The original tool-placement trade-off below is historical; runtime data remains project-local.
+
 All persistent Ronchi files will live under `<project-root>/ronchi/`. This includes downloaded managed tools, Surfpool runtime files, generated temporary configuration, Lab Journals, optional Run artifacts, summaries, and process logs. Ronchi will not create a persistent global cache or use OS application-support directories by default. Keeping one visible, deletable directory makes disk use and cleanup explicit for each project.
 
 The conceptual layout is:

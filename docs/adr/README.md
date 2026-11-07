@@ -26,6 +26,7 @@ The blockchain WebSocket transport remains deferred. The dashboard uses WebSocke
 | [0017](0017-case-driven-fault-model.md) | Continuing Case policy | Initial repetition, sequencing, and recovery defined in Cases and Custom Cases |
 | [0018](0018-ronchi-product-name.md) | Ronchi name and positioning | Current working brand |
 | [0019](0019-resource-efficient-rust-core.md) | Native Rust stack and resource model | Operational safety defaults exist; measured performance release gates are deferred |
+| [0020](0020-installed-native-tool-distribution.md) | Installed Ronchi and private Surfpool | Refines 0014 for executables; runtime data stays project-local |
 
 
 See the [documentation map](../README.md) for current contracts.

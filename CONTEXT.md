@@ -103,7 +103,7 @@ The Lab-level choice between local transaction simulation with Read-through and 
 _Avoid_: Case, backend type
 
 **Project Workspace**:
-The single project-local `ronchi/` directory containing all Ronchi tools, managed backend files, Lab runtime state, Lab Journals, and optional Run artifacts. Ronchi creates no persistent global data or tool cache outside it.
+The single project-local `ronchi/` directory containing Lab runtime state, managed backend data, Lab Journals and optional Run artifacts. Installed executables may be shared across projects; runtime data remains project-local.
 _Avoid_: Global cache, application support directory, scattered artifacts
 
 **Simulated Chain State**:

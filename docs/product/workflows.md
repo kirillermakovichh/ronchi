@@ -198,7 +198,7 @@ ronchi down
 
 An explicit normal Lab stop drains accepted work, stops owned resources, and finalizes its Journal.
 Forced or incomplete shutdown leaves an interrupted Journal and exposes known gaps.
-All persistent product files belong under the selected project's `ronchi/` directory, including managed Surfpool tools, configuration, runtime files, logs, and optional Run artifacts.
+All runtime data belongs under the selected project's `ronchi/` directory, including configuration, Surfpool runtime files, logs and optional Run artifacts. A packaged installation shares the Ronchi and private Surfpool executables across projects.
 The [Lab lifecycle contract](lab-lifecycle.md) refines the project-local decision in [ADR-0014](../adr/0014-project-local-workspace.md).
 Stopped Labs remain readable until explicitly deleted; there is no automatic age-based deletion.
 Deletion targets a stopped Lab and its workspace-owned artifacts under the [retention contract](evidence-and-findings.md#finalization-retention-and-export).

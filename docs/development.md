@@ -29,7 +29,7 @@ Commit and preserve the existing Cargo and npm lockfiles when changing dependenc
 
 Node.js and npm are build/test tools. The executable embeds compiled assets with `include_bytes!`.
 A released Lab needs no Node process, frontend directory, Docker, Solana CLI or validator.
-Surfpool is an optional separately managed native executable.
+Surfpool is a separate native executable included in native distributions. Source builds can install its pinned archive explicitly. It runs only in Surfpool mode.
 Keep Rust dependencies and protocol versions pinned against the [RPC compatibility contract](product/solana-rpc-contract.md#transaction-formats-and-encodings).
 Do not add workers, Wasm, a second renderer, a grid engine or more crates without a demonstrated need.
 No comparative frontend benchmark or public platform-support matrix has been established.
@@ -149,3 +149,59 @@ Keep lockfiles, required source fixtures and third-party notices. Exclude secret
 After committing, inspect `git status --short` and `git log -1 --oneline`.
 Do not amend, rewrite history, discard changes, add remotes or publish without authorization.
 If Git metadata is sandboxed, use the permission mechanism; do not edit Git metadata manually.
+
+## Native distribution
+
+Ronchi's source is MIT-licensed. The distribution carries the pinned Surfpool under Apache-2.0 and includes third-party notices and covered dependency sources.
+[ADR-0020](adr/0020-installed-native-tool-distribution.md) owns the separation between shared installed executables and project-local runtime data.
+Homebrew is deferred. No self-update command, automatic runtime download or public release is implied by having release scripts.
+
+`release/surfpool.json` is the shared upstream version/target/hash catalog. `release/about.toml` selects accepted dependency licenses; it does not replace their terms.
+The curl installer must have the same Surfpool version pin. Packaging rejects a mismatch.
+
+The native workflow targets macOS arm64, macOS x86_64 and Linux x86_64. The initial distribution baseline is macOS 15.5+ and Ubuntu 22.04-compatible glibc 2.35+ with libgcc_s; musl/Alpine is not a target. The pinned ARM Surfpool declares macOS 15.5 in its load commands. Bounded local smoke checks also passed on macOS 15.2, but do not establish full support below that upstream baseline. Each job builds on its native runner and tests the actual installed archive. macOS arm64 is verified locally; the other target jobs require an actual GitHub Actions run before compatibility is claimed.
+A cross-compiled file or a successful checksum is not a native runtime check.
+
+Build the frontend and release executable as above, then install cargo-about 0.9.3 as a release-only build tool. It is not required on end-user machines.
+
+```bash
+cargo install cargo-about --version 0.9.3 --locked --features cli
+python3 scripts/release-notices.py --target aarch64-apple-darwin
+python3 scripts/package-release.py --target aarch64-apple-darwin \
+  --binary target/release/ronchi \
+  --notices target/distribution/THIRD-PARTY-LICENSES.html \
+  --surfpool-notices target/distribution/SURFPOOL-THIRD-PARTY-LICENSES.html
+python3 scripts/test-installer.py
+python3 scripts/test-release.py --directory target/distribution
+```
+
+These Python scripts require Python 3.12 on release/test machines only. `--surfpool-archive PATH` lets packaging reuse an existing official archive after checking the catalog hash.
+Packaging downloads official pinned Surfpool artifacts when no local archive is given. Notice generation verifies the pinned source archive, scans the Rust dependencies and Ronchi dashboard production dependencies, and includes the upstream source plus exact Cargo.lock-verified MPL-covered crate sources.
+No placeholder notices or skipped license failures are allowed in a distributable package.
+
+`.github/workflows/release.yml` builds and tests on pull requests or manual dispatch without publishing. A matching `v<VERSION>` tag triggers publication only after every build/install job passes. It refuses to overwrite an existing release. Prerelease tags remain prereleases.
+Publishing a tag/release is a separate authorized action. The current implementation does not publish or push by itself.
+
+### Curl installation layout
+
+The default prefix is `~/.local`; `--prefix /absolute/path` or `RONCHI_INSTALL_PREFIX` selects another prefix. The installer uses curl, tar and sha256sum or shasum; it never invokes sudo, Cargo, npm or Python.
+It downloads from GitHub Releases by default. `--version VERSION` selects a fixed release; otherwise `release-version.txt` from the latest release selects it. `RONCHI_RELEASE_BASE_URL` supports an explicit HTTPS mirror or a loopback HTTP fixture.
+Archives and their SHA-256 files come from the release host. Checksums detect corruption; they do not authenticate a compromised release host.
+
+```text
+<prefix>/bin/ronchi -> ../lib/ronchi/releases/<version-target-content>/bin/ronchi
+<prefix>/lib/ronchi/releases/<version-target-content>/
+  bin/ronchi
+  libexec/surfpool/1.7.0/{surfpool,artifact.tar.gz}
+  LICENSE
+  licenses/{SURFPOOL-LICENSE,THIRD-PARTY-LICENSES.html,
+            SURFPOOL-THIRD-PARTY-LICENSES.html,SURFPOOL-SOURCES.tar.gz}
+  release.json
+```
+
+The actual symlink target is absolute. The content suffix permits a rebuilt version without changing an executable already used by a live Lab.
+The installer validates checksums and archive paths/types, stages both executables, verifies their versions and switches the symlink only after success. Same-version reinstall verifies existing files instead of rewriting them.
+A per-prefix lock rejects concurrent installers; failures clean staging files and leave the active symlink unchanged. After an uncatchable kill, remove a stale `.ronchi-install-lock` only after confirming no installer is running.
+Existing unrelated executables and symlinks are not replaced. PATH instructions are printed; the current parent shell and user profiles are not silently changed.
+Updating does not stop Labs or migrate Journals. Old release directories remain for active processes; remove old versions only after their Labs stop.
+To uninstall, stop Labs started by that installation, remove its `bin/ronchi` symlink and remove only its `lib/ronchi` release tree. Keep each project's `ronchi/` to retain investigation history.

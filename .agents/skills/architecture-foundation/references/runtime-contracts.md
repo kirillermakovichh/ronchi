@@ -45,7 +45,7 @@ Define which resources must be available before the Lab reports readiness.
 On partial startup failure, release resources the process already acquired.
 Keep optional Surfpool startup within Surfpool mode.
 Track the managed child process, readiness failure, unexpected exit, and cleanup.
-Use the project-local workspace in ADR-0014 for persistent artifacts, including Surfpool files.
+Use the project-local workspace in ADR-0014 for runtime artifacts, including Surfpool state and logs. ADR-0020 permits shared installed Ronchi/Surfpool executables; it does not permit global Lab data or runtime caches.
 Do not introduce account registration, cloud services, or a global application-data directory.
 
 ## Shutdown and failure

@@ -40,7 +40,7 @@ Resolve the project root in this order:
 4. Use the current directory.
 
 Canonicalize the selected root before locking or discovery.
-All persistent product files stay inside `<project-root>/ronchi/`.
+All runtime data stays inside `<project-root>/ronchi/`. Installed executables may be shared across projects under [ADR-0020](../adr/0020-installed-native-tool-distribution.md).
 There is no global Lab registry, tool cache, or application-support directory.
 The first version has no independent workspace-location override.
 The project configuration is `ronchi/config.toml` with an explicit schema version.
@@ -139,9 +139,9 @@ Simulator mode creates clean Simulated Chain State and starts its clock.
 It never restores an old transaction lifecycle or old response-loss identity set.
 
 In Surfpool mode, resolve its native project configuration from the selected project root.
-Use a pinned compatible native binary from `ronchi/tools/surfpool/<version>/`.
+Use the pinned private Surfpool from the native distribution. Source builds may use an explicitly installed project-local copy at `ronchi/tools/surfpool/<version>/`.
 Verify its checksum before launch and report the exact version.
-If the binary is absent, install the pinned artifact into that project or fail with the required offline-install action.
+If the distribution companion exists but is invalid or incomplete, fail instead of falling back. If no companion is installed, source builds can install the pinned artifact explicitly into that project. Runtime startup never downloads it.
 Tool installation has a separate bounded deadline from process readiness.
 Launch only an owned Surfpool instance with per-Lab runtime files.
 Wait for the owned process to remain alive and answer its expected local readiness checks.
@@ -335,9 +335,13 @@ Verify that every new Lab has clean chain state, retains prior Journals, and lea
 
 ## Managed native Surfpool implementation
 
-Install the explicit official v1.7.0 platform archive with `ronchi tool surfpool install --archive PATH`.
-Installation never downloads a tool or changes global caches.
-It stores the archive and executable under `ronchi/tools/surfpool/1.7.0/`.
+The native distribution includes the official v1.7.0 archive and extracted executable under `libexec/surfpool/1.7.0/`, relative to the distribution root containing `bin/ronchi`.
+Ronchi canonicalizes its own executable path and prefers that companion. It does not search PATH, create a global runtime cache or copy tools into each project.
+The private `libexec`, `surfpool` and version directories must not be symlinks. Both archive and executable remain subject to the checks below.
+If the companion subtree exists but its version is missing or verification fails, startup fails without a project-local fallback.
+
+For source builds without a distribution companion, install the official archive explicitly with `ronchi tool surfpool install --archive PATH`.
+That command never downloads a tool or changes global caches. It stores the archive and executable under `ronchi/tools/surfpool/1.7.0/`.
 The installer accepts regular files only, caps the compressed archive at 64 MiB, and caps the extracted executable at 128 MiB.
 Installation and verification check a five-minute cooperative deadline.
 The system `/usr/bin/tar` extracts only the named `surfpool` entry after archive verification.

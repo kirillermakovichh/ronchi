@@ -2,7 +2,7 @@
 
 The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
 The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
-Current work: [task 39](#39-readme-redesign).
+Current work: [task 40](#40-curl-installation-and-bundled-surfpool).
 
 ## Remaining validation
 
@@ -740,3 +740,17 @@ The original regression failed on the previous build: dragging Traffic by its ti
 - **Verification:** Local Markdown/HTML rendering loaded all four images with alt text, produced no browser errors or horizontal overflow at GitHub-like content width, and was inspected in light/dark presentation. All 329 local Markdown links/anchors passed; HTML media/navigation references were checked separately. PNG metadata and sources contain no dashboard credentials or personal paths. `git diff --check` passed. Runtime source, dependencies and existing release assets were unchanged; no broad runtime suite or rebuild was needed. Research, raw output, render previews and capture scripts remain outside the repository. No commit or publication.
 
 Research compared uv, Bun, Gum, VHS, LazyGit, OpenCode, mitmproxy and HTTP Toolkit. These references informed presentation; they do not establish usability or performance measurements.
+
+### 40. Curl installation and bundled Surfpool
+
+- [x] **40a:** Add MIT metadata and installed companion discovery with pinned integrity validation; retain source-build archive installation and project-local runtime state.
+- [x] **40b:** Package Ronchi plus compatible Surfpool and notices; implement checksummed, versioned curl installation and rerun updates without changing working installations on failure.
+- [x] **40c:** Add platform build/package/install checks and explicitly triggered release automation. Defer Homebrew and external publication.
+- [x] **40d:** Verify real installed Simulator/Surfpool flows and meaningful installer failure/update cases; update current contracts, README and progress with tested platform boundaries.
+
+Dependencies: 40a → 40b → 40c → 40d. Existing runtime ownership, Journal and RPC evidence contracts remain in force.
+
+- **Implemented:** MIT license and package metadata; shared pinned Surfpool catalog; canonical-executable companion discovery with archive/binary verification and explicit source-build fallback. Added a POSIX curl installer, reproducible native packaging, Rust/UI dependency notices and covered Surfpool dependency sources. Versioned, content-addressed installations preserve active processes; updates switch only the user-local symlink. No PATH-selected Surfpool or per-project executable copy is needed for installed distributions. Project-local Journals, runtime state and process ownership remain unchanged. ADR-0020 records the executable-storage exception to ADR-0014.
+- **Removal:** Removed the user-requested system Surfpool 0.12.0 at `/usr/local/bin/surfpool` through macOS administrator authorization and the existing project-local 1.7.0 executable/archive. No user Lab, Journal or chain-state directory was deleted. Archives and disposable executable copies used for verification remain test/build artifacts, not system installations.
+- **Verification:** 286 Rust tests, all-target Clippy with `-D warnings`, fmt and release build passed. The Surfpool suite passed all 15 tests with the real pinned archive enabled. Sixteen installer cases passed through a loopback HTTP mirror, covering install, rerun, update, SHA mismatch, unavailable downloads, unsafe/duplicate entries, wrong executable version, PATH quoting, concurrent locks, unrelated files/symlinks and damaged installed permissions/directories. The actual macOS archive installed and ran Simulator plus two Surfpool Labs in three clean projects without tool copies or system Surfpool. Embedded dashboard and project-local retained Journals were checked; a tampered companion failed before Lab allocation. A real Surfpool Lab survived a rebuilt-package update with unchanged owned-child identity, then stopped normally. Packaging rejected a wrong architecture and unpinned upstream input; re-packaging identical inputs produced the same archive checksum. Shell/Python syntax, workflow YAML structure and local documentation links passed.
+- **Boundaries:** The macOS arm64 archive is prepared locally under `target/distribution/` (ignored). The workflow is configured for macOS arm64, macOS Intel and Linux x86_64, but GitHub-hosted Intel/Linux execution remains unrun. The initial declared distribution baseline is macOS 15.5+ and Ubuntu 22.04-compatible glibc 2.35+ with libgcc_s; this is not a test claim for every OS at those versions. The local smoke host was macOS 15.2; the pinned ARM Surfpool itself declares 15.5. No frontend source changed, so the existing embedded dashboard was exercised without rerunning the unchanged UI suite. No Homebrew setup, global installer execution, commit, tag, push or release publication was performed. README labels curl installation as release preparation until actual artifacts are published.

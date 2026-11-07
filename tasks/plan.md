@@ -1,77 +1,35 @@
-# README redesign brief
+# Curl distribution with managed Surfpool
 
-Status: implemented and verified; task 39 records the evidence. Human + agent presentation with a branded Ronchi parallel-band header.
-The user requested a descriptive, attractive README with AI-native positioning, a running terminal example and meaningful dashboard screenshots.
-The user wants text descriptions of alternatives, without mockups.
-[Task 39](todo.md#39-readme-redesign) is the completion checklist.
+Status: implemented and locally verified. GitHub-hosted target verification and publication remain separate actions. Task 40 in [todo.md](todo.md#40-curl-installation-and-bundled-surfpool) is the only completion checklist.
+The agreed research notes remain outside the repository at `/private/tmp/ronchi-installation-plan.md`.
 
-## Goal and audience
+## Contract
 
-A developer opening the repository should understand what Ronchi does, why it is useful and how to try it.
-Show a concrete investigation result before describing internal architecture.
-Make human dashboard use and coding-agent CLI/MCP access visible.
-Keep the existing name, parallel-band identity and “Make hidden failures visible.” tagline.
+Ship Ronchi under MIT with a compatible pinned Surfpool executable in the same native installation.
+Support curl installation and update by rerunning the installer. Homebrew, npm and self-update commands are outside this task.
+Prepare release builds for macOS arm64, macOS x86_64 and Linux x86_64; publish support claims only after target checks pass.
+Keep GitHub publication separate from implementation. Do not commit, push a tag, publish a release or create external repositories without a new request.
 
-## Required content
+Use one versioned installation directory with a stable user-local `ronchi` symlink. Keep old versions so running Labs retain their executable paths during upgrades.
+Keep Surfpool private to that installation; never search PATH for it or replace an independently installed copy.
+The user explicitly requested removal of existing local Surfpool installations before implementing this task. Do not delete Labs, Journals or chain state.
+Ronchi and Surfpool executables may be shared across projects. All runtime data remains under the selected project's `ronchi/`.
+Resolve installed Surfpool relative to the canonical Ronchi executable. Preserve explicit project-local archive installation for source builds and existing users.
+Verify the official pinned Surfpool archive and executable on use; do not trust a mutable release manifest to establish upstream identity.
 
-- A short product description grounded in the current Solana/local-first scope.
-- One worked example: accepted submission, withheld response, later backend RPC actions and actual returned status.
-- A real running-terminal example and current dashboard screenshots with explanatory captions.
-- A short first-run path using implemented build/start/Demo commands.
-- An agent section with real structured CLI examples and the local MCP entrypoint.
-- A compact Case overview and Simulator/Surfpool distinction.
-- Clear prototype status and links to maintained docs for deeper setup and limits.
+## Ordered slices
 
-AI-native means a first-class structured interface for coding agents over the same Journal as the dashboard.
-It does not imply an embedded model, autonomous business-correctness evaluation or an application SDK requirement.
-Do not introduce unimplemented installers, cloud dependencies, unsupported platform claims or synthetic benchmark/badge claims.
+1. Add MIT metadata and a shared pinned artifact catalog. Resolve and validate an installed companion before falling back to the existing project-local tool path. Prove actual cross-project startup and rejection of tampered companions.
+2. Add deterministic native packaging and a POSIX shell installer. Bundle the official Surfpool archive, extracted executable and required distribution notices. Use versioned directories, checksummed downloads and atomic symlink replacement; do not touch project data.
+3. Add GitHub Actions build/package/smoke workflows for the selected targets. Build dashboard assets before Cargo. Test release artifacts without publishing; gate tagged publication on build and install checks. Keep runtime dependencies off the user's machine.
+4. Verify installation/update/failures against local HTTP release fixtures and the real macOS artifact. Run focused Rust checks and applicable regressions. Update maintained contracts, README and progress with accurate publication status.
 
-## Selected direction
+## Design choices and checks
 
-The user selected **Human + agent** with the branded parallel-band header from the product-showcase alternative.
-Present one Lab and one shared evidence history through two first-class interfaces: dashboard for people, structured CLI/MCP for coding agents.
-The user authorized the specification, implementation plan and complete README/media work. Runtime behavior remains outside scope.
-
-Approved narrative:
-
-1. Ronchi brand, existing tagline, concise Solana/local-first descriptor and developer/agent audience.
-2. A meaningful Workspace scene with one selected incident, then the two ways to investigate it.
-3. One concrete response-loss example that connects applied Fault, backend follow-ups and actual RPC result.
-4. A coding-agent workflow grounded in structured summaries and exact evidence references.
-5. Running-terminal example and an implemented first-run path, with Demo and backend connection distinguished.
-6. Compact fault/mode overview, prototype scope and links to maintained docs.
-
-Keep the README in English. Lead with a real static Workspace scene. Place the terminal example lower. Do not create mockups.
-
-## Media and presentation
-
-Use the existing dark/coral Ronchi identity and readable screenshots at actual README display width.
-Capture from a disposable Lab with a known workload; label simulated outcomes accurately.
-Prefer a focused Observation detail plus a Workspace overview over a gallery of empty screens.
-A short real terminal animation is optional; retain a readable still and copyable commands.
-Use original product visuals and real output. Screenshots must not expose launch keys, credentials, personal paths or unrelated backend data.
-Keep final referenced README media separate from temporary research and capture scratch files.
-Use relative paths, descriptive alt text and captions; retain text explanations when media does not load.
-
-## Implementation plan
-
-1. Capture one response-loss incident in a disposable Simulator Lab through the release executable. Use the same incident for the dashboard and structured CLI examples. Stop only that exact Lab after capture.
-2. Produce the original band header and real Workspace, Inspector and terminal media under `docs/assets/readme/`. Keep scratch files and research outside the repository.
-3. Rewrite README around the approved narrative. Provide executable source-build, Demo, backend, Case and MCP examples. Link detailed contracts rather than duplicating them.
-4. Verify commands against actual help/output. Inspect the rendered README and media at GitHub-like width. Check local links, image dimensions, credentials and whitespace. Record results in task 39.
-
-Dependencies follow this order: verified incident → final media/copy → rendering and link checks.
-The completion checklist remains in `todo.md`; this plan does not duplicate it.
-
-## Acceptance and boundaries
-
-A new reader can identify the product, see a meaningful incident and start a local Lab.
-Both human and coding-agent workflows use real supported interfaces over one Journal.
-The first visual is a real populated Workspace; the selected Observation has readable supporting detail.
-The terminal example uses actual captured output; copyable commands remain in text.
-Simulated finality is identified as simulated. RPC evidence does not claim business completion.
-Relative links and media resolve. Images have descriptive alt text and contain no launch credentials or personal data.
-Research and capture scripts are not product assets and remain outside tracked files.
-Do not alter runtime behavior or stop user Labs. Commit only at the user’s explicit request. Do not publish.
-
-Existing contracts remain authoritative: [overview](../docs/product/overview.md), [brand](../docs/product/positioning-and-brand.md), [dashboard](../docs/product/dashboard.md) and [interfaces](../docs/product/investigation-interfaces.md).
+A small explicit release/installer layer replaces the stock cargo-dist shell layout because the private pinned companion includes an archive and notices as well as two executables. Do not introduce an additional distribution framework unless it removes demonstrated complexity.
+Use GitHub-hosted artifacts and a checked-in installer; no domain or hosted service is required.
+Installation must reject unsupported platforms, corrupt archives and unsafe archive entries without replacing a working installation.
+Installer failure and concurrent updates must preserve the previous executable. Reinstalling an identical version must not mutate files used by live Labs.
+Check PATH messaging without claiming to edit the current parent shell. Document removal separately from Lab-data deletion.
+Actual target smoke tests, not a cross-compiled file, establish platform compatibility. macOS minimum version and Linux runtime compatibility must be explicit in release documentation.
+Keep dependency licenses/notices with distributed binaries. Surfpool remains an independent executable under Apache-2.0.

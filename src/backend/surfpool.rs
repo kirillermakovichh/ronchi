@@ -41,7 +41,7 @@ impl Owned {
         if !version.status.success()
             || !String::from_utf8_lossy(&version.stdout)
                 .split_whitespace()
-                .any(|part| part == crate::tools::SURFPOOL_VERSION)
+                .any(|part| part == crate::tools::version())
         {
             return Err(LabError::conflict(
                 "Surfpool reports a different version from its pinned artifact",
@@ -88,7 +88,7 @@ impl Owned {
         let websocket_address = ws.local_addr()?;
         let client = super::Client::new(
             rpc_address,
-            format!("surfpool:{}:{lab_id}", crate::tools::SURFPOOL_VERSION),
+            format!("surfpool:{}:{lab_id}", crate::tools::version()),
             datasource,
         )
         .map_err(LabError::invalid)?;

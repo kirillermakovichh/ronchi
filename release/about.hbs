@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Third-party licenses</title>
+<body><h1>Third-party licenses</h1>
+<p>Unmodified Surfpool source and source archives of MPL-covered dependencies are supplied in SURFPOOL-SOURCES.tar.gz beside the Surfpool notices. Other crate sources are available by exact name and version from crates.io.</p>
+{{#each licenses}}
+<section><h2>{{name}}</h2><ul>{{#each used_by}}<li>{{crate.name}} {{crate.version}} {{#if crate.repository}}— {{crate.repository}}{{/if}}</li>{{/each}}</ul><pre>{{text}}</pre></section>
+{{/each}}
+</body></html>

@@ -34,8 +34,7 @@ Implementation gaps and their verification belong in the [development queue](../
 
 ## Distribution and resources
 
-- Select initial native platforms and any first Testcontainers language adapter.
-- Select the product's open-source license before public distribution.
+- Select any first Testcontainers language adapter. Native distribution targets and verification status live in [development](development.md#native-distribution).
 - Complete public naming and registry checks listed in [positioning and brand](product/positioning-and-brand.md#pre-publication-checks).
 - Define measured release gates from the existing executable and representative workloads. Operational safety limits already live in their topic contracts.
 - Use [ADR-0019](adr/0019-resource-efficient-rust-core.md) for the accepted measurement areas; do not reopen the stack merely because limits are not numerical yet.

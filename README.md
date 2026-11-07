@@ -90,6 +90,21 @@ See the [CLI/MCP contract](docs/product/investigation-interfaces.md) for schemas
 
 ## Quickstart
 
+### Native installer
+
+The curl installer installs Ronchi together with its pinned private Surfpool. You do not need Rust, Node.js or a separate Surfpool installation.
+**Release preparation:** the installer is implemented, but the first binary release has not been published. Use the source build below until release assets are available.
+
+After the first release, the installation command will be:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/kirillermakovichh/ronchi/releases/latest/download/install.sh | sh
+```
+
+Run the same command to update. The installer keeps old releases for running Labs and prints a PATH instruction if needed. It does not edit your shell profile automatically.
+Journals and Lab state remain in each project's `ronchi/` directory. See [installation layout and removal](docs/development.md#curl-installation-layout).
+
 ### Build from source
 
 You need the [pinned Rust toolchain](rust-toolchain.toml), a platform C compiler/linker, Node.js and npm. Run these commands from this checkout:
@@ -178,7 +193,7 @@ ronchi up --mode surfpool \
   --surfpool-datasource https://api.mainnet-beta.solana.com
 ```
 
-Transactions execute locally in this mode. Ronchi does not fund signers or request airdrops. See [Surfpool setup and limits](docs/product/lab-lifecycle.md#managed-native-surfpool-implementation).
+Packaged installations already include Surfpool. Source builds need the explicit pinned-archive setup described in the link below. Transactions execute locally in this mode. Ronchi does not fund signers or request airdrops. See [Surfpool setup and limits](docs/product/lab-lifecycle.md#managed-native-surfpool-implementation).
 
 ## Explore other failure patterns
 
@@ -213,3 +228,5 @@ Ronchi explains observed behavior. It does not infer business intent, equate two
 - [Documentation map](docs/README.md) — product contracts, decisions and domain glossary.
 - [Agent instructions](AGENTS.md) — project rules and skill routing.
 - [Development queue](tasks/todo.md) — completed work and remaining validation.
+
+Ronchi is available under the [MIT license](LICENSE). Surfpool and other bundled dependencies retain their own licenses and notices.

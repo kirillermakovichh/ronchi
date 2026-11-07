@@ -183,8 +183,8 @@ async fn run_owned(
                 result=owned.ready()=>result,
                 _=startup_interrupt.recv()=>Err(LabError::new(130,"cancelled","Managed Surfpool startup cancelled")),
             }?;
-            append(&handle,event("backend.ready",started,serde_json::json!({"authority":"execution_backend","source_identity":owned.client.authority(),"process":owned.identity,"version":crate::tools::SURFPOOL_VERSION,"binary_sha256":owned.binary_sha256,"readiness":readiness,"rpc_address":owned.rpc_address,"websocket_address":owned.websocket_address,"automatic_airdrop":false,"state":"clean_memory","automatic_deployment":false}))).await?;
-            control.manifest.write().unwrap_or_else(|e|e.into_inner()).versions.insert("surfpool".into(),crate::tools::SURFPOOL_VERSION.into());
+            append(&handle,event("backend.ready",started,serde_json::json!({"authority":"execution_backend","source_identity":owned.client.authority(),"process":owned.identity,"version":crate::tools::version(),"binary_sha256":owned.binary_sha256,"readiness":readiness,"rpc_address":owned.rpc_address,"websocket_address":owned.websocket_address,"automatic_airdrop":false,"state":"clean_memory","automatic_deployment":false}))).await?;
+            control.manifest.write().unwrap_or_else(|e|e.into_inner()).versions.insert("surfpool".into(),crate::tools::version().into());
             Ok::<(),LabError>(())
         }.await;
         if let Err(error) = startup_backend {

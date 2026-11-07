@@ -1,0 +1,25 @@
+{
+  "version": "1.7.0",
+  "repository": "solana-foundation/surfpool",
+  "artifacts": [
+    {
+      "target": "aarch64-apple-darwin",
+      "platform": "darwin-arm64",
+      "archive": "surfpool-darwin-arm64.tar.gz",
+      "sha256": "32c309e3b79bfa3913e384b3c9b109000720cfe7f346d145feb6693fccfb202f"
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "platform": "darwin-x64",
+      "archive": "surfpool-darwin-x64.tar.gz",
+      "sha256": "b9724b6a67ac33b9cc94fb41adaf47bd638269142c7ddc6a0dae7ca77fd9e760"
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "platform": "linux-x64",
+      "archive": "surfpool-linux-x64.tar.gz",
+      "sha256": "5bef2b0b186a74622508f104b6d2e4e2db040932b6d8f3a811172e241f802a63"
+    }
+  ],
+  "source_sha256": "1ab4952a8e336c80dec7038b4f1235eef1e7fa72ffab5e196f21a67df4d9702b"
+}

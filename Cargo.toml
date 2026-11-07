@@ -3,6 +3,9 @@ name = "ronchi"
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "MIT"
+repository = "https://github.com/kirillermakovichh/ronchi"
+description = "A local reliability lab for Solana backends"
 
 [dependencies]
 rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io"] }
