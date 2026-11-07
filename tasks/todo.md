@@ -801,7 +801,13 @@ Palette/terminal changes are pushed in `722b8a7`. Frontend build and 64 tests pa
 ### 43. Publish the yellow UI as v0.1.1
 
 - [x] **43a:** Bump native/frontend versions, retain dependency versions, verify the source build and keep dependency-cache reuse across the patch bump.
-- [ ] **43b:** Push the new tag and obtain a successful complete native matrix/publication without bypassing checks or replacing v0.1.0.
-- [ ] **43c:** Verify latest public curl installs v0.1.1 with the yellow embedded dashboard and terminal, verify checksums/update behavior and push release documentation.
+- [x] **43b:** Push the new tag and obtain a successful complete native matrix/publication without bypassing checks or replacing v0.1.0.
+- [x] **43c:** Verify latest public curl installs v0.1.1 with the yellow embedded dashboard and terminal, verify checksums/update behavior and push release documentation.
 
 The user explicitly requested a rebuilt release so curl installation includes the accepted yellow palette and terminal changes. Use the existing tag-triggered build/test/package/install/publish gates. A separate duplicate manual matrix is unnecessary for this patch; publication still waits for the complete tagged matrix. The CI fallback cache is target-scoped; Cargo revalidates compiler, source, features and profile fingerprints.
+
+**Release and verification:** The annotated v0.1.1 tag points to `662e990`. [Tagged workflow `42417380310`](https://github.com/kirillermakovichh/ronchi/actions/runs/42417380310) passed the complete macOS ARM, macOS Intel and Linux x86_64 matrix and published [v0.1.1](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.1). Rust's 290 tests, fmt, Clippy, sixteen installer fixtures, notices, packaging and actual installed Simulator/Surfpool checks remained enabled. The v0.1.0 tag and assets were preserved.
+
+All eight assets were present. Anonymous downloads of all three archives matched their SHA-256 files; published version metadata was `0.1.1`. The public latest installer matched the maintained script and installed v0.1.1 without GitHub credentials into a temporary prefix. Served embedded CSS contained `--accent:#f3d65b`; real PTY output contained v0.1.1, the compact four-band mark and yellow 221. Ctrl-C stopped that Lab normally. An isolated v0.1.0 Surfpool Lab stayed ready across the upgrade with the same owned-child identity and a responding RPC. The old executable remained available; the new CLI stopped the old Lab normally. Actual installed Simulator/two Surfpool projects, embedded dashboard HTTP, retained Journals, tamper rejection and same-version reinstall passed. Every temporary Lab stopped and its prefix was removed. No user installation or Lab changed. Intel/Linux runtime evidence remains the native CI jobs, not execution on this macOS host.
+
+README now links v0.1.1. Both release pages describe public installation; v0.1.1 explains the palette and restarting a Lab after update. Temporary logs, helpers and downloads remain outside Git. Local link/anchor and diff-whitespace checks passed. Homebrew and independent-backend retesting remain separate work.
