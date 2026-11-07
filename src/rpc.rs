@@ -674,6 +674,12 @@ impl Exchange {
                                 self.hold.reserve_evidence(self.rpc.0.writer.clone(),batch_size).await?;
                                 let fact=json!({"request":reference,"method":method,"signatures":signatures,"policy":policy,"selection":selection,"dispatch":"prevented","authority":if self.rpc.0.backend.is_some(){"execution_backend"}else if crate::upstream::READ_METHODS.contains(&method){"read_upstream"}else{"rpc_simulator"}});
                                 self.hold.record(&self.rpc.0.writer,self.rpc.0.started,"rpc.dispatch_prevented",vec![fact]).await?;
+                                // Publish the committed prevention before start exposes the deadline.
+                                // A slow hold-start commit can outlive that deadline and cancel this future.
+                                if let Some(stored) = self.boundaries.lock().unwrap_or_else(|e| e.into_inner()).iter_mut().find(|v| v["request_id"] == reference["request_id"]) {
+                                    stored["rpc_response"] = json!("not_prepared");
+                                    stored["dispatch"] = json!("prevented");
+                                }
                                 self.hold.start(&self.rpc.0.writer,self.rpc.0.started,policy.settings.hold_ms,json!({"request":reference,"method":method,"hold_ms":policy.settings.hold_ms,"fault":"provider-timeout-burst","dispatch":"prevented"})).await?;
                                 Ok::<(),RpcError>(())
                             }.await;
@@ -683,15 +689,6 @@ impl Exchange {
                                 boundary["rpc_response"] = json!("not_prepared");
                                 boundary["dispatch"] = json!("prevented");
                                 boundaries.push(boundary.clone());
-                                if let Some(stored) = self
-                                    .boundaries
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .iter_mut()
-                                    .find(|v| v["request_id"] == reference["request_id"])
-                                {
-                                    *stored = boundary;
-                                }
                                 continue;
                             }
                             Err(error) => timeout_error = Some(error),

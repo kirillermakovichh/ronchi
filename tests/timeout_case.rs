@@ -557,3 +557,72 @@ async fn recovery_interval_dispatches_new_requests_and_the_next_cycle_repeats_ou
     assert_eq!(selected.data["selection"]["cycle"], 1);
     server.settle().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn short_hold_preserves_prevented_dispatch_when_start_commit_outlives_deadline() {
+    let mut server = Server::new().await;
+    let database = rusqlite::Connection::open(server.dir.path().join("journal.sqlite")).unwrap();
+    // Keep the hold-start transaction busy past a one-millisecond transport hold.
+    // This reproduces slow CI fsync/commit without changing the runtime clock.
+    database.execute_batch("CREATE TRIGGER slow_hold AFTER INSERT ON events WHEN json_extract(NEW.event_json,'$.kind')='fault.withholding_started' BEGIN SELECT sum(x) FROM (WITH RECURSIVE delay(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM delay WHERE x<1000000) SELECT x FROM delay); END;").unwrap();
+    server
+        .rpc
+        .arm_case(arm_timeout(1, vec![], 5000, 10000))
+        .await
+        .unwrap();
+    let mut stream = server
+        .raw(json!({"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[]}))
+        .await;
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(bytes.is_empty());
+    server.rpc.disarm_case().await.unwrap();
+    server.call("getLatestBlockhash", json!([])).await;
+    server.settle().await;
+    let facts = server.events().await;
+    let prevented = facts
+        .iter()
+        .find(|event| event.kind == "rpc.dispatch_prevented")
+        .unwrap();
+    let boundary = facts
+        .iter()
+        .find(|event| {
+            event.kind == "rpc.boundary"
+                && event.data["request_id"] == prevented.data["request"]["request_id"]
+        })
+        .unwrap();
+    assert_eq!(boundary.data["dispatch"], "prevented", "{facts:?}");
+    assert_eq!(boundary.data["rpc_response"], "no_transport_response");
+    assert!(
+        facts
+            .iter()
+            .any(|event| event.kind == "fault.withholding_started")
+    );
+    let report = ronchi::query::Engine::default()
+        .execute(
+            server.dir.path().join("journal.sqlite"),
+            false,
+            "explicit",
+            ronchi::query::Request {
+                contract_version: 1,
+                request_id: "slow-hold-findings".into(),
+                lab_id: "L-timeout".into(),
+                operation: ronchi::query::Operation::Findings,
+                arguments: ronchi::query::Arguments::default(),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        report.result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["rule_id"] == "provider-timeout-burst.later-rpc-attempt" }),
+        "{report:?}"
+    );
+}
