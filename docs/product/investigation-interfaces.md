@@ -135,8 +135,7 @@ external stop, static/color opt-outs, JSON/CI/dumb output, and abrupt daemon dea
 ### Implemented Case operations
 
 `case list` works offline and lists maintained Cases with their supported modes.
-The current simulator catalog includes `tx-response-lost`, `tx-confirmation-stalls`, `finality-delayed`, and `provider-timeout-burst`.
-`provider-timeout-burst` also supports managed Surfpool.
+The [Case mode matrix](cases.md#mode-support-and-limits) defines the built-in catalog and its simulator/Surfpool restrictions.
 The dashboard Case selector uses this core catalog and disables unsupported modes.
 `case arm tx-response-lost` arms or replaces a continuing policy without restarting the Lab.
 `case disarm` changes later registrations; existing holds retain their original policy and deadline.
@@ -149,8 +148,9 @@ Mutations require an authenticated ready Lab; retained or stopping Labs return `
 A transport deadline can leave mutation effects unknown; inspect status before another mutation.
 
 Authenticated control routes are `GET /v1/labs/{id}/cases`, `POST /v1/labs/{id}/case/arm`, and `POST /v1/labs/{id}/case/disarm`.
-Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, `signatures`, and optional typed `confirmation` settings.
-The [confirmation-delay claim](cases.md#verified-simulator-confirmation-delay-claim) defines those settings and evidence limits.
+Arm's strict JSON model uses `case_id`, `hold_ms`, `max_held`, `signatures`, and optional typed `confirmation`, `status`, `timeout` or `blockhash` settings.
+The corresponding [Case contracts](cases.md) define those settings and evidence limits.
+Custom activation uses `case_id:custom` with `custom_yaml` instead of built-in settings under the [Custom Case contract](custom-cases.md#prototype-authoring-and-inspection).
 Unknown arm keys return a structured `invalid_argument` without changing policy.
 Disarm accepts an empty body or `{}` and rejects supplied settings.
 Transient control-queue capacity returns `state_conflict`; Journal failure returns a product error and fails the Lab.

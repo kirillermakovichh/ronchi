@@ -115,15 +115,17 @@ The initial Reference Application does not promise real SOL or SPL transfers. Co
 
 The visual system is based on regular parallel bands whose controlled deformation reveals a deviation.
 
-Recommended direction:
+Current direction:
 
 - near-black background;
 - white or warm-neutral parallel lines;
-- one signal color for faults and deviations;
+- one yellow signal color for faults and deviations;
 - high contrast and restrained typography;
 - no blockchain cubes, chains, lightning bolts, skulls, or generic DevOps imagery.
 
 The band motif can appear in the wordmark, documentation dividers, dashboard Timeline, fault markers, Findings, and launch graphics. Visuals should be presented as a conceptual system inspired by Ronchi patterns, not as physically calculated ronchigrams unless they actually are.
+
+The dashboard accent is `#f3d65b`, with related dark surfaces defined in its shared CSS tokens. The terminal uses indexed yellow 221. Semantic success, error and unknown states retain their own icons and colors; an intentional Fault must remain distinct from a transaction error.
 
 The dashboard should not require a Control-versus-Chaos split view. Its primary composition is the Continuous Lab Journal with clear visual deformation around a fault, plus filtered Investigations and Findings. Optional comparisons may use aligned side-by-side views when Comparability is established.
 
@@ -149,7 +151,7 @@ Previous working names must not appear in current product copy, commands, paths,
 
 ## Pre-publication checks
 
-Before a public release:
+The repository and native releases are public. Publication does not establish completion of the naming and registry checks below. Keep unverified checks open before further distribution:
 
 - search relevant software and developer-tool trademarks in target markets;
 - check `ronchi` domains and social handles;

@@ -21,6 +21,7 @@ Each topic has one maintained owner. Update that owner instead of copying its sp
 | Journal facts, ordering, Findings, storage, redaction and retention | [Evidence and Findings](product/evidence-and-findings.md) |
 | Bundled relayer, intent storage and crash recovery | [Reference Application](product/reference-application.md) |
 | Messaging, name, visuals and public launch checks | [Positioning and brand](product/positioning-and-brand.md) |
+| Install, update, configure PATH and remove Ronchi | [Installation](development.md#curl-installation-layout) |
 | Build, dependencies, source layout, verification and commit rules | [Development](development.md) |
 | Domain terms | [CONTEXT.md](../CONTEXT.md) |
 | Deliberately unresolved or deferred choices | [Open questions](open-questions.md) |
@@ -34,7 +35,7 @@ The blockchain traffic boundary is HTTP JSON-RPC; dashboard WebSocket is a separ
 
 ## Decisions
 
-The [ADR index](adr/README.md) lists all 19 decisions and their refinement/supersession relationships.
+The [ADR index](adr/README.md) lists the decisions and their refinement/supersession relationships.
 Numbered ADR paths and rationale remain stable. Current topic contracts own implementation details.
 The [shared Solana references](../.agents/references/solana-rpc/index.md) supply protocol evidence; they do not expand Ronchi capabilities.
 

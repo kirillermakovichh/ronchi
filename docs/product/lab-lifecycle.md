@@ -355,8 +355,8 @@ Existing installation names are verified rather than overwritten.
 | `surfpool-linux-x64.tar.gz` | `5bef2b0b186a74622508f104b6d2e4e2db040932b6d8f3a811172e241f802a63` |
 
 These hashes identify the official `solana-foundation/surfpool` v1.7.0 release published on 2026-10-28.
-Actual local execution is verified on macOS 15.2 arm64.
-The other pinned targets remain untested on this host.
+The initial local native checks verified execution on macOS 15.2 arm64.
+The published native release also passed installed Surfpool checks on macOS ARM, macOS Intel and Linux x86_64 in CI. The [distribution contract](../development.md#native-distribution) records supported baselines and links the release evidence. Intel/Linux were not executed on this local host.
 Windows and other architectures have no native Ronchi ownership implementation in this build.
 
 Start the installed backend with `ronchi up --mode surfpool`.

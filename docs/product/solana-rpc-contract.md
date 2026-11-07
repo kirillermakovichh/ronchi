@@ -1,6 +1,6 @@
 # Solana RPC contract
 
-Status: accepted product contract. This defines intended coverage, not implemented support or a stable wire API.
+Status: implemented partial simulator profile, allowlisted Read-through and managed Surfpool boundary. The sections below distinguish verified fixtures from broader compatibility goals. No stable wire API is promised.
 The [product overview](overview.md#execution-modes) owns product scope and mode authority.
 [Cases and coverage](cases.md) owns Fault policies and Coverage Claims.
 Use the [shared protocol references](../../.agents/references/solana-rpc/index.md) and official method contracts for protocol facts.
@@ -9,7 +9,7 @@ Use the [shared protocol references](../../.agents/references/solana-rpc/index.m
 
 In simulator mode, these methods use one coherent local Simulated Chain State:
 
-| Method | Intended behavior |
+| Method | Local behavior |
 | --- | --- |
 | `getLatestBlockhash` | Return a local recent blockhash and its last valid block height |
 | `sendTransaction` | Accept a signed transaction under the submission contract below |
@@ -28,8 +28,8 @@ The implementation must verify the reported compatibility profile before making 
 
 ### Implemented bootstrap profile
 
-Task 4 implements `getHealth`, `getVersion`, `getGenesisHash`, `getSlot`, `getBlockHeight`, `getLatestBlockhash`, and `isBlockhashValid`.
-Task 5 adds `sendTransaction`, `getSignatureStatuses`, and `getTransaction`.
+Bootstrap methods are `getHealth`, `getVersion`, `getGenesisHash`, `getSlot`, `getBlockHeight`, `getLatestBlockhash`, and `isBlockhashValid`.
+Transaction methods and fee queries follow their scoped contracts below.
 The current partial profile is `local-simulator-v1`.
 `getVersion` reports `0.0.0-ronchi.<native-version>` and an explicit partial-profile extension.
 It does not claim an Agave release or feature set.
@@ -68,7 +68,7 @@ A forced/cancelled or failed transport remains separate from the prepared result
 `http_write_completed` records server transport completion; client receipt and application outcome remain unknown.
 
 Method selection and bank/context semantics were cross-checked against [Agave v3.0.10 RPC source](https://github.com/anza-xyz/agave/blob/v3.0.10/rpc/src/rpc.rs).
-The official method-page fetch returned HTTP `429` in this session; the checked-in references and pinned implementation provide the available evidence.
+During the original bootstrap verification, the official method-page fetch returned HTTP `429`; checked-in references and the pinned implementation supplied the available evidence.
 This bootstrap verification does not establish the full accepted format matrix.
 
 ### Implemented lifecycle profile

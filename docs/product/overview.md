@@ -1,6 +1,6 @@
 # Product overview
 
-Status: accepted product direction. This document defines intent and scope, not implemented capabilities or a stable API.
+Status: current product intent and scope. Topic contracts distinguish implemented behavior, verification limits and deferred work. APIs remain prototype contracts without a stability promise.
 
 Ronchi is an open-source, local-first reliability lab for blockchain applications.
 A real backend uses Ronchi as its Solana HTTP JSON-RPC endpoint.
@@ -107,8 +107,8 @@ The [clock and validity profile](solana-rpc-contract.md#clock-and-validity-profi
 | Evidence source | What becomes observable |
 | --- | --- |
 | Configured RPC path and simulator/backend | Received requests, local lifecycle decisions, applied Faults, RPC Boundary Results, and later RPC calls |
-| Optional Instrumented RPC Client | Client Outcomes, call sites, and explicitly supplied business correlation |
-| Optional Application Checkpoints | The application decisions or transitions those events report |
+| Instrumented RPC Client (deferred SDK) | Client Outcomes, call sites, and explicitly supplied business correlation |
+| Application Checkpoints (deferred SDK) | The application decisions or transitions those events report |
 
 Changing the RPC URL is sufficient for the base Observation Boundary.
 It does not expose hidden application state, prove how the client interpreted a response, or relate different signatures to one business intent automatically.
@@ -143,7 +143,7 @@ Browser scraping, full trace dumps, and complete application logs are not the no
 Ronchi contains no embedded model and exposes no arbitrary shell-execution tool.
 The [interface contract](investigation-interfaces.md) defines the first dashboard, CLI/MCP operations, machine schemas, and query limits.
 
-An optional first-party SDK is accepted but deferred while the CLI and no-SDK workflow are defined.
+An optional first-party SDK is accepted but deferred. CLI and local MCP support the current Coding Agent workflow.
 The accepted direction starts with Go, wraps an existing RPC client once without per-call closures, and emits structured Checkpoints.
 Business identifiers remain explicit application input.
 Raw application logs are opt-in bounded attachments, not a default SDK stream.

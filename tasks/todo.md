@@ -2,14 +2,14 @@
 
 The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
 The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
-Current work: [task 41](#41-first-native-release).
+Current work: no active implementation task. [Task 45](#45-documentation-status-and-navigation-cleanup) records the latest documentation maintenance.
 
 ## Remaining validation
 
 - [ ] Repeat the complete independent stateful-backend/pool-discovery workflow after the task-28 fixes and current UI changes. The earlier manual Solana-backend trial provides bounded evidence, not complete compatibility.
 
 Checkpoint C/E's initial manual workflow criterion is recorded below. This full retest remains separate.
-SDK, CI wrappers, replay, distribution and later capabilities remain [open questions](../docs/open-questions.md), not an implicitly started implementation queue.
+SDK, CI wrappers, replay, Homebrew and later capabilities remain [open questions](../docs/open-questions.md), not an implicitly started implementation queue.
 
 ## Working rules
 
@@ -825,3 +825,15 @@ The installer adds a guarded POSIX block to zsh's selected `.zshrc`, Bash's inte
 **Verification:** Twenty-nine installer tests passed with a local HTTP mirror and isolated shell homes. Tests cover actual new Bash login/interactive and zsh interactive processes, ZDOTDIR, profile precedence, existing settings/symlinks, quotes/metacharacters, failures, opt-out and the README command. Shell/Python syntax, local Markdown links/anchors and diff whitespace passed. The new installer also passed the actual published macOS ARM v0.1.1 archive's full install smoke: shell PATH, Simulator, two Surfpool projects, embedded dashboard, retained Journals, tamper rejection, reinstall and live Surfpool update. All test homes, installations and Labs were temporary. User profiles, installations and Labs were not modified. No Rust/frontend source or native binary changed; the existing v0.1.1 native matrix remains its platform evidence.
 
 **Public verification:** Commit `c009cf1` publishes the maintained installer and README without changing v0.1.1's native archives or attached installer snapshot. The raw public installer matched the checked source byte-for-byte. The exact README command ran anonymously with an empty curl config, no GitHub credentials and a disposable zsh home. `ronchi --version` worked immediately in the installing terminal and in a new interactive zsh, returning `0.1.1`. Automatic `.zshrc` setup was present. The temporary installation was removed; no user profile or installation changed. Both release pages now show the same maintained-installer command. No native rebuild, new tag or archive replacement was necessary.
+
+### 45. Documentation status and navigation cleanup
+
+- [x] **45a:** Reconcile current task/release/install status and remove duplicated session history from the progress summary.
+- [x] **45b:** Correct verified stale Case, RPC and Journal status text; keep deferred work separate from implemented behavior.
+- [x] **45c:** Verify local paths/anchors and preserve decision bodies, glossary, research, scoped limits and remaining validation.
+
+The documentation map now routes installation directly and no longer carries a stale ADR count. The task header no longer points to completed task 41. Progress links the detailed evidence in tasks 36–44 instead of copying release history. Development owns native support baselines and installation behavior; task records retain run IDs, CI timings, checksum checks and supplied-media provenance. The working plan records this completed maintenance. Homebrew remains explicitly deferred; the independent-backend retest remains open.
+
+Current contracts now identify the implemented seven-Case catalog across five families, its mode restrictions and typed arm fields. Journal documentation matches the writer's schema 6 and the reader's support for schemas 1–6. Obsolete storage-integration promises are replaced by the existing durable-commit/acceptance boundary. RPC status text distinguishes implemented profiles from broader compatibility goals. SDK instrumentation is marked deferred. Brand copy records the accepted yellow accent and preserves the remaining unverified naming/registry checks despite public publication.
+
+All maintained documentation paths remain in place. Numbered ADR decision bodies, CONTEXT, research sources, candidate Case/Pack names and historical task evidence are unchanged. Scoped operational limits and protocol/evidence restrictions are preserved. All 412 local Markdown paths/anchors across 92 tracked Markdown files, including project skills, passed. The preservation check confirmed unchanged bodies for all 20 numbered ADRs, CONTEXT, tracked research and historical task evidence. Diff whitespace passed. Runtime, tests, installer, assets and release files did not change; no runtime checks or builds were repeated for this documentation-only task.

@@ -1,6 +1,6 @@
 # Cases and coverage
 
-Status: accepted contract with a separate candidate catalog. Simulator `tx-response-lost` is implemented and verified under the scoped Coverage Claim below. The simulator confirmation-delay variants are implemented with the scoped claim below. `provider-timeout-burst` is implemented with the scoped claim below. Other families remain planned; managed Surfpool response loss has the scoped claim below. Names, parameters, and YAML syntax are not stable APIs.
+Status: seven built-in Cases across the five initial fault families are implemented. The mode matrix and scoped Coverage Claims below define their support and verification limits. Later candidates remain separate. Names, parameters, and YAML syntax are not stable APIs.
 This document owns Case scope and catalog status; [overview.md](overview.md) owns the overall product definition.
 
 ## Continuing Case model
@@ -466,7 +466,7 @@ A different replacement signature is a separate observed transaction; shared eco
 
 ### Mode support and limits
 
-This matrix defines intended variants, subject to implementation verification.
+This matrix summarizes implemented variants. Each Coverage Claim below or in the corresponding family section records its evidence and limits.
 Read-through does not change local transaction authority in simulator mode.
 
 | Variant | RPC Simulator | Managed Surfpool | Unavailable claim |

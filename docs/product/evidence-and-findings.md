@@ -1,6 +1,6 @@
 # Journal, evidence, and Findings
 
-Status: initial implementation contract. Task 2 implements bounded durable storage and disk admission; the queue records remaining runtime integration.
+Status: implemented Journal storage, RPC/Case evidence, deterministic Findings and retained-evidence maintenance. The scoped contracts below define limits; no stable storage or API compatibility promise is made.
 The defaults below are reversible product choices to validate in the first prototype.
 They refine [ADR-0005](../adr/0005-explanation-first-outcomes.md), [ADR-0016](../adr/0016-continuous-lab-journal.md), and [ADR-0019](../adr/0019-resource-efficient-rust-core.md).
 This document owns evidence semantics, persistence, Findings, and retention; the [RPC contract](solana-rpc-contract.md) owns protocol behavior.
@@ -221,7 +221,7 @@ No active history is evicted to keep the Lab running; protocol lookup and lifeti
 
 ### Implemented storage primitive
 
-`JournalStore` creates a new file-backed version-5 Journal. Readers also accept versions 1 through 4.
+`JournalStore` creates a new file-backed version-6 Journal. Readers also accept versions 1 through 5 without upgrading them.
 Its strict tables store one immutable Lab identity, the committed watermark, terminal state, and JSON event envelopes keyed by sequence.
 Sequence assignment, event insertion, watermark update, and terminal state update share one transaction.
 Schema 2 adds an indexed transaction projection maintained by SQLite triggers in the same event transaction.
@@ -258,7 +258,7 @@ Existing Journals are not reinitialized or resumed.
 
 The initial storage envelope contains version, kind, UTC timestamp text, monotonic elapsed nanoseconds, source, execution mode, and data.
 Callers must validate event-family semantics and redact facts before storage.
-Protocol correlation fields and typed event families arrive with their owning slices.
+Callers supply protocol correlation fields and typed event-family data.
 Each encoded event is bounded to 64 KiB before serialization can exceed that limit.
 An atomic group contains at most 256 events and 1 MiB.
 These are storage safety limits, not measured throughput results.
@@ -298,7 +298,7 @@ These conservative bounds can reject work before the directory reaches its quota
 
 Admission scans actual files and checks filesystem available space under the same accounting lock used for commits and checkpoints.
 A reservation covers potential database growth, WAL frames, SHM growth, and filesystem allocation rounding.
-The version-5 schema bounds new pages by encoded overflow pages, twelve pages per event, and sixteen metadata pages per group.
+The storage reservation bounds new pages by encoded overflow pages, twelve pages per event, and sixteen metadata pages per group.
 `max_page_count` enforces that bound for each write transaction.
 `cache_spill=OFF` prevents repeated spilled WAL frames during the transaction.
 The reservation conservatively charges a frame for every potential database page, including existing pages.
@@ -316,7 +316,7 @@ An explicit interruption record can consume the shutdown reserve.
 A failed Journal cannot be finalized as clean.
 No budget recovery removes events or deletes a live WAL.
 An error after SQLite commit can leave committed evidence; the reader and writer watermark retain that fact.
-This primitive does not yet acknowledge RPC acceptance or persist signed protocol content.
+Storage receipts acknowledge durable commits. The RPC owner returns acceptance only after its transaction facts and signed content commit under the [submission contract](solana-rpc-contract.md#implemented-lifecycle-profile).
 
 ## Finalization, retention, and export
 

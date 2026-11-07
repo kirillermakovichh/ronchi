@@ -159,9 +159,17 @@ Homebrew is deferred. No self-update command, automatic runtime download or publ
 `release/surfpool.json` is the shared upstream version/target/hash catalog. `release/about.toml` selects accepted dependency licenses; it does not replace their terms.
 The curl installer must have the same Surfpool version pin. Packaging rejects a mismatch.
 
-The native workflow targets macOS arm64, macOS x86_64 and Linux x86_64. The initial distribution baseline is macOS 15.5+ and Ubuntu 22.04-compatible glibc 2.35+ with libgcc_s; musl/Alpine is not a target. The pinned ARM Surfpool declares macOS 15.5 in its load commands. Bounded local smoke checks also passed on macOS 15.2, but do not establish full support below that upstream baseline. Each job builds on its native runner and tests the actual installed archive. All three targets passed the complete [manual validation](https://github.com/kirillermakovichh/ronchi/actions/runs/42404486999) and [tagged release pipeline](https://github.com/kirillermakovichh/ronchi/actions/runs/42406451668) for `v0.1.0`. These runner checks do not establish every OS version at the declared baseline.
-Public `v0.1.0` downloads and all three published archive checksums were verified anonymously. The public curl installer also passed actual macOS ARM Simulator/Surfpool, embedded dashboard HTTP, retained-Journal, tamper and reinstall checks in an isolated prefix. [Task 41](../tasks/todo.md#41-first-native-release) records the evidence and platform limits.
-The yellow dashboard and terminal are published in [v0.1.1](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.1). Its [tagged pipeline](https://github.com/kirillermakovichh/ronchi/actions/runs/42417380310) passed on all three native targets. Anonymous downloads matched all three archive checksums. The public installer passed the macOS ARM color, Simulator/Surfpool and live-update checks recorded in [task 43](../tasks/todo.md#43-publish-the-yellow-ui-as-v011). Intel/Linux runtime evidence comes from their native CI jobs.
+Native distribution targets:
+
+| Target | Initial baseline |
+| --- | --- |
+| macOS Apple Silicon | macOS 15.5+ |
+| macOS Intel | macOS 15.5+ |
+| Linux x86_64 | Ubuntu 22.04-compatible glibc 2.35+ with libgcc_s |
+
+Windows and musl/Alpine are outside this distribution. The pinned ARM Surfpool declares macOS 15.5 in its load commands. Bounded local smoke checks also passed on macOS 15.2, but do not establish full support below that upstream baseline.
+
+The workflow builds on each native runner and tests the actual installed archive, including Simulator and Surfpool. The current [v0.1.1 release](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.1) passed the full matrix. Anonymous archive checksums and macOS ARM installation, embedded colors and live upgrade were verified in [task 43](../tasks/todo.md#43-publish-the-yellow-ui-as-v011). [Task 41](../tasks/todo.md#41-first-native-release) retains the first release's CI fixes and publication evidence. [Task 44](../tasks/todo.md#44-automatic-shell-path-setup) records the independently updated public installer and automatic PATH checks. Intel/Linux runtime evidence comes from native CI, not execution on this macOS host. Runner checks do not establish every OS version at the declared baseline.
 A cross-compiled file or a successful checksum is not a native runtime check.
 
 Build the frontend and release executable as above, then install cargo-about 0.9.3 as a release-only build tool. It is not required on end-user machines.
