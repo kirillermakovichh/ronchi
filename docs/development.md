@@ -179,6 +179,8 @@ These Python scripts require Python 3.12 on release/test machines only. `--surfp
 Packaging downloads official pinned Surfpool artifacts when no local archive is given. Notice generation verifies the pinned source archive, scans the Rust dependencies and Ronchi dashboard production dependencies, and includes the upstream source plus exact Cargo.lock-verified MPL-covered crate sources.
 No placeholder notices or skipped license failures are allowed in a distributable package.
 
+Native CI caches Cargo downloads, platform-specific debug/release build outputs and the pinned `cargo-about` executable separately. Rust cache keys include the toolchain, manifests, workflow and source revision; compatible earlier builds supply dependency reuse. Cargo still runs every test, lint and release-build command. License generation, packaging and installed-artifact checks also run on cache hits. Completed caches can be saved when a later check fails; cache save does not turn that job into success. CI disables incremental compilation and keeps line-table debug information to limit cache size; the shipped release profile is unchanged. The first run fills the caches and is not evidence of warm-cache speed.
+
 `.github/workflows/release.yml` builds and tests on pull requests or manual dispatch without publishing. A matching `v<VERSION>` tag triggers publication only after every build/install job passes. It refuses to overwrite an existing release. Prerelease tags remain prereleases.
 Publishing a tag/release is a separate authorized action. The current implementation does not publish or push by itself.
 

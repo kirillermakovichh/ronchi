@@ -41,6 +41,9 @@ jobs:
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: '15.5'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -61,6 +64,30 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             python3 -c 'import os,tomllib; assert os.environ["RELEASE_TAG"] == "v" + tomllib.load(open("Cargo.toml", "rb"))["package"]["version"]'
           fi
+      - name: Restore Cargo downloads
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-downloads-v1-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'release/surfpool.json') }}
+          restore-keys: cargo-downloads-v1-${{ matrix.target }}-
+      - name: Restore Rust build
+        id: rust-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/debug
+            target/release
+          key: native-v1-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', '.github/workflows/release.yml') }}-${{ github.sha }}
+          restore-keys: native-v1-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', '.github/workflows/release.yml') }}-
+      - name: Restore license generator
+        id: tools-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ronchi-release-tools
+          key: release-tools-v1-${{ matrix.target }}-${{ matrix.runner }}-${{ hashFiles('rust-toolchain.toml') }}-cargo-about-0.9.3-cli
       - name: Build embedded dashboard
         run: |
           npm --prefix dashboard ci
@@ -74,7 +101,14 @@ jobs:
       - name: Build native executable
         run: cargo build --release --locked
       - name: Install license generator
-        run: cargo install cargo-about --version 0.9.3 --locked --features cli
+        id: install-license
+        run: |
+          tool_root="$RUNNER_TEMP/ronchi-release-tools"
+          if [ ! -x "$tool_root/bin/cargo-about" ]; then
+            cargo install cargo-about --version 0.9.3 --locked --features cli --root "$tool_root"
+          fi
+          test "$("$tool_root/bin/cargo-about" --version)" = 'cargo-about 0.9.3'
+          echo "$tool_root/bin" >> "$GITHUB_PATH"
       - name: Generate dependency notices
         run: python3 scripts/release-notices.py --target '${{ matrix.target }}'
       - name: Package both executables
@@ -85,6 +119,30 @@ jobs:
             --surfpool-notices target/distribution/SURFPOOL-THIRD-PARTY-LICENSES.html
       - name: Test installed artifact and real Surfpool
         run: python3 scripts/test-release.py --directory target/distribution
+      # Keep completed compilation/downloads even if a later product check fails.
+      # Cache hits never skip tests, builds, notices, packaging or installed checks.
+      - name: Save Cargo downloads
+        if: ${{ always() && !cancelled() && steps.cargo-cache.outputs.cache-primary-key != '' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      - name: Save Rust build
+        if: ${{ always() && !cancelled() && steps.rust-cache.outputs.cache-primary-key != '' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/debug
+            target/release
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Save license generator
+        if: ${{ always() && !cancelled() && steps.install-license.outcome == 'success' && steps.tools-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ronchi-release-tools
+          key: ${{ steps.tools-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ronchi-${{ matrix.target }}
