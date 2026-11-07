@@ -34,7 +34,7 @@ mod custom_lifecycle_cases {
         json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})
     }
 
-    async fn bulk_statuses(server: &Server, signatures: &[String]) -> Value {
+    async fn bulk_call(server: &Server, method: &str, params: Value) -> Value {
         let client: Client<HttpConnector, Full<Bytes>> = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(0)
             .build_http();
@@ -43,16 +43,17 @@ mod custom_lifecycle_cases {
             .uri(format!("http://{}/", server.address))
             .header("content-type", "application/json")
             .body(Full::new(Bytes::from(
-                rpc(256, "getSignatureStatuses", json!([signatures])).to_string(),
+                rpc(256, method, params).to_string(),
             )))
             .unwrap();
         let started = Instant::now();
-        // Up to 256 per-entry source/effect facts require durable commits in this fixture.
+        // Bulk submissions, transitions and lookups share the dedicated durable writer.
+        // Allow their queued commits to finish without changing simulator deadlines.
         let response = tokio::time::timeout(Duration::from_secs(30), client.request(request))
             .await
             .unwrap_or_else(|error| {
                 panic!(
-                    "bulk lookup timeout {error}; writer={:?}; actor_finished={}",
+                    "bulk {method} timeout {error}; writer={:?}; actor_finished={}",
                     server.writer.as_ref().unwrap().handle().status(),
                     server.task.as_ref().unwrap().is_finished()
                 )
@@ -65,8 +66,14 @@ mod custom_lifecycle_cases {
             .unwrap()
             .to_bytes();
         assert!(bytes.len() <= ronchi::rpc::MAX_RESPONSE_BYTES);
-        eprintln!("bulk status lookup completed after {:?}", started.elapsed());
+        if method == "getSignatureStatuses" {
+            eprintln!("bulk {method} completed after {:?}", started.elapsed());
+        }
         serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn bulk_statuses(server: &Server, signatures: &[String]) -> Value {
+        bulk_call(server, "getSignatureStatuses", json!([signatures])).await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -546,11 +553,13 @@ mod custom_lifecycle_cases {
         let mut signatures = Vec::with_capacity(256);
         // Each group fills the 128 pending-lifecycle slots, then releases its credits.
         for group in 0..2 {
-            let hash = server.hash().await;
+            let hash = bulk_call(&server, "getLatestBlockhash", json!([{"commitment":"processed"}]))
+                .await["result"]["value"]["blockhash"]
+                .as_str().unwrap().to_owned();
             for index in 0..128 {
                 let (signature, wire) = signed(&hash, (group * 128 + index) as u8, false);
                 assert_eq!(
-                    server.call("sendTransaction", send(&wire)).await["result"],
+                    bulk_call(&server, "sendTransaction", send(&wire)).await["result"],
                     signature
                 );
                 signatures.push(signature);
@@ -604,7 +613,7 @@ mod custom_lifecycle_cases {
             .unwrap_or_else(|| panic!("{masked}"));
         assert_eq!(values.len(), 256);
         assert!(values.iter().all(Value::is_null));
-        assert_eq!(server.call("getHealth", json!([])).await["result"], "ok");
+        assert_eq!(bulk_call(&server, "getHealth", json!([])).await["result"], "ok");
         assert_eq!(
             server.writer.as_ref().unwrap().handle().status().health,
             WriterHealth::Healthy

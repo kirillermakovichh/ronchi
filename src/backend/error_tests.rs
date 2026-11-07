@@ -306,7 +306,7 @@ async fn local_required_evidence_failure_is_not_classified_as_backend_rpc_error(
     // Fail-stop may close the owned RPC transport before an error body is written.
     if let Ok(result) = result {
         assert_eq!(result["error"]["code"], -32603);
-        assert!(result["error"].get("data").is_none());
+        assert_eq!(result["error"]["data"], json!({"code":"journal_failed"}));
     }
     assert_ne!(
         server.writer.as_ref().unwrap().handle().status().health,
