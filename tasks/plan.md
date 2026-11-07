@@ -1,7 +1,7 @@
-# Automatic shell PATH setup
+# Automatic shell PATH setup completed
 
-[Task 44](todo.md#44-automatic-shell-path-setup) owns the checklist and verification evidence. The user accepted automatic shell-profile setup plus one installation command that enables Ronchi in the current terminal.
+[Task 44](todo.md#44-automatic-shell-path-setup) owns the completed checklist and detailed evidence. The installer configures shell profiles automatically. The README command activates Ronchi immediately in the current terminal.
 
-The installer and README changes pass local fixture and actual macOS archive checks. Publish the maintained installer from `main`, then verify the exact public README command in an isolated shell home. Native archives remain the verified v0.1.1 release. Existing tags/assets remain unchanged. Update release-page installation commands after the public check.
+The maintained installer and README are published. Twenty-nine fixture tests, the actual macOS ARM archive smoke and anonymous execution of the public README command passed. New-terminal behavior, preservation of settings, reinstall and live Surfpool update were checked in isolated test homes/projects. Release-page instructions use the new command. Native binaries remain v0.1.1; existing tags/assets and user installations are unchanged.
 
-Homebrew and the independent-backend retest remain separate work.
+No new implementation task is selected. Homebrew and the independent-backend retest remain separate work.

@@ -48,7 +48,7 @@ Release notes and README now point users to v0.1.1. Homebrew remains deferred. T
 
 The user accepted automatic shell-profile configuration and one command that activates PATH immediately. The maintained installer now configures zsh/Bash/POSIX profiles with a guarded, idempotent block. It preserves existing contents and valid dotfile symlinks. `--no-modify-path` opts out. README uses the installer from `main` and appends the parent-shell export; binaries still come from the verified native Releases.
 
-[Task 44](todo.md#44-automatic-shell-path-setup) records 29 fixture tests and the actual published macOS ARM v0.1.1 archive smoke. New terminals, reinstall, retained Journals, tamper rejection and live Surfpool update passed with temporary shell homes and projects. User profiles and Labs were untouched. Public source publication/command verification is the remaining step. No new native version or tag is needed for the installer change.
+[Task 44](todo.md#44-automatic-shell-path-setup) records 29 fixture tests and the actual published macOS ARM v0.1.1 archive smoke. New terminals, reinstall, retained Journals, tamper rejection and live Surfpool update passed with temporary shell homes and projects. User profiles and Labs were untouched. Commit `c009cf1` publishes the installer and README. Anonymous verification of the exact public command passed: v0.1.1 was available immediately and in a new interactive zsh with a temporary home. The downloaded installer matched source. Both release pages use the new command. Existing v0.1.1 assets/tags remain unchanged; no new native version was needed.
 
 ## Remaining validation
 
