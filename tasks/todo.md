@@ -760,7 +760,7 @@ Dependencies: 40a → 40b → 40c → 40d. Existing runtime ownership, Journal a
 - [x] **41a:** Push main and manually dispatch Native distribution at the implementation revision.
 - [x] **41b:** Resolve CI failures and obtain a successful full native matrix without bypassing checks.
 - [x] **41c:** Push v0.1.0 at the verified revision and confirm successful tagged build/publication.
-- [ ] **41d:** Verify public curl installation, remove the public-installation warning and push the final public-install documentation.
+- [x] **41d:** Verify public curl installation, remove the public-installation warning and push the final public-install documentation.
 
 The user explicitly authorized all four steps, including corrective commits/pushes and release publication. Homebrew remains deferred. The user separately requested faster Actions.
 
@@ -788,7 +788,7 @@ These are two observed CI runs, not a fixed latency guarantee. Cached compilatio
 
 **Published-asset verification:** All eight release files were downloaded through authenticated GitHub access. All three archive SHA-256 files and version/target/Surfpool metadata matched; the published installer matched its maintained source. The downloaded macOS ARM archive passed actual installation, embedded dashboard/Simulator/two Surfpool projects, retained Journals, tamper rejection, reinstall and live-update checks. The fixture ignored an unrelated system Surfpool. All verification installations and Labs were isolated; no original user Lab/backend or global installation was changed.
 
-**Remaining:** GitHub still reports the repository as private. The user explicitly deferred making the repository public. Anonymous curl installation remains unverified, so README retains an accurate public-installation notice. After explicit permission, enable public access, run the real anonymous curl installation in an isolated prefix, update release notes/README and close 41d. Temporary logs, downloads, diagnostic scripts and reports remain outside the repository.
+**Public installation completed:** The user made the repository public and resumed verification on 2026-11-08. The exact public installer URL downloaded without GitHub credentials; the test used an empty curl config, removed GitHub token variables and installed into an isolated temporary prefix. Its bytes matched the maintained installer. Actual installed macOS ARM Simulator and two Surfpool projects, embedded dashboard HTTP, project-local retained Journals, tamper rejection and same-version reinstall all passed. Every test Lab stopped and its temporary installation was removed. Anonymous downloads of all three platform archives matched their published SHA-256 files; `release-version.txt` and the eight-file release inventory matched. Intel/Linux runtime evidence remains the completed native CI jobs, rather than execution on this macOS host. README's public-installation warning is removed and release notes describe the working command and platform baseline. The unchanged `v0.1.0` tag still points to `0ca02a0`; yellow branding/terminal updates remain newer `main` source changes. Temporary logs, downloads, diagnostic scripts and reports remain outside the repository. Homebrew and the independent-backend retest remain separate work.
 
 ### 42. Yellow identity and README media
 
@@ -797,3 +797,11 @@ These are two observed CI runs, not a fixed latency guarantee. Cached compilatio
 - [x] **42c:** Replace README images with the three supplied originals, align captions/header and commit/push the complete README refresh.
 
 Palette/terminal changes are pushed in `722b8a7`. Frontend build and 64 tests passed; five real PTY tests verify the compact four-band mark, requested label/value colors, narrow layout and terminal opt-outs. Rust fmt, Clippy and the local release build passed. The user supplied the original Desktop screenshots. All three PNGs were copied byte-for-byte into the existing README media paths: terminal 926×514, Observation 1248×1282 and Workspace 3024×1642. Source/destination SHA-256 values matched. README captions now describe the shown retained Surfpool history; the header uses yellow. Local links/anchors, SVG XML and diff whitespace passed. README media was not regenerated. Temporary previews and research files are not committed. Repository visibility and the existing release/tag remain unchanged.
+
+### 43. Publish the yellow UI as v0.1.1
+
+- [x] **43a:** Bump native/frontend versions, retain dependency versions, verify the source build and keep dependency-cache reuse across the patch bump.
+- [ ] **43b:** Push the new tag and obtain a successful complete native matrix/publication without bypassing checks or replacing v0.1.0.
+- [ ] **43c:** Verify latest public curl installs v0.1.1 with the yellow embedded dashboard and terminal, verify checksums/update behavior and push release documentation.
+
+The user explicitly requested a rebuilt release so curl installation includes the accepted yellow palette and terminal changes. Use the existing tag-triggered build/test/package/install/publish gates. A separate duplicate manual matrix is unnecessary for this patch; publication still waits for the complete tagged matrix. The CI fallback cache is target-scoped; Cargo revalidates compiler, source, features and profile fingerprints.

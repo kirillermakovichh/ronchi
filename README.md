@@ -94,9 +94,9 @@ See the [CLI/MCP contract](docs/product/investigation-interfaces.md) for schemas
 ### Native installer
 
 The curl installer installs Ronchi together with its pinned private Surfpool. You do not need Rust, Node.js or a separate Surfpool installation.
-**Public installation pending:** [v0.1.0](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.0) has passed native build and installation checks. Anonymous downloads remain unavailable while the repository is private. Use the source build below until public downloads are enabled.
+The current binary release is [v0.1.0](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.0). Supported platforms are macOS 15.5+ (Apple Silicon and Intel) and Linux x86_64 with glibc 2.35+ and libgcc_s.
 
-When public downloads are enabled, install with:
+Install with:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \

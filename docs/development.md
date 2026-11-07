@@ -160,6 +160,7 @@ Homebrew is deferred. No self-update command, automatic runtime download or publ
 The curl installer must have the same Surfpool version pin. Packaging rejects a mismatch.
 
 The native workflow targets macOS arm64, macOS x86_64 and Linux x86_64. The initial distribution baseline is macOS 15.5+ and Ubuntu 22.04-compatible glibc 2.35+ with libgcc_s; musl/Alpine is not a target. The pinned ARM Surfpool declares macOS 15.5 in its load commands. Bounded local smoke checks also passed on macOS 15.2, but do not establish full support below that upstream baseline. Each job builds on its native runner and tests the actual installed archive. All three targets passed the complete [manual validation](https://github.com/kirillermakovichh/ronchi/actions/runs/42404486999) and [tagged release pipeline](https://github.com/kirillermakovichh/ronchi/actions/runs/42406451668) for `v0.1.0`. These runner checks do not establish every OS version at the declared baseline.
+Public `v0.1.0` downloads and all three published archive checksums were verified anonymously. The public curl installer also passed actual macOS ARM Simulator/Surfpool, embedded dashboard HTTP, retained-Journal, tamper and reinstall checks in an isolated prefix. [Task 41](../tasks/todo.md#41-first-native-release) records the evidence and platform limits.
 A cross-compiled file or a successful checksum is not a native runtime check.
 
 Build the frontend and release executable as above, then install cargo-about 0.9.3 as a release-only build tool. It is not required on end-user machines.

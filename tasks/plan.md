@@ -1,7 +1,8 @@
-# Current work
+# Publish v0.1.1 with the accepted yellow UI
 
-The yellow palette, terminal presentation and README refresh are complete at [task 42](todo.md#42-yellow-identity-and-readme-media). README uses the user's three original screenshots. Current implementation and verification evidence are in [implementation-progress.md](implementation-progress.md).
+The user authorized a new release so the public curl installer includes the yellow dashboard and current terminal. [Task 43](todo.md#43-publish-the-yellow-ui-as-v011) is the completion checklist. Preserve v0.1.0 and publish the patch as v0.1.1.
 
-No next implementation task is selected. Continue from the user's next request.
-
-The repository remains private. Anonymous public installer verification in task 41d is explicitly deferred by the user. Do not change visibility or overwrite the existing `v0.1.0` tag/release without a new instruction.
+1. Bump native/frontend versions without changing dependency versions. Keep target-specific cache reuse across patch-version changes; all checks remain enabled.
+2. Verify local frontend/release builds and workflow syntax. Push the release commit/tag. The existing tagged pipeline runs the complete native matrix and publishes only after every gate passes. Do not run a redundant manual matrix.
+3. Check all published SHA-256 files. Test anonymous latest curl installation, actual embedded yellow styles and terminal output, Surfpool and updating an isolated v0.1.0 installation. Do not change user installations or Labs.
+4. Update release notes, README and progress with the actual new release/results, then commit and push final docs. Homebrew remains deferred.
