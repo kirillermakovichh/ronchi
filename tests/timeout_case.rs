@@ -232,19 +232,38 @@ async fn invalid_unavailable_and_notification_calls_do_not_consume_timeout_capac
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delayed_batch_keeps_registration_cycle_and_old_policy_after_replacement() {
     let mut server = Server::new().await;
+    // The test delays dispatch across a cycle boundary. Its registration window
+    // must also allow the durable Case activation to finish on a busy CI disk.
+    let outage_ms = 1000;
     let old = server
         .rpc
-        .arm_case(arm_timeout(200, vec![], 40, 1000))
+        .arm_case(arm_timeout(2000, vec![], outage_ms, 10000))
         .await
         .unwrap();
     let pause = server.rpc.pause_next_registration();
     let mut stream=server.raw(json!([{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[]},{"jsonrpc":"2.0","id":2,"method":"getSlot","params":[]}])).await;
     pause.registered().await;
-    tokio::time::sleep(Duration::from_millis(70)).await;
+    let registration = server
+        .events()
+        .await
+        .into_iter()
+        .find(|event| {
+            event.kind == "rpc.registered" && event.data["method"] == "getLatestBlockhash"
+        })
+        .unwrap();
+    let registered_elapsed = registration.data["registered_elapsed_ns"].as_u64().unwrap();
+    let activated_elapsed = old.policy.as_ref().unwrap().activated_elapsed_ns;
+    assert!(
+        registered_elapsed - activated_elapsed < outage_ms * 1_000_000,
+        "fixture registration must occur during the initial outage"
+    );
+    // The pause has observed registration; crossing one full outage interval
+    // now guarantees that dispatch happens in recovery, regardless of I/O time.
+    tokio::time::sleep(Duration::from_millis(outage_ms + 30)).await;
     server.rpc.disarm_case().await.unwrap();
     pause.resume();
     let mut bytes = Vec::new();
-    tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut bytes))
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut bytes))
         .await
         .unwrap()
         .unwrap();
@@ -270,7 +289,7 @@ async fn delayed_batch_keeps_registration_cycle_and_old_policy_after_replacement
         prevented.data["policy"]["revision"],
         old.policy.unwrap().revision
     );
-    assert!(prevented.data["selection"]["position_ns"].as_u64().unwrap() < 40_000_000);
+    assert!(prevented.data["selection"]["position_ns"].as_u64().unwrap() < outage_ms * 1_000_000);
     assert_eq!(
         events
             .iter()
