@@ -2,7 +2,7 @@
 
 The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
 The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
-Current work: [task 49](#49-publish-dashboard-and-installer-updates-as-v012). The independent-backend retest remains separate.
+Current work: no active implementation task. [Task 49](#49-publish-dashboard-and-installer-updates-as-v012) records the completed release.
 
 ## Remaining validation
 
@@ -880,11 +880,17 @@ All documentation paths remain stable. Decision bodies, CONTEXT, research, sourc
 ### 49. Publish dashboard and installer updates as v0.1.2
 
 - [x] **49a:** Prepare version 0.1.2 without dependency upgrades and verify local frontend/native builds and browser regressions.
-- [ ] **49b:** Commit/push all intended tracked changes, exclude mock_backend without adding it to gitignore, and publish through the complete tagged native matrix.
-- [ ] **49c:** Verify anonymous published checksums, latest installation/version, installed UI/runtime/update behavior and final release documentation.
+- [x] **49b:** Commit/push all intended tracked changes, exclude mock_backend without adding it to gitignore, and publish through the complete tagged native matrix.
+- [x] **49c:** Verify anonymous published checksums, latest installation/version, installed UI/runtime/update behavior and final release documentation.
 
 The user explicitly authorized committing and pushing all current changes except `mock_backend/`, rebuilding and publishing a new release. The mock must remain untracked and unignored. Existing release tags/assets must remain intact. Use the existing tag-triggered pipeline; no duplicate manual run or weakened gates.
 
 v0.1.2 includes the yellow response-loss follow-up summary, exact RPC total, sub-tenth rate labels, compact RPC copy feedback, the supplied README screenshot/story and documentation cleanup. It also packages the maintained installer's automatic shell PATH setup. Surfpool remains 1.7.0; dependency versions remain unchanged. Browser fixtures can select an already built release through `RONCHI_BROWSER_BINARY` to avoid a duplicate local debug build.
 
 Local preparation passed: 72 frontend tests, full frontend formatting/typecheck/production build, Rust fmt and locked native release build. All ten native Chromium scenarios passed against the actual release binary, with the pinned Surfpool archive enabled. New assertions cover the exact RPC total, icon-only header copy control and response-loss summary before/after a live status query. Version/lockfile edits change only the package version to 0.1.2. Local documentation links/anchors and diff whitespace passed.
+
+**Published release:** Commit `2afc14a` and annotated tag v0.1.2 were pushed atomically. [Tagged workflow `42483576817`](https://github.com/kirillermakovichh/ronchi/actions/runs/42483576817) passed all macOS ARM, macOS Intel and Linux x86_64 jobs and published [v0.1.2](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.2). Native CI retained all gates, including 290 Rust tests, 29 installer tests, fmt, Clippy, notices, packaging and actual installed Simulator/Surfpool/reinstall/live-update checks. No duplicate manual pipeline, dependency upgrade or old-release replacement was performed.
+
+**Anonymous public verification:** All eight files were present. Anonymous downloads of all three archives matched their SHA-256 files; release version metadata was 0.1.2. The attached installer matched maintained source. The exact README command installed 0.1.2 without GitHub credentials in an isolated shell home; the current terminal and a new interactive zsh found it automatically. An existing temporary v0.1.1 Surfpool Lab remained ready across the upgrade with the same owned-child identity, a responding RPC and retained old executable. The new CLI stopped it normally. Chromium exercised the downloaded binary's embedded yellow summary, correct copy URL/one-second feedback, exact RPC total and live follow-up update without browser errors. Installed Simulator/two independent Surfpool projects, embedded dashboard HTTP, retained Journals, tamper rejection and same-version reinstall passed. Reinstall did not duplicate the profile block. All temporary Labs stopped and their installation was removed. User installations, profiles, Labs and the excluded mock were not changed. Intel/Linux runtime evidence remains their native CI jobs.
+
+Release notes and README now identify v0.1.2. Final documentation records the published state and completed checks. The mock remains untracked and unignored; `.gitignore` is unchanged. Diagnostic scripts, browser outputs and logs stayed outside Git. Local links/anchors and diff whitespace passed. The independent-backend retest remains open; Homebrew remains deferred.

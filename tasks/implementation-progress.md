@@ -1,26 +1,26 @@
 # Current implementation state
 
 Ronchi is a local investigation prototype with a native Rust core and Solid dashboard.
-Active work: [v0.1.2 publication](todo.md#49-publish-dashboard-and-installer-updates-as-v012). [Tasks](todo.md) own completion status and verification evidence; [product contracts](../docs/README.md#current-documents) own current behavior.
+No implementation task is active. [Tasks](todo.md) own completion status and verification evidence; [product contracts](../docs/README.md#current-documents) own current behavior.
 
-## Published and local state
+## Published state
 
-The latest verified public binary release is [v0.1.1](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.1) at `662e990`. It includes the yellow dashboard and compact terminal mark. The maintained installer comes from `main`; native archives come from Releases. [Installation](../docs/development.md#curl-installation-layout) owns PATH setup, updates and removal. Homebrew remains deferred.
+The latest verified public release is [v0.1.2](https://github.com/kirillermakovichh/ronchi/releases/tag/v0.1.2), tagged at `2afc14a`. It includes the response-loss activity summary, exact RPC total, sub-tenth rate display, compact RPC copy feedback, automatic installer PATH setup and the updated README screenshot/story. [Task 49](todo.md#49-publish-dashboard-and-installer-updates-as-v012) records publication and public verification.
 
-The prepared v0.1.2 source adds the response-loss activity summary, sub-tenth RPS display, compact RPC copy icon and RPC total. The local native executable embeds all these UI changes. README uses the supplied no-follow-up screenshot. Public release assets have not been replaced.
+The maintained installer comes from `main`; native archives come from Releases. [Installation](../docs/development.md#curl-installation-layout) owns PATH setup, updates and removal. Older releases remain intact. Homebrew remains deferred.
 
-The mock loop, Surfpool Lab/child and temporary UI preview were stopped at the user's request. Their Journals remain readable. Local launch metadata under `/private/tmp/` is historical. The user authorized committing/pushing the current UI/README/docs and publishing v0.1.2. `mock_backend/` remains excluded, untracked and unignored.
+The user authorized committing/pushing all intended changes except `mock_backend/` and publishing this release. The mock remains local, untracked and unignored; do not stage it. Demo processes are stopped and their Journals are retained. Metadata under `/private/tmp/` is historical; release checks used separate disposable projects and did not change user installations or Labs.
 
 ## Recorded verification
 
-| Scope | Recorded evidence | Owner |
+| Scope | Evidence | Owner |
 | --- | --- | --- |
-| Public v0.1.1 | Full macOS ARM/Intel and Linux x86_64 matrix; 290 Rust tests; fmt, Clippy, packaging and installed Simulator/Surfpool gates; anonymous asset checksums, colors and live upgrade | [Task 43](todo.md#43-publish-the-yellow-ui-as-v011) |
-| Local UI | 72 frontend tests at the latest revision; native Chromium checks of the summary, live updates, clipboard and counters; earlier checks keep their own scopes | [Task 46](todo.md#46-response-loss-follow-up-summary) |
-| Local README and final binary | Supplied image preserved byte-for-byte; updated case story; confirmed process shutdown; final embedded release build after shutdown | [Task 47](todo.md#47-readme-no-follow-up-showcase-and-preview-shutdown) |
-| Public installer | 29 fixture tests, actual macOS ARM archive smoke and exact public README command in current/new zsh terminals | [Task 44](todo.md#44-automatic-shell-path-setup) |
+| Native v0.1.2 | Complete macOS ARM/Intel and Linux x86_64 matrix; 290 Rust tests, 29 installer tests, fmt, Clippy, packaging and installed Simulator/Surfpool gates | [Task 49](todo.md#49-publish-dashboard-and-installer-updates-as-v012) |
+| UI v0.1.2 | 72 frontend tests and ten real Chromium flows with the pinned Surfpool fixture enabled; downloaded embedded UI checked for summary, RPC total, clipboard and live update | [Task 49](todo.md#49-publish-dashboard-and-installer-updates-as-v012) |
+| Public installation | Anonymous checksums, exact README command, current/new zsh PATH, live upgrade from v0.1.1, installed runtime smoke, tamper rejection and reinstall | [Task 49](todo.md#49-publish-dashboard-and-installer-updates-as-v012) |
+| Supplied README media | Original screenshot preserved byte-for-byte; selected-history no-follow-up story; prior demo shutdown and final embedded build | [Task 47](todo.md#47-readme-no-follow-up-showcase-and-preview-shutdown) |
 
-These are recorded checks, not tests rerun by documentation maintenance. Intel/Linux runtime claims are bounded to native CI. [Task 41](todo.md#41-first-native-release) retains the initial release, CI fixes and measured cache timings. [Tasks 36](todo.md#36-remove-application-checks), [37](todo.md#37-remove-confirmed-dead-code) and [42](todo.md#42-yellow-identity-and-readme-media) retain earlier browser, terminal and supplied-media evidence.
+Checks have their recorded scope. Intel/Linux runtime claims come from native CI, not this macOS host. [Task 41](todo.md#41-first-native-release) retains initial release/CI cache evidence; [task 43](todo.md#43-publish-the-yellow-ui-as-v011) retains v0.1.1; [tasks 44](todo.md#44-automatic-shell-path-setup) and [46](todo.md#46-response-loss-follow-up-summary) retain installer and intermediate UI evidence.
 
 ## Remaining work
 
