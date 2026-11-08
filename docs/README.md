@@ -12,7 +12,7 @@ Each topic has one maintained owner. Update that owner instead of copying its sp
 | --- | --- |
 | Product, users, value, supported environments and limits | [Product overview](product/overview.md) |
 | Launch, connect a backend, activate a Case and investigate | [Developer workflows](product/workflows.md) |
-| Workspace, Observations, live updates, browser access and RPS | [Dashboard](product/dashboard.md) |
+| Workspace, Observations, live updates, browser access and RPC metrics | [Dashboard](product/dashboard.md) |
 | CLI/MCP operations, shared query semantics, schemas and errors | [Investigation interfaces](product/investigation-interfaces.md) |
 | Lab startup/stop, configuration, ownership and managed Surfpool | [Lab lifecycle](product/lab-lifecycle.md) |
 | Built-in Cases, Coverage Claims and clearly deferred candidates | [Cases and coverage](product/cases.md) |
@@ -25,7 +25,7 @@ Each topic has one maintained owner. Update that owner instead of copying its sp
 | Build, dependencies, source layout, verification and commit rules | [Development](development.md) |
 | Domain terms | [CONTEXT.md](../CONTEXT.md) |
 | Deliberately unresolved or deferred choices | [Open questions](open-questions.md) |
-| Current session state and latest verified baseline | [Implementation progress](../tasks/implementation-progress.md) |
+| Published release, local changes, process state and verification | [Implementation progress](../tasks/implementation-progress.md) |
 | Completion checklist, task evidence and remaining validation | [Development queue](../tasks/todo.md) |
 | Current maintenance scope | [Working plan](../tasks/plan.md) |
 

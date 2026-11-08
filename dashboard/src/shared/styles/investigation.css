@@ -353,6 +353,34 @@
   padding: 8px 10px;
   color: var(--muted);
 }
+.follow-up-notice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-left: 2px solid var(--accent);
+  border-radius: 3px;
+  background: var(--accent-subtle);
+}
+.follow-up-icon,
+.follow-up-notice h3 {
+  color: var(--accent);
+}
+.follow-up-icon {
+  font-size: 18px;
+  line-height: 1.3;
+}
+.follow-up-notice h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.follow-up-notice p {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 70ch;
+}
 .technical {
   padding: 12px 0;
   font-size: 12px;

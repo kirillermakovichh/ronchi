@@ -19,9 +19,9 @@ Ronchi makes that behavior visible. Start a local Lab, point your backend at its
 
 **Open source · Local-first · No account or cloud required · No application SDK required**
 
-![Ronchi Workspace showing retained Surfpool traffic and a selected response-loss Observation with its expanded RPC path](docs/assets/readme/workspace.png)
+![Live Surfpool Workspace with preparation traffic, a withheld submission response, zero status checks and a yellow summary showing no observed follow-up for the selected signature](docs/assets/readme/workspace.png)
 
-*Retained Surfpool session: one selected submission, a withheld response, two status checks and one transaction lookup. Both status replies report `finalized` with `err: null`. Screenshots show the current source build.*
+*A deliberately incomplete client keeps preparing new transactions after losing a submission response. For the selected signature, Ronchi shows one submission and no observed status checks, transaction lookups or repeat submissions.*
 
 ## One Lab. Two ways to investigate.
 
@@ -33,25 +33,22 @@ Ronchi makes that behavior visible. Start a local Lab, point your backend at its
 
 Both interfaces read the **same Lab Journal**. The dashboard updates over a live WebSocket. Findings link to recorded evidence. The Journal remains available after the Lab stops.
 
-## From a missing response to an explained incident
+## A lost response. No follow-up.
 
-With `tx-response-lost`, Ronchi withholds the response after acceptance. Your backend sees an ambiguous submission. Its subsequent RPC calls reveal how it reacts.
+RPC traffic keeps flowing. That alone does not show whether the backend followed up on the affected transaction.
 
-<p align="center">
-  <img src="docs/assets/readme/observation.png" width="640" alt="Observation path: Surfpool returned a signature; Ronchi withheld the response; two status checks returned finalized with err null; a transaction lookup returned the transaction; the original request ended without a response.">
-</p>
-
-In this captured history:
+In the Surfpool session above, Case `tx-response-lost` exposes a deliberately incomplete recovery path:
 
 - Surfpool returned a signature for **one submission**.
-- Ronchi withheld the submission response for **20 seconds**. The original request ended without a response.
-- The application made **two status checks** for the same signature. Both replies reported `finalized` with `err: null`.
-- The application requested the transaction once. That RPC reply returned the transaction with `err: null`.
-- **No repeat submission** of that signature appeared in the selected history.
+- Ronchi withheld the response with a **20-second limit**.
+- The original HTTP request ended **without a response after about 5 seconds**.
+- **No status checks, transaction lookups or repeat submissions** of that signature were observed in the selected history.
+
+The yellow **After response loss** summary makes the missing follow-up explicit. Other preparation calls remain visible in Traffic, separate from the selected transaction's path.
 
 Expand **Technical details** for identifiers, supporting events and retained RPC payloads. Each path step keeps its evidence links.
 
-These replies establish observed RPC behavior. They do not prove that the backend completed its business operation. The default Simulator does not execute transfers.
+This history shows an unresolved RPC outcome. It does not establish failed transaction execution or the application's business result.
 
 ## Built for coding agents
 

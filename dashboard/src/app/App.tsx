@@ -166,6 +166,8 @@ export function App() {
               <Copy
                 value={`http://${status.value()?.rpc_address}`}
                 label="Copy RPC"
+                copiedLabel="RPC URL copied"
+                iconOnly
               />
             </Show>
             <span

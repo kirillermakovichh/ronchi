@@ -351,6 +351,22 @@ export function ObservationInspector(props: {
       <Show when={!compact().timeline.length}>
         <p>Result unknown.</p>
       </Show>
+      <Show when={compact().followUp}>
+        <section
+          class="follow-up-notice"
+          aria-label="Activity after response loss"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span class="follow-up-icon" aria-hidden="true">
+            ◷
+          </span>
+          <div>
+            <h3>After response loss</h3>
+            <p>{compact().followUp}</p>
+          </div>
+        </section>
+      </Show>
       <button
         class="technical-toggle"
         aria-label="Technical details"

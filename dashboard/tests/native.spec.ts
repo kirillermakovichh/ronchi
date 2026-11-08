@@ -20,10 +20,15 @@ test("Solid Workspace displays native live traffic and keeps selection across up
     await expect(
       page.getByRole("button", { name: "Arm Case", exact: true }),
     ).toBeEnabled();
+    await expect(page.getByTestId("rpc-calls")).toHaveText("0");
+    const copyRpc = page.getByRole("button", { name: "Copy RPC", exact: true });
+    await expect(copyRpc).toHaveText("");
+    await expect(copyRpc.locator(".copy-glyph")).toHaveCount(1);
     await rpc(lab.rpc_address, "getLatestBlockhash");
     await expect(
       page.locator('[data-widget="traffic"] .traffic-row'),
     ).toHaveCount(1);
+    await expect(page.getByTestId("rpc-calls")).toHaveText("1");
     await page.locator('[data-widget="traffic"] .traffic-row').first().click();
     await expect(
       page.getByRole("heading", { name: "getLatestBlockhash", exact: true }),
@@ -32,6 +37,7 @@ test("Solid Workspace displays native live traffic and keeps selection across up
     await expect(
       page.locator('[data-widget="traffic"] .traffic-row'),
     ).toHaveCount(2);
+    await expect(page.getByTestId("rpc-calls")).toHaveText("2");
     await expect(
       page.getByRole("heading", { name: "getLatestBlockhash", exact: true }),
     ).toBeVisible();
@@ -68,7 +74,15 @@ test("a fault episode appears before follow-ups, then its expanded path receives
     await expect(page.locator(".observed-result h2")).toContainText(
       "Result unknown",
     );
+    await expect(
+      page.getByRole("region", { name: "Activity after response loss" }),
+    ).toContainText(
+      "No status checks, transaction lookups or repeat submissions observed in this history.",
+    );
     await rpc(lab.rpc_address, "getSignatureStatuses", [[sig]]);
+    await expect(
+      page.getByRole("region", { name: "Activity after response loss" }),
+    ).toContainText("Observed 1 status check for this signature.");
     await expect(page.locator(".path")).toContainText(
       "Application checked status",
     );

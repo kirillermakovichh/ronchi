@@ -2,7 +2,7 @@
 
 The initial implementation queue is complete. Current product contracts live in the [documentation map](../docs/README.md).
 The only completion checklist is this file. [Implementation progress](implementation-progress.md) records the latest session state.
-Current work: no active implementation task. [Task 45](#45-documentation-status-and-navigation-cleanup) records the latest documentation maintenance.
+Current work: [task 49](#49-publish-dashboard-and-installer-updates-as-v012). The independent-backend retest remains separate.
 
 ## Remaining validation
 
@@ -837,3 +837,54 @@ The documentation map now routes installation directly and no longer carries a s
 Current contracts now identify the implemented seven-Case catalog across five families, its mode restrictions and typed arm fields. Journal documentation matches the writer's schema 6 and the reader's support for schemas 1–6. Obsolete storage-integration promises are replaced by the existing durable-commit/acceptance boundary. RPC status text distinguishes implemented profiles from broader compatibility goals. SDK instrumentation is marked deferred. Brand copy records the accepted yellow accent and preserves the remaining unverified naming/registry checks despite public publication.
 
 All maintained documentation paths remain in place. Numbered ADR decision bodies, CONTEXT, research sources, candidate Case/Pack names and historical task evidence are unchanged. Scoped operational limits and protocol/evidence restrictions are preserved. All 412 local Markdown paths/anchors across 92 tracked Markdown files, including project skills, passed. The preservation check confirmed unchanged bodies for all 20 numbered ADRs, CONTEXT, tracked research and historical task evidence. Diff whitespace passed. Runtime, tests, installer, assets and release files did not change; no runtime checks or builds were repeated for this documentation-only task.
+
+### 46. Response-loss follow-up summary
+
+- [x] **46a:** Add a separate yellow summary of subsequent same-signature RPC activity without adding Journal events or Findings.
+- [x] **46b:** Distinguish complete no-action history, observed follow-ups and incomplete evidence; update through existing live subscriptions.
+- [x] **46c:** Verify the UI refinements, embedded builds and live examples at their recorded scopes.
+
+The [dashboard contract](../docs/product/dashboard.md) owns the final behavior: the yellow **After response loss** summary, `<0.1` for positive sub-tenth RPS, the compact RPC copy icon with one-second confirmation, and the exact global `RPC calls` total. The summary is a UI interpretation of selected same-signature records, not another Fault, Journal event or application verdict.
+
+| Change | Recorded verification |
+| --- | --- |
+| After response loss | 69 frontend tests, typecheck/production build, formatting and native release build. Chromium verified three unchanged timeline events, yellow styling and no browser errors. A separate disposable Lab verified a new status request updates the summary over WebSocket without reload. |
+| Small RPS values | 71 frontend tests and frontend/native builds. Chromium verified idle `RPS avg <0.1`, `RPS active 2.0` and the no-follow-up summary. Actual zero remained `0.0`; unavailable values remained `—`. |
+| RPC copy icon | 71 UI tests, frontend/native builds and a Chromium clipboard check of the exact RPC URL, accessible confirmation and one-second return to the copy icon. |
+| RPC calls | 72 frontend tests, typecheck/production build, formatting and a live Chromium counter-growth/tooltip check. Exact totals used the existing `rpc_traffic.requests`, independent of Traffic filters. |
+
+The first preview used a one-send/no-status client. The later offline Surfpool mock prepared and submitted new local transactions, with no status/history queries or same-signature retries. The final loop used five-second starts with at most two active cycles; observed start gaps were 5.001 and 4.999 seconds. It did not satisfy the separate independent stateful-backend/pool-discovery retest.
+
+For the counter check, a temporary Vite preview served the new frontend while the same Lab and mock loop continued. The native binary still held the preceding UI at that intermediate stage. [Task 47](#47-readme-no-follow-up-showcase-and-preview-shutdown) records the subsequent shutdown and completed embedded build. Earlier Journals were retained during preview restarts. Temporary test screenshots and launch metadata stayed outside Git; `/private/tmp/ronchi-active-preview.json` and `/private/tmp/ronchi-dashboard-ui-preview.json` are historical launch records. The mock remains local. No commit, push or public release update was authorized.
+
+### 47. README no-follow-up showcase and preview shutdown
+
+- [x] **47a:** Stop the mock cycle, owned Surfpool Lab/child and temporary UI preview on explicit user request; retain Journals.
+- [x] **47b:** Replace the old Workspace media with the supplied Desktop original and remove the obsolete separate Observation image.
+- [x] **47c:** Rewrite the README example around the observed missing follow-up, verify media/links and finish the local embedded build after shutdown.
+
+The supplied `CleanShot 2026-11-08 at 15.48.00@2x.png` was copied byte-for-byte to `docs/assets/readme/workspace.png` (3024×1648; SHA-256 `7f5ee0a842b6397444c22acedd1a54a6422eba206be878c94a1a0db74a5f65ac`). The old unused `observation.png` and its README embed are removed. Header and terminal media remain unchanged. The hero caption and case story now describe one selected submission, the twenty-second withholding limit, the observed five-second HTTP ending, and zero observed same-signature status/transaction lookups or repeat submissions. Other preparation traffic remains separate from that signature's history. No execution failure or application business result is inferred.
+
+Owned PIDs 22491 (mock), 22081 (Lab), 22084 (Surfpool) and 22942 (UI preview) were verified and stopped normally. No demo process remains active. Journals are retained. The native release build completed after shutdown and now embeds the latest local UI, including the RPC total. Earlier fixture/browser results stay scoped to task 46; runtime tests were not repeated for this media edit. Asset byte/hash comparison, local documentation links/anchors and diff whitespace passed. No commit, push or public release update.
+
+### 48. Post-preview documentation maintenance
+
+- [x] **48a:** Reconcile published/local state, stopped preview processes and the completed embedded build.
+- [x] **48b:** Consolidate current UI contracts and recent verification records while preserving their scopes and media provenance.
+- [x] **48c:** Verify local links and preserve source code, assets, ADRs, glossary, research and the remaining external-backend retest.
+
+Dashboard documentation now groups the three Lab-wide RPC metrics, RPC copy feedback and the separate response-loss activity summary. The Case contract links implemented Surfpool coverage instead of describing it as future work. Source-build instructions record the observed executable-identity caveat. Brand copy separates runnable commands and pending naming checks from historical proposals. Progress and plan distinguish the unchanged public release from local UI/README changes, stopped processes and the excluded mock. Task 46 retains its intermediate verification scopes and final mock cadence without active-service or rebuild instructions; task 47 retains original image provenance and shutdown/build evidence.
+
+All documentation paths remain stable. Decision bodies, CONTEXT, research, source/runtime files, current README media and existing local code edits are preserved. All 419 local links/anchors across 92 tracked Markdown files passed. Preservation checks confirmed 219 non-Markdown files and 73 reference documents unchanged, including the current media, source edits, ADRs and glossary. Earlier task history and task 47 media provenance remain intact. Diff whitespace passed. This task changed documentation only; no runtime tests, native rebuild, process launch, commit, push or publication was performed.
+
+### 49. Publish dashboard and installer updates as v0.1.2
+
+- [x] **49a:** Prepare version 0.1.2 without dependency upgrades and verify local frontend/native builds and browser regressions.
+- [ ] **49b:** Commit/push all intended tracked changes, exclude mock_backend without adding it to gitignore, and publish through the complete tagged native matrix.
+- [ ] **49c:** Verify anonymous published checksums, latest installation/version, installed UI/runtime/update behavior and final release documentation.
+
+The user explicitly authorized committing and pushing all current changes except `mock_backend/`, rebuilding and publishing a new release. The mock must remain untracked and unignored. Existing release tags/assets must remain intact. Use the existing tag-triggered pipeline; no duplicate manual run or weakened gates.
+
+v0.1.2 includes the yellow response-loss follow-up summary, exact RPC total, sub-tenth rate labels, compact RPC copy feedback, the supplied README screenshot/story and documentation cleanup. It also packages the maintained installer's automatic shell PATH setup. Surfpool remains 1.7.0; dependency versions remain unchanged. Browser fixtures can select an already built release through `RONCHI_BROWSER_BINARY` to avoid a duplicate local debug build.
+
+Local preparation passed: 72 frontend tests, full frontend formatting/typecheck/production build, Rust fmt and locked native release build. All ten native Chromium scenarios passed against the actual release binary, with the pinned Surfpool archive enabled. New assertions cover the exact RPC total, icon-only header copy control and response-loss summary before/after a live status query. Version/lockfile edits change only the package version to 0.1.2. Local documentation links/anchors and diff whitespace passed.

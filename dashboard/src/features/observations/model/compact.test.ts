@@ -224,3 +224,75 @@ it("keeps a repeat submission visible after an earlier status lookup", () => {
   );
   expect(view.timeline.find((r) => r.id === "activity:r3")?.time).toBe("21 s");
 });
+
+it("summarizes no follow-up activity separately from recorded timeline events", () => {
+  const history = rows.filter((r) => r.request_id === "r1");
+  const view = compactObservation(
+    f,
+    observationStory(f, history, true, 7),
+    history,
+    [],
+  );
+  expect(view.followUp).toBe(
+    "No status checks, transaction lookups or repeat submissions observed in this history.",
+  );
+  expect(view.timeline).toHaveLength(3);
+});
+
+it("updates the follow-up summary when status queries and repeated submissions arrive", () => {
+  const history = [
+    ...rows,
+    row(8, "rpc.registered", 21, "r3", "sendTransaction"),
+  ];
+  const view = compactObservation(
+    f,
+    observationStory(f, history, true, 8),
+    history,
+    [],
+  );
+  expect(view.followUp).toBe(
+    "Observed 1 status check and 1 repeat submission for this signature. No transaction lookups observed in this history.",
+  );
+});
+
+it("counts transaction lookups as follow-up activity without inventing status checks", () => {
+  const history = [
+    ...rows.filter((r) => r.request_id === "r1"),
+    row(8, "rpc.registered", 21, "r3", "getTransaction"),
+  ];
+  const view = compactObservation(
+    f,
+    observationStory(f, history, true, 8),
+    history,
+    [],
+  );
+  expect(view.followUp).toBe(
+    "Observed 1 transaction lookup for this signature. No status checks or repeat submissions observed in this history.",
+  );
+});
+
+it("never claims absence of follow-up actions from incomplete history", () => {
+  const history = rows.filter((r) => r.request_id === "r1");
+  const view = compactObservation(
+    f,
+    observationStory(f, history, false, 7),
+    history,
+    [],
+  );
+  expect(view.followUp).toBe(
+    "Not enough data about subsequent RPC activity for this signature.",
+  );
+});
+
+it("does not add a response-loss follow-up summary to another Fault or an unobserved hold", () => {
+  const other = { ...f, rule_id: "provider-timeout-burst.later-rpc-attempt" };
+  expect(
+    compactObservation(other, observationStory(other, rows, true, 7), rows, [])
+      .followUp,
+  ).toBeUndefined();
+  const history = rows.filter((r) => r.kind !== "fault.withholding_started");
+  expect(
+    compactObservation(f, observationStory(f, history, true, 7), history, [])
+      .followUp,
+  ).toBeUndefined();
+});

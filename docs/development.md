@@ -54,7 +54,9 @@ cargo build --release --locked
 ./target/release/ronchi up
 ```
 
-The running process keeps its existing binary and assets. Restart the selected Lab to load a new build.
+The running process keeps its existing binary and assets.
+For source builds, stop the Lab before replacing its executable. Lifecycle authentication checks the recorded executable identity; replacing that file while the owner runs can make authentication fail.
+Start a new Lab to load a new build. The earlier Journal remains retained.
 See [workflows](product/workflows.md) for backend connection and [dashboard access](product/dashboard.md#access-and-retained-viewing) for live and retained links.
 
 ## Verification
@@ -78,6 +80,8 @@ npm --prefix dashboard run test:browser
 
 Install Playwright's matching Chromium once with `npm --prefix dashboard exec -- playwright install chromium`.
 `RONCHI_CHROMIUM=/absolute/path/to/chromium` selects an existing executable.
+`RONCHI_BROWSER_BINARY=/absolute/path/to/ronchi` selects an already built native executable for browser tests; the default is `target/debug/ronchi`.
+For a release-only local check, build the embedded release and run `RONCHI_BROWSER_BINARY="$PWD/target/release/ronchi" npm --prefix dashboard run test:browser`.
 Browser tests launch the real binary in disposable projects. Review screenshots in `dashboard/test-results` after visual changes.
 Desktop/laptop layouts are primary; narrow layout receives basic handling.
 Test screenshots, reports, research scratch files and local runtime artifacts are not committed.

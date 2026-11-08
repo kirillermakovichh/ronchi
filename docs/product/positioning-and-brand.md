@@ -7,7 +7,7 @@
 **Primary tagline:** Make hidden failures visible.  
 **Descriptor:** An open-source, local-first reliability lab for blockchain applications.
 
-Ronchi is the accepted working brand. Public launch still requires trademark, domain, repository-name, and package-registry checks.
+Ronchi is the accepted working brand. [Naming and registry checks](#pre-publication-checks) remain open despite the public repository and releases.
 
 ## Product value
 
@@ -62,7 +62,7 @@ RPC-focused supporting line:
 
 ### 1. A fault is a probe, not a verdict
 
-Applying a fault proves only that Ronchi changed a supported boundary. Correctness conclusions require observable application evidence .
+Applying a fault proves only that Ronchi changed a supported boundary. Correctness conclusions require observable application evidence.
 
 ### 2. Evidence over assumptions
 
@@ -85,7 +85,7 @@ Humans use the local dashboard. Coding Agents use compact structured CLI and loc
 Describe a persistent local Lab connected to an independently running backend, with a continuing Case and Continuous Lab Journal.
 The default mode is a non-executing RPC Simulator; optional managed Surfpool supplies local execution when required.
 Describe the dashboard for humans and bounded CLI/MCP evidence queries for Coding Agents.
-Exact commands remain illustrative; use [developer workflows](workflows.md) for the canonical journey.
+Use [developer workflows](workflows.md) for runnable commands and the canonical journey. Deferred SDK and CI-wrapper examples remain illustrative.
 Do not imply mandatory YAML, Docker, SDK instrumentation, a Control baseline, a faucet, or a public-chain write.
 
 ## First proof and honest claims

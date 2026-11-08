@@ -2,7 +2,9 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-export const binary = resolve("../target/debug/ronchi");
+export const binary = resolve(
+  process.env.RONCHI_BROWSER_BINARY ?? "../target/debug/ronchi",
+);
 export function cli(project: string, ...args: string[]) {
   try {
     return JSON.parse(

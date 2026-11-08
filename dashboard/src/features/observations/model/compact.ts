@@ -300,11 +300,51 @@ export function compactObservation(
   ]
     .filter(Boolean)
     .join(" · ");
+  let followUp: string | undefined;
+  if (
+    rule.startsWith("tx-response-lost.") &&
+    records.some(
+      (r) =>
+        r.kind === "fault.withholding_started" && r.request_id === original,
+    )
+  ) {
+    if (!story.complete) {
+      followUp =
+        "Not enough data about subsequent RPC activity for this signature.";
+    } else {
+      const actions = [
+        [story.after.statuses, "status check"],
+        [story.after.transactions, "transaction lookup"],
+        [story.after.submissions, "repeat submission"],
+      ] as const;
+      const observed = actions
+        .filter(([count]) => count > 0)
+        .map(([count, name]) => `${count} ${name}${count === 1 ? "" : "s"}`);
+      const absent = actions
+        .filter(([count]) => count === 0)
+        .map(([, name]) => `${name}s`);
+      const list = (items: string[], conjunction: string) =>
+        items.length < 2
+          ? items.join("")
+          : `${items.slice(0, -1).join(", ")} ${conjunction} ${items.at(-1)}`;
+      followUp = [
+        observed.length
+          ? `Observed ${list(observed, "and")} for this signature.`
+          : "",
+        absent.length
+          ? `No ${list(absent, "or")} observed in this history.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+  }
   return {
     timeline,
     headline,
     counts,
     result,
+    followUp,
     omittedGroups:
       Math.max(0, groups.length - shown.length) +
       Math.max(0, otherRequests.length - 4),

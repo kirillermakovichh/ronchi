@@ -81,6 +81,7 @@ export function ErrorNotice(props: { message?: string }) {
 export function Copy(props: {
   value: string;
   label?: string;
+  copiedLabel?: string;
   iconOnly?: boolean;
 }) {
   const value = createMemo(() => props.value);
@@ -126,7 +127,7 @@ export function Copy(props: {
         aria-label={
           props.iconOnly
             ? copied()
-              ? "Signature copied"
+              ? (props.copiedLabel ?? "Signature copied")
               : (props.label ?? "Copy")
             : undefined
         }

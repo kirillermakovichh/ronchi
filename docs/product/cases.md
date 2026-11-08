@@ -178,9 +178,9 @@ This default applies to simulator mode; Surfpool retains authority over its actu
 
 ### tx-response-lost Coverage Claim
 
-This claim records the verified simulator behavior and the accepted remaining mode boundary.
+This claim records the verified simulator behavior.
 The native CLI/control and HTTP histories described below verify the simulator implementation.
-Surfpool behavior remains a requirement for its later implementation, not a verified capability.
+The implemented [managed Surfpool response-loss claim](#managed-surfpool-response-loss-claim) records that mode's separate native evidence and limits.
 
 | Area | Claim |
 | --- | --- |
@@ -189,7 +189,7 @@ Surfpool behavior remains a requirement for its later implementation, not a veri
 | Identity and repetition | [One response-loss Fault per affected identity for the lifetime of a Lab](#tx-response-lost-identity-and-repetition), with separate evidence for each submission attempt. |
 | RPC boundary | [Hold the affected request without a response for up to 20 seconds of real time, then terminate it without an HTTP or JSON-RPC response](#tx-response-lost-response-withholding). Observable client cancellation or disconnect can end the hold earlier. |
 | Simulator history | Retain acceptance independently of response loss. Follow the [configurable successful processing and confirmation schedule](#tx-response-lost-default-simulated-outcome), with default transitions at 2, 4, and 6 seconds of simulator time. |
-| Surfpool history (planned) | Surfpool owns transaction state and the actual local execution result. Ronchi can withhold an observed successful submission response; it does not force execution success or replace the backend's duplicate-handling result. |
+| Surfpool boundary | Surfpool owns transaction state and the actual local execution result under its [separate Coverage Claim](#managed-surfpool-response-loss-claim). Ronchi does not force execution success or replace the backend's duplicate-handling result. |
 | Case changes | [Bind policy at request registration](#continuing-case-model). [Already held requests keep their original deadline](#tx-response-lost-case-switching). Preserve the Lab's record of affected transaction identities across reactivation. |
 | Required evidence | Received requests and signatures, selected Case and settings, the shared registration/control order, simulator acceptance or the local backend's acceptance response, applied Faults, RPC Boundary Results, and any observed lifecycle changes and later RPC actions. Each statement identifies its evidence source. |
 | Implemented Findings | Two [version-1 rules](evidence-and-findings.md#implemented-version-1-rules) explain observed acceptance, selected response loss, observed withholding, and a later status/transaction request or submission attempt for the same signature. Rules report receipt of the later action; they do not interpret its returned state or infer operation completion. Saved later response facts remain available in Timeline/Evidence Slice. |
@@ -198,7 +198,7 @@ Surfpool behavior remains a requirement for its later implementation, not a veri
 
 The accepted [RPC contract](solana-rpc-contract.md) defines format coverage, request behavior, Read-through, and the initial clock profile.
 The verified local format matrix covers legacy/v0/v1 and explicit nonce/lookup state.
-Backend-version compatibility and Surfpool runtime verification remain implementation work.
+The managed claim records the pinned Surfpool version's runtime verification. It does not establish compatibility with arbitrary backend versions.
 Any missing required capability must be declared as unsupported or as a limit on the available conclusions.
 
 #### Verified implementation histories

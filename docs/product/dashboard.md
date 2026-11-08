@@ -36,9 +36,10 @@ Exact request detail follows its ID across list filters.
 Browser Back restores selection. Forms, detail tabs, payload previews and expanded steps survive relevant live updates.
 Inactive destinations release subscriptions. Virtualized lists preserve their retained visible anchor within the bounded window.
 
-The header has separate mini-cards for `RPS avg`, `RPS active` and Lab health.
+The header has separate mini-cards for `RPC calls`, `RPS avg`, `RPS active` and Lab health.
 Health describes Ronchi, not the backend or a transaction. Journal finalization is not shown in this card.
-Rate tooltips explain average-with-idle and active intervals briefly.
+The [RPC metrics contract](#lab-rpc-rates) defines the counters and their tooltips.
+The RPC endpoint uses the same compact copy icon as a transaction signature. A successful copy shows a check for one second. Its accessible confirmation identifies the copied RPC URL.
 See [the visual direction](positioning-and-brand.md#visual-identity) for palette and typography.
 
 ## Access and retained viewing
@@ -225,6 +226,15 @@ One Technical details disclosure retains the current technical story, identifier
 The technical panels remain readable and update live while open.
 Client timeouts, retry causes, business completion and economic execution require separate supporting evidence.
 
+### Activity after response loss
+
+Response-loss paths show a yellow **After response loss** summary below the timeline.
+It counts later same-signature status checks, transaction lookups and repeat submissions after observed withholding.
+Only a complete selected history can support a statement that those actions were not observed there.
+Incomplete history reports insufficient data.
+New committed actions update the summary through the existing Live subscription.
+This summary adds no Journal event, injected Fault or application-failure verdict.
+
 ## Compact RPC result timeline
 
 The timeline shows rounded real elapsed seconds from the original received request.
@@ -264,19 +274,20 @@ The existing technical history remains paginated.
 
 ## Lab RPC rates
 
-The header shows `RPS avg` and `RPS active` beside Lab health.
-Both metrics cover the entire Lab, independent of Traffic filters, pagination, Pause and selected snapshots.
+The header shows `RPC calls`, `RPS avg` and `RPS active` beside Lab health.
+All three cover the entire Lab, independent of Traffic filters, pagination, Pause and selected snapshots.
 A registered JSON-RPC batch member counts as one call.
 Unsupported or invalid calls count if Ronchi records `rpc.registered` for them.
 Unregistered transport failures do not count.
 The metrics do not measure the independently started backend's lifetime, processing time or success rate.
 
+- **RPC calls:** the exact registered-call count since Lab startup, with spaces between thousands. It updates from the existing status subscription.
 - **RPS avg:** registered calls divided by real elapsed time from the first registration to the current time while the Lab runs, or to its terminal event after shutdown. Idle time is included.
 - **RPS active:** registered calls divided by the sum of active arrival intervals. Each interval runs from its first registration to its last registration. A gap of at least ten seconds starts a new interval. The idle tail after the last registration is excluded immediately. Each interval has a one-second minimum duration, including a singleton or a simultaneous batch.
 
 The average denominator also has a one-second minimum to avoid undefined startup values.
-With no calls, both values show `0.0`.
-Display uses one decimal place.
+With no calls, `RPC calls` shows `0`; both rates show `0.0`.
+Positive rates below 0.1 display as `<0.1`; larger rates use one decimal place.
 Tooltips explain the scope and interval rules.
 If counters or the live connection are unavailable, values show `—` until fresh data arrives.
 After an interrupted history without a terminal record, values freeze at the last recorded event and show `last recorded`.
